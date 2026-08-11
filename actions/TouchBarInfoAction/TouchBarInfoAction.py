@@ -393,9 +393,9 @@ class TouchBarInfoAction(ActionBase):
         sec_a_bot = settings.setdefault("sec_a_bottom_widget", 0)
 
         sec_b_mode = settings.setdefault("sec_b_mode", 0)
-        sec_b_full = settings.setdefault("sec_b_full_widget", 1) # Stacked Date & Time
-        sec_b_top = settings.setdefault("sec_b_top_widget", 1)  # Date
-        sec_b_bot = settings.setdefault("sec_b_bottom_widget", 2) # Time
+        sec_b_full = settings.setdefault("sec_b_full_widget", 0) # None (Empty)
+        sec_b_top = settings.setdefault("sec_b_top_widget", 0)  # None (Empty)
+        sec_b_bot = settings.setdefault("sec_b_bottom_widget", 0) # None (Empty)
 
         sec_c_mode = settings.setdefault("sec_c_mode", 0)
         sec_c_full = settings.setdefault("sec_c_full_widget", 0)
@@ -659,9 +659,9 @@ class TouchBarInfoAction(ActionBase):
         sec_a_bot = settings.get("sec_a_bottom_widget", 0)
 
         sec_b_mode = settings.get("sec_b_mode", 0)
-        sec_b_full = settings.get("sec_b_full_widget", 1)
-        sec_b_top = settings.get("sec_b_top_widget", 1)
-        sec_b_bot = settings.get("sec_b_bottom_widget", 2)
+        sec_b_full = settings.get("sec_b_full_widget", 0)
+        sec_b_top = settings.get("sec_b_top_widget", 0)
+        sec_b_bot = settings.get("sec_b_bottom_widget", 0)
 
         sec_c_mode = settings.get("sec_c_mode", 0)
         sec_c_full = settings.get("sec_c_full_widget", 0)
