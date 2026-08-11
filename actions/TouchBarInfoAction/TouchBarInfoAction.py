@@ -1199,6 +1199,26 @@ class TouchBarInfoAction(ActionBase):
             self.update_display()
 
     def on_select_custom_bg_clicked(self, button):
+        settings = self.get_settings() or {}
+        curr_path = settings.get("custom_bg_path", "")
+
+        def on_asset_selected(path: str):
+            if path and os.path.isfile(path):
+                st = self.get_settings()
+                if st is not None:
+                    st["custom_bg_path"] = path
+                    self.set_settings(st)
+                    self.last_rendered_key = ""
+                    self.update_display()
+
+        if hasattr(gl, "app") and gl.app is not None and hasattr(gl.app, "let_user_select_asset"):
+            try:
+                gl.app.let_user_select_asset(default_path=curr_path, callback_func=on_asset_selected)
+                return
+            except Exception as e:
+                log.error(f"TouchBarInfo: Error launching StreamController Asset Manager: {e}")
+
+        # Fallback to GTK FileChooserNative if gl.app is unavailable
         dialog = Gtk.FileChooserNative.new(
             title=self.get_locale_text("actions.touchbar-info.bg-image.dialog-title", "Select Touch Bar Background Image"),
             parent=None,
@@ -1217,10 +1237,10 @@ class TouchBarInfoAction(ActionBase):
                 file_obj = dialog_obj.get_file()
                 if file_obj:
                     path = file_obj.get_path()
-                    settings = self.get_settings()
-                    if settings is not None:
-                        settings["custom_bg_path"] = path
-                        self.set_settings(settings)
+                    st = self.get_settings()
+                    if st is not None:
+                        st["custom_bg_path"] = path
+                        self.set_settings(st)
                         self.last_rendered_key = ""
                         self.update_display()
             dialog_obj.destroy()
