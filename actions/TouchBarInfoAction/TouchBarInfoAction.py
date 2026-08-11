@@ -377,7 +377,7 @@ class TouchBarInfoAction(ActionBase):
 
             # --- 2. Top Subsection Expander ---
             top_expander = Adw.ExpanderRow(
-                title=self.get_locale_text("actions.touchbar-info.top-subsection.label", "Top Slot"),
+                title=self.get_locale_text("actions.touchbar-info.top-subsection.label", "Top"),
                 subtitle=self.get_locale_text("actions.touchbar-info.top-subsection.subtitle", "Configure widget for the top 50px slot")
             )
             top_model = Gtk.StringList()
@@ -401,7 +401,7 @@ class TouchBarInfoAction(ActionBase):
 
             # --- 3. Bottom Subsection Expander ---
             bot_expander = Adw.ExpanderRow(
-                title=self.get_locale_text("actions.touchbar-info.bottom-subsection.label", "Bottom Slot"),
+                title=self.get_locale_text("actions.touchbar-info.bottom-subsection.label", "Bottom"),
                 subtitle=self.get_locale_text("actions.touchbar-info.bottom-subsection.subtitle", "Configure widget for the bottom 50px slot")
             )
             bot_model = Gtk.StringList()
