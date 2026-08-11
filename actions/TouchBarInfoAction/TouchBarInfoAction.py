@@ -15,7 +15,8 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gtk, Adw, Gdk, GLib
+gi.require_version("Pango", "1.0")
+from gi.repository import Gtk, Adw, Gdk, GLib, Pango
 from loguru import logger as log
 import globals as gl
 
@@ -151,9 +152,6 @@ class TouchBarInfoAction(ActionBase):
         Thread(target=task, daemon=True).start()
 
     def get_config_rows(self) -> "list[Adw.PreferencesRow]":
-        # Available font families
-        self.font_families = ["DejaVu Sans", "Liberation Sans", "Ubuntu", "Noto Sans", "Monospace", "Serif", "Sans"]
-
         # Date Format Options
         self.date_format_options = [
             ("%b. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.mon-day-year", "Mon. Day, Year (Aug. 11, 2026)")),
@@ -189,26 +187,36 @@ class TouchBarInfoAction(ActionBase):
 
         # Control Widget trackers for global syncing
         self.all_date_fmt_combos = []
-        self.all_date_fam_combos = []
-        self.all_date_size_spins = []
-        self.all_date_color_btns = []
+        self.all_date_font_btns = []
+        self.all_date_fill_switches = []
+        self.all_date_fill_color_btns = []
+        self.all_date_out_switches = []
+        self.all_date_out_color_btns = []
+        self.all_date_out_size_spins = []
 
         self.all_time_24h_switches = []
         self.all_time_sec_switches = []
-        self.all_time_fam_combos = []
-        self.all_time_size_spins = []
-        self.all_time_color_btns = []
+        self.all_time_font_btns = []
+        self.all_time_fill_switches = []
+        self.all_time_fill_color_btns = []
+        self.all_time_out_switches = []
+        self.all_time_out_color_btns = []
+        self.all_time_out_size_spins = []
 
         self.all_weather_loc_entries = []
         self.all_weather_res_combos = []
         self.all_weather_unit_combos = []
         self.all_weather_ref_combos = []
-        self.all_weather_fam_combos = []
-        self.all_weather_size_spins = []
-        self.all_weather_color_btns = []
+        self.all_weather_font_btns = []
+        self.all_weather_fill_switches = []
+        self.all_weather_fill_color_btns = []
+        self.all_weather_out_switches = []
+        self.all_weather_out_color_btns = []
+        self.all_weather_out_size_spins = []
+
         self.search_results_data = []
 
-        # Helper to create flat Date controls
+        # Helper to create Date controls with Gtk.FontButton, Fill, and Outline
         def build_date_controls():
             fmt_model = Gtk.StringList()
             for _, label in self.date_format_options: fmt_model.append(label)
@@ -218,34 +226,66 @@ class TouchBarInfoAction(ActionBase):
                 subtitle=self.get_locale_text("actions.touchbar-info.date-format.subtitle", "Format style for date text")
             )
 
-            fam_model = Gtk.StringList()
-            for fam in self.font_families: fam_model.append(fam)
-            fam_combo = Adw.ComboRow(
-                model=fam_model,
-                title=self.get_locale_text("actions.touchbar-info.date-font-family.label", "Date Font Family"),
-                subtitle=self.get_locale_text("actions.touchbar-info.date-font-family.subtitle", "Select font typeface for date text")
+            font_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
+                subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
+            )
+            font_btn = Gtk.FontButton.new()
+            font_btn.set_use_font(True)
+            font_btn.set_use_size(True)
+            font_btn.set_valign(Gtk.Align.CENTER)
+            font_row.add_suffix(font_btn)
+
+            fill_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
             )
 
-            size_spin = Adw.SpinRow.new_with_range(10, 80, 1)
-            size_spin.set_title(self.get_locale_text("actions.touchbar-info.date-font-size.label", "Date Font Size"))
-            size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.date-font-size.subtitle", "Font size in pixels for date text"))
-
-            color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.date-font-color.label", "Date Font Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.date-font-color.subtitle", "Text color for date text")
+            fill_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for text interior fill")
             )
-            color_btn = Gtk.ColorButton()
-            color_btn.set_valign(Gtk.Align.CENTER)
-            color_row.add_suffix(color_btn)
+            fill_color_btn = Gtk.ColorButton()
+            fill_color_btn.set_valign(Gtk.Align.CENTER)
+            fill_color_row.add_suffix(fill_color_btn)
+
+            out_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
+            )
+
+            out_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for text stroke outline")
+            )
+            out_color_btn = Gtk.ColorButton()
+            out_color_btn.set_valign(Gtk.Align.CENTER)
+            out_color_row.add_suffix(out_color_btn)
+
+            out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
+            out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
+            out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+
+            def update_date_sub_vis():
+                fill_color_row.set_visible(fill_sw.get_active())
+                out_color_row.set_visible(out_sw.get_active())
+                out_size_spin.set_visible(out_sw.get_active())
+
+            fill_sw.connect("notify::active", lambda *a: update_date_sub_vis())
+            out_sw.connect("notify::active", lambda *a: update_date_sub_vis())
+            update_date_sub_vis()
 
             self.all_date_fmt_combos.append(fmt_combo)
-            self.all_date_fam_combos.append(fam_combo)
-            self.all_date_size_spins.append(size_spin)
-            self.all_date_color_btns.append(color_btn)
+            self.all_date_font_btns.append(font_btn)
+            self.all_date_fill_switches.append(fill_sw)
+            self.all_date_fill_color_btns.append(fill_color_btn)
+            self.all_date_out_switches.append(out_sw)
+            self.all_date_out_color_btns.append(out_color_btn)
+            self.all_date_out_size_spins.append(out_size_spin)
 
-            return fmt_combo, fam_combo, size_spin, color_row, color_btn
+            return [fmt_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
 
-        # Helper to create flat Time controls
+        # Helper to create Time controls with Gtk.FontButton, Fill, and Outline
         def build_time_controls():
             sw_24h = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.use-24h.label", "Use 24-Hour Clock"),
@@ -257,35 +297,67 @@ class TouchBarInfoAction(ActionBase):
                 subtitle=self.get_locale_text("actions.touchbar-info.show-seconds.subtitle", "Include seconds in the displayed time")
             )
 
-            fam_model = Gtk.StringList()
-            for fam in self.font_families: fam_model.append(fam)
-            fam_combo = Adw.ComboRow(
-                model=fam_model,
-                title=self.get_locale_text("actions.touchbar-info.time-font-family.label", "Time Font Family"),
-                subtitle=self.get_locale_text("actions.touchbar-info.time-font-family.subtitle", "Select font typeface for time text")
+            font_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
+                subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
+            )
+            font_btn = Gtk.FontButton.new()
+            font_btn.set_use_font(True)
+            font_btn.set_use_size(True)
+            font_btn.set_valign(Gtk.Align.CENTER)
+            font_row.add_suffix(font_btn)
+
+            fill_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
             )
 
-            size_spin = Adw.SpinRow.new_with_range(10, 100, 1)
-            size_spin.set_title(self.get_locale_text("actions.touchbar-info.time-font-size.label", "Time Font Size"))
-            size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.time-font-size.subtitle", "Font size in pixels for time text"))
-
-            color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.time-font-color.label", "Time Font Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.time-font-color.subtitle", "Text color for time text")
+            fill_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for text interior fill")
             )
-            color_btn = Gtk.ColorButton()
-            color_btn.set_valign(Gtk.Align.CENTER)
-            color_row.add_suffix(color_btn)
+            fill_color_btn = Gtk.ColorButton()
+            fill_color_btn.set_valign(Gtk.Align.CENTER)
+            fill_color_row.add_suffix(fill_color_btn)
+
+            out_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
+            )
+
+            out_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for text stroke outline")
+            )
+            out_color_btn = Gtk.ColorButton()
+            out_color_btn.set_valign(Gtk.Align.CENTER)
+            out_color_row.add_suffix(out_color_btn)
+
+            out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
+            out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
+            out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+
+            def update_time_sub_vis():
+                fill_color_row.set_visible(fill_sw.get_active())
+                out_color_row.set_visible(out_sw.get_active())
+                out_size_spin.set_visible(out_sw.get_active())
+
+            fill_sw.connect("notify::active", lambda *a: update_time_sub_vis())
+            out_sw.connect("notify::active", lambda *a: update_time_sub_vis())
+            update_time_sub_vis()
 
             self.all_time_24h_switches.append(sw_24h)
             self.all_time_sec_switches.append(sw_sec)
-            self.all_time_fam_combos.append(fam_combo)
-            self.all_time_size_spins.append(size_spin)
-            self.all_time_color_btns.append(color_btn)
+            self.all_time_font_btns.append(font_btn)
+            self.all_time_fill_switches.append(fill_sw)
+            self.all_time_fill_color_btns.append(fill_color_btn)
+            self.all_time_out_switches.append(out_sw)
+            self.all_time_out_color_btns.append(out_color_btn)
+            self.all_time_out_size_spins.append(out_size_spin)
 
-            return sw_24h, sw_sec, fam_combo, size_spin, color_row, color_btn
+            return [sw_24h, sw_sec, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
 
-        # Helper to create flat Weather controls
+        # Helper to create Weather controls with Gtk.FontButton, Fill, and Outline
         def build_weather_controls():
             loc_entry = Adw.EntryRow(
                 title=self.get_locale_text("actions.touchbar-info.weather-location.label", "City / Location Search")
@@ -315,35 +387,67 @@ class TouchBarInfoAction(ActionBase):
                 subtitle=self.get_locale_text("actions.touchbar-info.weather-refresh.subtitle", "Automatic weather update frequency")
             )
 
-            fam_model = Gtk.StringList()
-            for fam in self.font_families: fam_model.append(fam)
-            fam_combo = Adw.ComboRow(
-                model=fam_model,
-                title=self.get_locale_text("actions.touchbar-info.weather-font-family.label", "Weather Font Family"),
-                subtitle=self.get_locale_text("actions.touchbar-info.weather-font-family.subtitle", "Select font typeface for weather text")
+            font_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
+                subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
+            )
+            font_btn = Gtk.FontButton.new()
+            font_btn.set_use_font(True)
+            font_btn.set_use_size(True)
+            font_btn.set_valign(Gtk.Align.CENTER)
+            font_row.add_suffix(font_btn)
+
+            fill_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
             )
 
-            size_spin = Adw.SpinRow.new_with_range(10, 80, 1)
-            size_spin.set_title(self.get_locale_text("actions.touchbar-info.weather-font-size.label", "Weather Font Size"))
-            size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.weather-font-size.subtitle", "Font size in pixels for weather text"))
-
-            color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.weather-font-color.label", "Weather Font Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.weather-font-color.subtitle", "Text color for weather text")
+            fill_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for text interior fill")
             )
-            color_btn = Gtk.ColorButton()
-            color_btn.set_valign(Gtk.Align.CENTER)
-            color_row.add_suffix(color_btn)
+            fill_color_btn = Gtk.ColorButton()
+            fill_color_btn.set_valign(Gtk.Align.CENTER)
+            fill_color_row.add_suffix(fill_color_btn)
+
+            out_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
+            )
+
+            out_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for text stroke outline")
+            )
+            out_color_btn = Gtk.ColorButton()
+            out_color_btn.set_valign(Gtk.Align.CENTER)
+            out_color_row.add_suffix(out_color_btn)
+
+            out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
+            out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
+            out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+
+            def update_weather_sub_vis():
+                fill_color_row.set_visible(fill_sw.get_active())
+                out_color_row.set_visible(out_sw.get_active())
+                out_size_spin.set_visible(out_sw.get_active())
+
+            fill_sw.connect("notify::active", lambda *a: update_weather_sub_vis())
+            out_sw.connect("notify::active", lambda *a: update_weather_sub_vis())
+            update_weather_sub_vis()
 
             self.all_weather_loc_entries.append(loc_entry)
             self.all_weather_res_combos.append(res_combo)
             self.all_weather_unit_combos.append(unit_combo)
             self.all_weather_ref_combos.append(ref_combo)
-            self.all_weather_fam_combos.append(fam_combo)
-            self.all_weather_size_spins.append(size_spin)
-            self.all_weather_color_btns.append(color_btn)
+            self.all_weather_font_btns.append(font_btn)
+            self.all_weather_fill_switches.append(fill_sw)
+            self.all_weather_fill_color_btns.append(fill_color_btn)
+            self.all_weather_out_switches.append(out_sw)
+            self.all_weather_out_color_btns.append(out_color_btn)
+            self.all_weather_out_size_spins.append(out_size_spin)
 
-            return loc_entry, res_combo, unit_combo, ref_combo, fam_combo, size_spin, color_row, color_btn
+            return [loc_entry, res_combo, unit_combo, ref_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
 
         # Helper to create Section Expander with clean subsection expanders for split mode
         def create_section_expander(title_key, default_title, subtitle_key, default_sub, prefix_key):
@@ -368,12 +472,10 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.full-widget.label", "Full Section Widget"),
                 subtitle=self.get_locale_text("actions.touchbar-info.full-widget.subtitle", "Widget assigned to full section area")
             )
-            fd_fmt, fd_fam, fd_size, fd_col_row, _ = build_date_controls()
-            ft_24h, ft_sec, ft_fam, ft_size, ft_col_row, _ = build_time_controls()
-            fw_loc, fw_res, fw_unit, fw_ref, fw_fam, fw_size, fw_col_row, _ = build_weather_controls()
-            full_date_rows = [fd_fmt, fd_fam, fd_size, fd_col_row]
-            full_time_rows = [ft_24h, ft_sec, ft_fam, ft_size, ft_col_row]
-            full_weather_rows = [fw_loc, fw_res, fw_unit, fw_ref, fw_fam, fw_size, fw_col_row]
+            full_date_rows = build_date_controls()
+            full_time_rows = build_time_controls()
+            full_weather_rows = build_weather_controls()
+            fw_res = full_weather_rows[1] # Weather search results combo
 
             # --- 2. Top Subsection Expander ---
             top_expander = Adw.ExpanderRow(
@@ -387,12 +489,10 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.widget-selector.label", "Select Widget"),
                 subtitle=self.get_locale_text("actions.touchbar-info.widget-selector.subtitle", "Choose widget to display in this slot")
             )
-            td_fmt, td_fam, td_size, td_col_row, _ = build_date_controls()
-            tt_24h, tt_sec, tt_fam, tt_size, tt_col_row, _ = build_time_controls()
-            tw_loc, tw_res, tw_unit, tw_ref, tw_fam, tw_size, tw_col_row, _ = build_weather_controls()
-            top_date_rows = [td_fmt, td_fam, td_size, td_col_row]
-            top_time_rows = [tt_24h, tt_sec, tt_fam, tt_size, tt_col_row]
-            top_weather_rows = [tw_loc, tw_res, tw_unit, tw_ref, tw_fam, tw_size, tw_col_row]
+            top_date_rows = build_date_controls()
+            top_time_rows = build_time_controls()
+            top_weather_rows = build_weather_controls()
+            tw_res = top_weather_rows[1]
 
             top_expander.add_row(top_combo)
             for r in top_date_rows: top_expander.add_row(r)
@@ -411,12 +511,10 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.widget-selector.label", "Select Widget"),
                 subtitle=self.get_locale_text("actions.touchbar-info.widget-selector.subtitle", "Choose widget to display in this slot")
             )
-            bd_fmt, bd_fam, bd_size, bd_col_row, _ = build_date_controls()
-            bt_24h, bt_sec, bt_fam, bt_size, bt_col_row, _ = build_time_controls()
-            bw_loc, bw_res, bw_unit, bw_ref, bw_fam, bw_size, bw_col_row, _ = build_weather_controls()
-            bot_date_rows = [bd_fmt, bd_fam, bd_size, bd_col_row]
-            bot_time_rows = [bt_24h, bt_sec, bt_fam, bt_size, bt_col_row]
-            bot_weather_rows = [bw_loc, bw_res, bw_unit, bw_ref, bw_fam, bw_size, bw_col_row]
+            bot_date_rows = build_date_controls()
+            bot_time_rows = build_time_controls()
+            bot_weather_rows = build_weather_controls()
+            bw_res = bot_weather_rows[1]
 
             bot_expander.add_row(bot_combo)
             for r in bot_date_rows: bot_expander.add_row(r)
@@ -507,18 +605,18 @@ class TouchBarInfoAction(ActionBase):
 
         # Create Section Expanders
         self.sec_a_expander, self.sec_a_mode_combo, self.sec_a_full_combo, self.sec_a_top_combo, self.sec_a_bot_combo = create_section_expander(
-            "actions.touchbar-info.section-a.label", "Left Region (200px)",
-            "actions.touchbar-info.section-a.subtitle", "Configure widgets for the left Touch Bar region", "sec_a"
+            "actions.touchbar-info.section-a.label", "Left (200px)",
+            "actions.touchbar-info.section-a.subtitle", "Configure widgets for the left Touch Bar section", "sec_a"
         )
 
         self.sec_b_expander, self.sec_b_mode_combo, self.sec_b_full_combo, self.sec_b_top_combo, self.sec_b_bot_combo = create_section_expander(
-            "actions.touchbar-info.section-b.label", "Center Region (400px)",
-            "actions.touchbar-info.section-b.subtitle", "Configure widgets for the center Touch Bar region", "sec_b"
+            "actions.touchbar-info.section-b.label", "Center (400px)",
+            "actions.touchbar-info.section-b.subtitle", "Configure widgets for the center Touch Bar section", "sec_b"
         )
 
         self.sec_c_expander, self.sec_c_mode_combo, self.sec_c_full_combo, self.sec_c_top_combo, self.sec_c_bot_combo = create_section_expander(
-            "actions.touchbar-info.section-c.label", "Right Region (200px)",
-            "actions.touchbar-info.section-c.subtitle", "Configure widgets for the right Touch Bar region", "sec_c"
+            "actions.touchbar-info.section-c.label", "Right (200px)",
+            "actions.touchbar-info.section-c.subtitle", "Configure widgets for the right Touch Bar section", "sec_c"
         )
 
         self.load_config_defaults()
@@ -552,22 +650,34 @@ class TouchBarInfoAction(ActionBase):
         for sw in self.all_time_sec_switches: sw.connect("notify::active", self.on_show_seconds_toggled)
         for combo in self.all_date_fmt_combos: combo.connect("notify::selected", self.on_date_format_changed)
 
-        for combo in self.all_date_fam_combos: combo.connect("notify::selected", self.on_date_font_family_changed)
-        for spin in self.all_date_size_spins: spin.connect("notify::value", self.on_date_font_size_changed)
-        for btn in self.all_date_color_btns: btn.connect("color-set", self.on_date_font_color_set)
+        # Date Font Signals
+        for fb in self.all_date_font_btns: fb.connect("font-set", self.on_date_font_set)
+        for sw in self.all_date_fill_switches: sw.connect("notify::active", self.on_date_fill_toggled)
+        for btn in self.all_date_fill_color_btns: btn.connect("color-set", self.on_date_fill_color_set)
+        for sw in self.all_date_out_switches: sw.connect("notify::active", self.on_date_out_toggled)
+        for btn in self.all_date_out_color_btns: btn.connect("color-set", self.on_date_out_color_set)
+        for spin in self.all_date_out_size_spins: spin.connect("notify::value", self.on_date_out_size_changed)
 
-        for combo in self.all_time_fam_combos: combo.connect("notify::selected", self.on_time_font_family_changed)
-        for spin in self.all_time_size_spins: spin.connect("notify::value", self.on_time_font_size_changed)
-        for btn in self.all_time_color_btns: btn.connect("color-set", self.on_time_font_color_set)
+        # Time Font Signals
+        for fb in self.all_time_font_btns: fb.connect("font-set", self.on_time_font_set)
+        for sw in self.all_time_fill_switches: sw.connect("notify::active", self.on_time_fill_toggled)
+        for btn in self.all_time_fill_color_btns: btn.connect("color-set", self.on_time_fill_color_set)
+        for sw in self.all_time_out_switches: sw.connect("notify::active", self.on_time_out_toggled)
+        for btn in self.all_time_out_color_btns: btn.connect("color-set", self.on_time_out_color_set)
+        for spin in self.all_time_out_size_spins: spin.connect("notify::value", self.on_time_out_size_changed)
 
         # Weather Signals
         for entry in self.all_weather_loc_entries: entry.connect("changed", self.on_weather_location_entry_changed)
         for combo in self.all_weather_res_combos: combo.connect("notify::selected", self.on_weather_result_selected)
         for combo in self.all_weather_unit_combos: combo.connect("notify::selected", self.on_weather_unit_changed)
         for combo in self.all_weather_ref_combos: combo.connect("notify::selected", self.on_weather_refresh_changed)
-        for combo in self.all_weather_fam_combos: combo.connect("notify::selected", self.on_weather_font_family_changed)
-        for spin in self.all_weather_size_spins: spin.connect("notify::value", self.on_weather_font_size_changed)
-        for btn in self.all_weather_color_btns: btn.connect("color-set", self.on_weather_font_color_set)
+
+        for fb in self.all_weather_font_btns: fb.connect("font-set", self.on_weather_font_set)
+        for sw in self.all_weather_fill_switches: sw.connect("notify::active", self.on_weather_fill_toggled)
+        for btn in self.all_weather_fill_color_btns: btn.connect("color-set", self.on_weather_fill_color_set)
+        for sw in self.all_weather_out_switches: sw.connect("notify::active", self.on_weather_out_toggled)
+        for btn in self.all_weather_out_color_btns: btn.connect("color-set", self.on_weather_out_color_set)
+        for spin in self.all_weather_out_size_spins: spin.connect("notify::value", self.on_weather_out_size_changed)
 
         return [
             self.sec_a_expander,
@@ -599,22 +709,36 @@ class TouchBarInfoAction(ActionBase):
         sec_c_top = settings.setdefault("sec_c_top_widget", 0)
         sec_c_bot = settings.setdefault("sec_c_bottom_widget", 0)
 
-        date_font_family_idx = settings.setdefault("date_font_family_idx", 0)
-        date_font_size = settings.setdefault("date_font_size", 25)
+        # Date Font & Fill/Outline Defaults
+        date_font_str = settings.setdefault("date_font_str", "DejaVu Sans Bold 25")
+        date_fill_enabled = settings.setdefault("date_fill_enabled", True)
         date_font_color = settings.setdefault("date_font_color", "#AAC8E6FF")
+        date_outline_enabled = settings.setdefault("date_outline_enabled", False)
+        date_outline_color = settings.setdefault("date_outline_color", "#000000FF")
+        date_outline_size = settings.setdefault("date_outline_size", 2)
 
-        time_font_family_idx = settings.setdefault("time_font_family_idx", 0)
-        time_font_size = settings.setdefault("time_font_size", 45)
+        # Time Font & Fill/Outline Defaults
+        time_font_str = settings.setdefault("time_font_str", "DejaVu Sans Bold 45")
+        time_fill_enabled = settings.setdefault("time_fill_enabled", True)
         time_font_color = settings.setdefault("time_font_color", "#FFFFFFFF")
+        time_outline_enabled = settings.setdefault("time_outline_enabled", False)
+        time_outline_color = settings.setdefault("time_outline_color", "#000000FF")
+        time_outline_size = settings.setdefault("time_outline_size", 2)
 
+        # Weather Location & Units
         weather_location_name = settings.setdefault("weather_location_name", "Miami")
         weather_unit_idx = settings.setdefault("weather_unit_idx", 0)
-        weather_refresh_idx = settings.setdefault("weather_refresh_idx", 2) # 15m
-        weather_font_family_idx = settings.setdefault("weather_font_family_idx", 0)
-        weather_font_size = settings.setdefault("weather_font_size", 22)
-        weather_font_color = settings.setdefault("weather_font_color", "#FFFFFFFF")
+        weather_refresh_idx = settings.setdefault("weather_refresh_idx", 2)
 
-        # Sync Date/Time controls
+        # Weather Font & Fill/Outline Defaults
+        weather_font_str = settings.setdefault("weather_font_str", "DejaVu Sans Bold 22")
+        weather_fill_enabled = settings.setdefault("weather_fill_enabled", True)
+        weather_font_color = settings.setdefault("weather_font_color", "#FFFFFFFF")
+        weather_outline_enabled = settings.setdefault("weather_outline_enabled", False)
+        weather_outline_color = settings.setdefault("weather_outline_color", "#000000FF")
+        weather_outline_size = settings.setdefault("weather_outline_size", 2)
+
+        # Sync Date/Time basic controls
         for sw in self.all_time_24h_switches: sw.set_active(use_24h)
         for sw in self.all_time_sec_switches: sw.set_active(show_seconds)
         for combo in self.all_date_fmt_combos:
@@ -636,26 +760,34 @@ class TouchBarInfoAction(ActionBase):
         self.sec_c_top_combo.set_selected(sec_c_top)
         self.sec_c_bot_combo.set_selected(sec_c_bot)
 
-        for combo in self.all_date_fam_combos:
-            if 0 <= date_font_family_idx < len(self.font_families): combo.set_selected(date_font_family_idx)
-        for spin in self.all_date_size_spins: spin.set_value(date_font_size)
-        for btn in self.all_date_color_btns: self.set_color_button_rgba(btn, date_font_color)
+        # Sync Date Font & Fill/Outline Controls
+        for fb in self.all_date_font_btns: fb.set_font(date_font_str)
+        for sw in self.all_date_fill_switches: sw.set_active(date_fill_enabled)
+        for btn in self.all_date_fill_color_btns: self.set_color_button_rgba(btn, date_font_color)
+        for sw in self.all_date_out_switches: sw.set_active(date_outline_enabled)
+        for btn in self.all_date_out_color_btns: self.set_color_button_rgba(btn, date_outline_color)
+        for spin in self.all_date_out_size_spins: spin.set_value(date_outline_size)
 
-        for combo in self.all_time_fam_combos:
-            if 0 <= time_font_family_idx < len(self.font_families): combo.set_selected(time_font_family_idx)
-        for spin in self.all_time_size_spins: spin.set_value(time_font_size)
-        for btn in self.all_time_color_btns: self.set_color_button_rgba(btn, time_font_color)
+        # Sync Time Font & Fill/Outline Controls
+        for fb in self.all_time_font_btns: fb.set_font(time_font_str)
+        for sw in self.all_time_fill_switches: sw.set_active(time_fill_enabled)
+        for btn in self.all_time_fill_color_btns: self.set_color_button_rgba(btn, time_font_color)
+        for sw in self.all_time_out_switches: sw.set_active(time_outline_enabled)
+        for btn in self.all_time_out_color_btns: self.set_color_button_rgba(btn, time_outline_color)
+        for spin in self.all_time_out_size_spins: spin.set_value(time_outline_size)
 
-        # Sync Weather controls
+        # Sync Weather Controls
         for entry in self.all_weather_loc_entries: entry.set_text(weather_location_name)
         for combo in self.all_weather_unit_combos:
             if 0 <= weather_unit_idx < len(self.weather_units): combo.set_selected(weather_unit_idx)
         for combo in self.all_weather_ref_combos:
             if 0 <= weather_refresh_idx < len(self.weather_intervals): combo.set_selected(weather_refresh_idx)
-        for combo in self.all_weather_fam_combos:
-            if 0 <= weather_font_family_idx < len(self.font_families): combo.set_selected(weather_font_family_idx)
-        for spin in self.all_weather_size_spins: spin.set_value(weather_font_size)
-        for btn in self.all_weather_color_btns: self.set_color_button_rgba(btn, weather_font_color)
+        for fb in self.all_weather_font_btns: fb.set_font(weather_font_str)
+        for sw in self.all_weather_fill_switches: sw.set_active(weather_fill_enabled)
+        for btn in self.all_weather_fill_color_btns: self.set_color_button_rgba(btn, weather_font_color)
+        for sw in self.all_weather_out_switches: sw.set_active(weather_outline_enabled)
+        for btn in self.all_weather_out_color_btns: self.set_color_button_rgba(btn, weather_outline_color)
+        for spin in self.all_weather_out_size_spins: spin.set_value(weather_outline_size)
 
     def set_color_button_rgba(self, button: Gtk.ColorButton, hex_str: str):
         try:
@@ -691,118 +823,145 @@ class TouchBarInfoAction(ActionBase):
             self.last_rendered_key = ""
             self.update_display()
 
-    # --- Date / Time Callbacks ---
-    def on_use_24h_toggled(self, switch, *args):
+    # --- Date Font / Fill / Outline Callbacks ---
+    def on_date_font_set(self, font_btn):
+        settings = self.get_settings()
+        if settings is not None:
+            val = font_btn.get_font()
+            settings["date_font_str"] = val
+            for fb in self.all_date_font_btns:
+                if fb != font_btn: fb.set_font(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_date_fill_toggled(self, switch, *args):
         settings = self.get_settings()
         if settings is not None:
             val = switch.get_active()
-            settings["use_24h"] = val
-            for sw in self.all_time_24h_switches:
-                if sw != switch and sw.get_active() != val:
-                    sw.set_active(val)
+            settings["date_fill_enabled"] = val
+            for sw in self.all_date_fill_switches:
+                if sw != switch and sw.get_active() != val: sw.set_active(val)
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()
 
-    def on_show_seconds_toggled(self, switch, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = switch.get_active()
-            settings["show_seconds"] = val
-            for sw in self.all_time_sec_switches:
-                if sw != switch and sw.get_active() != val:
-                    sw.set_active(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
-
-    def on_date_format_changed(self, combo, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = combo.get_selected()
-            settings["date_format_idx"] = val
-            for c in self.all_date_fmt_combos:
-                if c != combo and c.get_selected() != val:
-                    c.set_selected(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
-
-    def on_date_font_family_changed(self, combo, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = combo.get_selected()
-            settings["date_font_family_idx"] = val
-            for c in self.all_date_fam_combos:
-                if c != combo and c.get_selected() != val:
-                    c.set_selected(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
-
-    def on_date_font_size_changed(self, spin, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = int(spin.get_value())
-            settings["date_font_size"] = val
-            for s in self.all_date_size_spins:
-                if s != spin and int(s.get_value()) != val:
-                    s.set_value(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
-
-    def on_date_font_color_set(self, button):
+    def on_date_fill_color_set(self, button):
         settings = self.get_settings()
         if settings is not None:
             rgba = button.get_rgba()
             hex_val = self.gdk_to_hex(rgba)
             settings["date_font_color"] = hex_val
-            for btn in self.all_date_color_btns:
-                if btn != button:
-                    self.set_color_button_rgba(btn, hex_val)
+            for btn in self.all_date_fill_color_btns:
+                if btn != button: self.set_color_button_rgba(btn, hex_val)
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()
 
-    def on_time_font_family_changed(self, combo, *args):
+    def on_date_out_toggled(self, switch, *args):
         settings = self.get_settings()
         if settings is not None:
-            val = combo.get_selected()
-            settings["time_font_family_idx"] = val
-            for c in self.all_time_fam_combos:
-                if c != combo and c.get_selected() != val:
-                    c.set_selected(val)
+            val = switch.get_active()
+            settings["date_outline_enabled"] = val
+            for sw in self.all_date_out_switches:
+                if sw != switch and sw.get_active() != val: sw.set_active(val)
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()
 
-    def on_time_font_size_changed(self, spin, *args):
+    def on_date_out_color_set(self, button):
+        settings = self.get_settings()
+        if settings is not None:
+            rgba = button.get_rgba()
+            hex_val = self.gdk_to_hex(rgba)
+            settings["date_outline_color"] = hex_val
+            for btn in self.all_date_out_color_btns:
+                if btn != button: self.set_color_button_rgba(btn, hex_val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_date_out_size_changed(self, spin, *args):
         settings = self.get_settings()
         if settings is not None:
             val = int(spin.get_value())
-            settings["time_font_size"] = val
-            for s in self.all_time_size_spins:
-                if s != spin and int(s.get_value()) != val:
-                    s.set_value(val)
+            settings["date_outline_size"] = val
+            for s in self.all_date_out_size_spins:
+                if s != spin and int(s.get_value()) != val: s.set_value(val)
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()
 
-    def on_time_font_color_set(self, button):
+    # --- Time Font / Fill / Outline Callbacks ---
+    def on_time_font_set(self, font_btn):
+        settings = self.get_settings()
+        if settings is not None:
+            val = font_btn.get_font()
+            settings["time_font_str"] = val
+            for fb in self.all_time_font_btns:
+                if fb != font_btn: fb.set_font(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_time_fill_toggled(self, switch, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = switch.get_active()
+            settings["time_fill_enabled"] = val
+            for sw in self.all_time_fill_switches:
+                if sw != switch and sw.get_active() != val: sw.set_active(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_time_fill_color_set(self, button):
         settings = self.get_settings()
         if settings is not None:
             rgba = button.get_rgba()
             hex_val = self.gdk_to_hex(rgba)
             settings["time_font_color"] = hex_val
-            for btn in self.all_time_color_btns:
-                if btn != button:
-                    self.set_color_button_rgba(btn, hex_val)
+            for btn in self.all_time_fill_color_btns:
+                if btn != button: self.set_color_button_rgba(btn, hex_val)
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()
 
-    # --- Weather Callbacks ---
+    def on_time_out_toggled(self, switch, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = switch.get_active()
+            settings["time_outline_enabled"] = val
+            for sw in self.all_time_out_switches:
+                if sw != switch and sw.get_active() != val: sw.set_active(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_time_out_color_set(self, button):
+        settings = self.get_settings()
+        if settings is not None:
+            rgba = button.get_rgba()
+            hex_val = self.gdk_to_hex(rgba)
+            settings["time_outline_color"] = hex_val
+            for btn in self.all_time_out_color_btns:
+                if btn != button: self.set_color_button_rgba(btn, hex_val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_time_out_size_changed(self, spin, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = int(spin.get_value())
+            settings["time_outline_size"] = val
+            for s in self.all_time_out_size_spins:
+                if s != spin and int(s.get_value()) != val: s.set_value(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    # --- Weather Callbacks & Font Signals ---
     def on_weather_location_entry_changed(self, entry, *args):
         text = entry.get_text().strip()
         if len(text) < 3:
@@ -888,61 +1047,127 @@ class TouchBarInfoAction(ActionBase):
                     c.set_selected(val)
             self.set_settings(settings)
 
-    def on_weather_font_family_changed(self, combo, *args):
+    def on_weather_font_set(self, font_btn):
         settings = self.get_settings()
         if settings is not None:
-            val = combo.get_selected()
-            settings["weather_font_family_idx"] = val
-            for c in self.all_weather_fam_combos:
-                if c != combo and c.get_selected() != val:
-                    c.set_selected(val)
+            val = font_btn.get_font()
+            settings["weather_font_str"] = val
+            for fb in self.all_weather_font_btns:
+                if fb != font_btn: fb.set_font(val)
             self.set_settings(settings)
             self.trigger_redraw()
 
-    def on_weather_font_size_changed(self, spin, *args):
+    def on_weather_fill_toggled(self, switch, *args):
         settings = self.get_settings()
         if settings is not None:
-            val = int(spin.get_value())
-            settings["weather_font_size"] = val
-            for s in self.all_weather_size_spins:
-                if s != spin and int(s.get_value()) != val:
-                    s.set_value(val)
+            val = switch.get_active()
+            settings["weather_fill_enabled"] = val
+            for sw in self.all_weather_fill_switches:
+                if sw != switch and sw.get_active() != val: sw.set_active(val)
             self.set_settings(settings)
             self.trigger_redraw()
 
-    def on_weather_font_color_set(self, button):
+    def on_weather_fill_color_set(self, button):
         settings = self.get_settings()
         if settings is not None:
             rgba = button.get_rgba()
             hex_val = self.gdk_to_hex(rgba)
             settings["weather_font_color"] = hex_val
-            for btn in self.all_weather_color_btns:
-                if btn != button:
-                    self.set_color_button_rgba(btn, hex_val)
+            for btn in self.all_weather_fill_color_btns:
+                if btn != button: self.set_color_button_rgba(btn, hex_val)
             self.set_settings(settings)
             self.trigger_redraw()
 
-    def get_font_for_family(self, family_name: str, size: int, bold: bool = True):
-        style = "Bold" if bold else "Regular"
-        cmd = ["fc-match", "-f", "%{file}", f"{family_name}:style={style}"]
+    def on_weather_out_toggled(self, switch, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = switch.get_active()
+            settings["weather_outline_enabled"] = val
+            for sw in self.all_weather_out_switches:
+                if sw != switch and sw.get_active() != val: sw.set_active(val)
+            self.set_settings(settings)
+            self.trigger_redraw()
+
+    def on_weather_out_color_set(self, button):
+        settings = self.get_settings()
+        if settings is not None:
+            rgba = button.get_rgba()
+            hex_val = self.gdk_to_hex(rgba)
+            settings["weather_outline_color"] = hex_val
+            for btn in self.all_weather_out_color_btns:
+                if btn != button: self.set_color_button_rgba(btn, hex_val)
+            self.set_settings(settings)
+            self.trigger_redraw()
+
+    def on_weather_out_size_changed(self, spin, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = int(spin.get_value())
+            settings["weather_outline_size"] = val
+            for s in self.all_weather_out_size_spins:
+                if s != spin and int(s.get_value()) != val: s.set_value(val)
+            self.set_settings(settings)
+            self.trigger_redraw()
+
+    def on_use_24h_toggled(self, switch, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = switch.get_active()
+            settings["use_24h"] = val
+            for sw in self.all_time_24h_switches:
+                if sw != switch and sw.get_active() != val: sw.set_active(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_show_seconds_toggled(self, switch, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = switch.get_active()
+            settings["show_seconds"] = val
+            for sw in self.all_time_sec_switches:
+                if sw != switch and sw.get_active() != val: sw.set_active(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_date_format_changed(self, combo, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = combo.get_selected()
+            settings["date_format_idx"] = val
+            for c in self.all_date_fmt_combos:
+                if c != combo and c.get_selected() != val: c.set_selected(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    # --- Pango Font Resolver for PIL ---
+    def get_font_from_desc(self, font_str: str, default_size: int = 25, scale_factor: float = 1.0):
         try:
+            desc = Pango.FontDescription.from_string(font_str)
+            family = desc.get_family() or "DejaVu Sans"
+            size_pango = desc.get_size()
+            raw_size = int(size_pango / Pango.SCALE) if size_pango > 0 else default_size
+            size = max(10, int(raw_size * scale_factor))
+
+            weight = desc.get_weight()
+            is_bold = weight >= Pango.Weight.BOLD
+            is_italic = desc.get_style() in [Pango.Style.ITALIC, Pango.Style.OBLIQUE]
+
+            style_parts = []
+            if is_bold: style_parts.append("Bold")
+            if is_italic: style_parts.append("Italic")
+            if not style_parts: style_parts.append("Regular")
+            style_str = " ".join(style_parts)
+
+            cmd = ["fc-match", "-f", "%{file}", f"{family}:style={style_str}"]
             res = subprocess.check_output(cmd, text=True).strip()
             if res and os.path.isfile(res):
                 return ImageFont.truetype(res, size)
-        except Exception:
-            pass
+        except Exception as e:
+            log.error(f"TouchBarInfo: Error loading font '{font_str}': {e}")
 
-        font_paths = [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-            "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"
-        ]
-        for path in font_paths:
-            if os.path.isfile(path):
-                try:
-                    return ImageFont.truetype(path, size)
-                except Exception:
-                    pass
         return ImageFont.load_default()
 
     def get_canvas_size(self) -> tuple[int, int]:
@@ -953,8 +1178,15 @@ class TouchBarInfoAction(ActionBase):
                     return size
         return (800, 100)
 
+    # --- PIL Render Helper for Text with Fill and Outline ---
+    def render_styled_text(self, draw: ImageDraw.ImageDraw, pos: tuple[float, float], text: str, font, fill_enabled: bool, fill_color: tuple, outline_enabled: bool, outline_color: tuple, outline_size: int, anchor: str = "mm"):
+        fill = fill_color if fill_enabled else (0, 0, 0, 0)
+        stroke_w = outline_size if outline_enabled else 0
+        stroke_f = outline_color if outline_enabled else None
+        draw.text(pos, text, fill=fill, font=font, stroke_width=stroke_w, stroke_fill=stroke_f, anchor=anchor)
+
     # --- Render Helpers ---
-    def draw_stacked(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], date_str: str, time_str: str, font_date, font_time, date_color, time_color):
+    def draw_stacked(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], date_str: str, time_str: str, font_date, font_time, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz):
         x_min, y_min, x_max, y_max = box
         w = x_max - x_min
         h = y_max - y_min
@@ -973,16 +1205,16 @@ class TouchBarInfoAction(ActionBase):
         date_y = start_y + (date_h / 2)
         time_y = start_y + date_h + spacing + (time_h / 2)
 
-        draw.text((center_x, date_y), date_str, fill=date_color, font=font_date, anchor="mm")
-        draw.text((center_x, time_y), time_str, fill=time_color, font=font_time, anchor="mm")
+        self.render_styled_text(draw, (center_x, date_y), date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz, anchor="mm")
+        self.render_styled_text(draw, (center_x, time_y), time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz, anchor="mm")
 
-    def draw_single(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], text: str, font, color):
+    def draw_single(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], text: str, font, fill_en, fill_col, out_en, out_col, out_sz):
         x_min, y_min, x_max, y_max = box
         center_x = x_min + (x_max - x_min) / 2
         center_y = y_min + (y_max - y_min) / 2
-        draw.text((center_x, center_y), text, fill=color, font=font, anchor="mm")
+        self.render_styled_text(draw, (center_x, center_y), text, font, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
-    def draw_weather(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_weather, font_location, color):
+    def draw_weather(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_weather, font_location, fill_en, fill_col, out_en, out_col, out_sz):
         x_min, y_min, x_max, y_max = box
         box_w = x_max - x_min
         box_h = y_max - y_min
@@ -996,7 +1228,6 @@ class TouchBarInfoAction(ActionBase):
         icon_file = self.get_weather_icon_filename(wmo_code, is_day)
         icon_path = os.path.join(self.plugin_base.PATH, "assets", "weather-icons", icon_file)
 
-        # Scale weather icon to fit section height
         target_icon_h = int(box_h * 0.70)
         icon_img = None
 
@@ -1026,7 +1257,6 @@ class TouchBarInfoAction(ActionBase):
         loc_w = bbox_loc[2] - bbox_loc[0]
         loc_h = bbox_loc[3] - bbox_loc[1]
 
-        # Calculate text column center to align temperature in the center above location name
         text_column_w = max(temp_w, loc_w)
         center_text_x = left_text_x + (text_column_w / 2)
 
@@ -1037,8 +1267,8 @@ class TouchBarInfoAction(ActionBase):
         temp_y = start_y + (temp_h / 2)
         loc_y = start_y + temp_h + spacing + (loc_h / 2)
 
-        draw.text((center_text_x, temp_y), temp_str, fill=color, font=font_weather, anchor="mm")
-        draw.text((center_text_x, loc_y), location_str, fill=color, font=font_location, anchor="mm")
+        self.render_styled_text(draw, (center_text_x, temp_y), temp_str, font_weather, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+        self.render_styled_text(draw, (center_text_x, loc_y), location_str, font_location, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
     def update_display(self) -> None:
         settings = self.get_settings() or {}
@@ -1062,17 +1292,29 @@ class TouchBarInfoAction(ActionBase):
         sec_c_top = settings.get("sec_c_top_widget", 0)
         sec_c_bot = settings.get("sec_c_bottom_widget", 0)
 
-        date_font_family_idx = settings.get("date_font_family_idx", 0)
-        date_font_size = settings.get("date_font_size", 25)
-        date_font_color_hex = settings.get("date_font_color", "#AAC8E6FF")
+        # Date Font & Fill/Outline Settings
+        date_font_str = settings.get("date_font_str", "DejaVu Sans Bold 25")
+        date_fill_en = settings.get("date_fill_enabled", True)
+        date_fill_col_hex = settings.get("date_font_color", "#AAC8E6FF")
+        date_out_en = settings.get("date_outline_enabled", False)
+        date_out_col_hex = settings.get("date_outline_color", "#000000FF")
+        date_out_sz = settings.get("date_outline_size", 2)
 
-        time_font_family_idx = settings.get("time_font_family_idx", 0)
-        time_font_size = settings.get("time_font_size", 45)
-        time_font_color_hex = settings.get("time_font_color", "#FFFFFFFF")
+        # Time Font & Fill/Outline Settings
+        time_font_str = settings.get("time_font_str", "DejaVu Sans Bold 45")
+        time_fill_en = settings.get("time_fill_enabled", True)
+        time_fill_col_hex = settings.get("time_font_color", "#FFFFFFFF")
+        time_out_en = settings.get("time_outline_enabled", False)
+        time_out_col_hex = settings.get("time_outline_color", "#000000FF")
+        time_out_sz = settings.get("time_outline_size", 2)
 
-        weather_font_family_idx = settings.get("weather_font_family_idx", 0)
-        weather_font_size = settings.get("weather_font_size", 22)
-        weather_font_color_hex = settings.get("weather_font_color", "#FFFFFFFF")
+        # Weather Font & Fill/Outline Settings
+        weather_font_str = settings.get("weather_font_str", "DejaVu Sans Bold 22")
+        weather_fill_en = settings.get("weather_fill_enabled", True)
+        weather_fill_col_hex = settings.get("weather_font_color", "#FFFFFFFF")
+        weather_out_en = settings.get("weather_outline_enabled", False)
+        weather_out_col_hex = settings.get("weather_outline_color", "#000000FF")
+        weather_out_sz = settings.get("weather_outline_size", 2)
 
         date_options = [
             ("%b. %d, %Y", "Mon. Day, Year"),
@@ -1092,14 +1334,10 @@ class TouchBarInfoAction(ActionBase):
         
         time_str = now.strftime(time_fmt).lstrip("0") if not use_24h else now.strftime(time_fmt)
 
-        date_family = self.font_families[min(date_font_family_idx, len(self.font_families) - 1)] if hasattr(self, "font_families") else "DejaVu Sans"
-        time_family = self.font_families[min(time_font_family_idx, len(self.font_families) - 1)] if hasattr(self, "font_families") else "DejaVu Sans"
-        weather_family = self.font_families[min(weather_font_family_idx, len(self.font_families) - 1)] if hasattr(self, "font_families") else "DejaVu Sans"
-
         cache_temp = self.weather_cache.get("temp_str", "--°") if hasattr(self, "weather_cache") else "--°"
         cache_loc = self.weather_cache.get("location", "") if hasattr(self, "weather_cache") else ""
 
-        combined_key = f"{date_str}|{time_str}|{cache_temp}|{cache_loc}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{date_family}|{date_font_size}|{date_font_color_hex}|{time_family}|{time_font_size}|{time_font_color_hex}|{weather_family}|{weather_font_size}|{weather_font_color_hex}"
+        combined_key = f"{date_str}|{time_str}|{cache_temp}|{cache_loc}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{date_font_str}|{date_fill_en}|{date_fill_col_hex}|{date_out_en}|{date_out_col_hex}|{date_out_sz}|{time_font_str}|{time_fill_en}|{time_fill_col_hex}|{time_out_en}|{time_out_col_hex}|{time_out_sz}|{weather_font_str}|{weather_fill_en}|{weather_fill_col_hex}|{weather_out_en}|{weather_out_col_hex}|{weather_out_sz}"
 
         if combined_key == self.last_rendered_key:
             return
@@ -1110,18 +1348,23 @@ class TouchBarInfoAction(ActionBase):
         image = Image.new("RGBA", (width, height), (15, 16, 22, 255))
         draw = ImageDraw.Draw(image)
 
-        font_date = self.get_font_for_family(date_family, date_font_size, bold=True)
-        font_time = self.get_font_for_family(time_family, time_font_size, bold=True)
+        font_date = self.get_font_from_desc(date_font_str, default_size=25)
+        font_time = self.get_font_from_desc(time_font_str, default_size=45)
 
-        font_weather_full = self.get_font_for_family(weather_family, int(weather_font_size * 1.5), bold=True)
-        font_loc_full = self.get_font_for_family(weather_family, weather_font_size, bold=True)
+        font_weather_full = self.get_font_from_desc(weather_font_str, default_size=22, scale_factor=1.4)
+        font_loc_full = self.get_font_from_desc(weather_font_str, default_size=22, scale_factor=1.0)
 
-        font_weather_sub = self.get_font_for_family(weather_family, weather_font_size, bold=True)
-        font_loc_sub = self.get_font_for_family(weather_family, max(10, int(weather_font_size * 0.75)), bold=True)
+        font_weather_sub = self.get_font_from_desc(weather_font_str, default_size=22, scale_factor=1.0)
+        font_loc_sub = self.get_font_from_desc(weather_font_str, default_size=22, scale_factor=0.75)
 
-        date_color = self.hex_to_rgba_tuple(date_font_color_hex, default=(170, 200, 230, 255))
-        time_color = self.hex_to_rgba_tuple(time_font_color_hex, default=(255, 255, 255, 255))
-        weather_color = self.hex_to_rgba_tuple(weather_font_color_hex, default=(255, 255, 255, 255))
+        date_fill_col = self.hex_to_rgba_tuple(date_fill_col_hex, default=(170, 200, 230, 255))
+        date_out_col = self.hex_to_rgba_tuple(date_out_col_hex, default=(0, 0, 0, 255))
+
+        time_fill_col = self.hex_to_rgba_tuple(time_fill_col_hex, default=(255, 255, 255, 255))
+        time_out_col = self.hex_to_rgba_tuple(time_out_col_hex, default=(0, 0, 0, 255))
+
+        weather_fill_col = self.hex_to_rgba_tuple(weather_fill_col_hex, default=(255, 255, 255, 255))
+        weather_out_col = self.hex_to_rgba_tuple(weather_out_col_hex, default=(0, 0, 0, 255))
 
         # --- Section Bounding Boxes ---
         box_a_full = (0, 0, 200, 100)
@@ -1139,29 +1382,29 @@ class TouchBarInfoAction(ActionBase):
         def render_section(mode, full_choice, top_choice, bot_choice, full_box, top_box, bot_box):
             if mode == 0: # 1 Widget (Full Section)
                 if full_choice == 1: # Stacked Date & Time
-                    self.draw_stacked(draw, full_box, date_str, time_str, font_date, font_time, date_color, time_color)
+                    self.draw_stacked(draw, full_box, date_str, time_str, font_date, font_time, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
                 elif full_choice == 2: # Date
-                    self.draw_single(draw, full_box, date_str, font_date, date_color)
+                    self.draw_single(draw, full_box, date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz)
                 elif full_choice == 3: # Time
-                    self.draw_single(draw, full_box, time_str, font_time, time_color)
+                    self.draw_single(draw, full_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
                 elif full_choice == 4: # Weather
-                    self.draw_weather(image, draw, full_box, font_weather_full, font_loc_full, weather_color)
+                    self.draw_weather(image, draw, full_box, font_weather_full, font_loc_full, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
             else: # 2 Widgets (Split Top / Bottom)
                 # Top Sub-slot
                 if top_choice == 1: # Date
-                    self.draw_single(draw, top_box, date_str, font_date, date_color)
+                    self.draw_single(draw, top_box, date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz)
                 elif top_choice == 2: # Time
-                    self.draw_single(draw, top_box, time_str, font_time, time_color)
+                    self.draw_single(draw, top_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
                 elif top_choice == 3: # Weather
-                    self.draw_weather(image, draw, top_box, font_weather_sub, font_loc_sub, weather_color)
+                    self.draw_weather(image, draw, top_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
 
                 # Bottom Sub-slot
                 if bot_choice == 1: # Date
-                    self.draw_single(draw, bot_box, date_str, font_date, date_color)
+                    self.draw_single(draw, bot_box, date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz)
                 elif bot_choice == 2: # Time
-                    self.draw_single(draw, bot_box, time_str, font_time, time_color)
+                    self.draw_single(draw, bot_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
                 elif bot_choice == 3: # Weather
-                    self.draw_weather(image, draw, bot_box, font_weather_sub, font_loc_sub, weather_color)
+                    self.draw_weather(image, draw, bot_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
 
         render_section(sec_a_mode, sec_a_full, sec_a_top, sec_a_bot, box_a_full, box_a_top, box_a_bot)
         render_section(sec_b_mode, sec_b_full, sec_b_top, sec_b_bot, box_b_full, box_b_top, box_b_bot)
