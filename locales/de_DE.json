@@ -1,0 +1,14 @@
+{
+    "plugin.name": "Touch Bar Info",
+    "actions.touchbar-info.name": "Touch Bar Info",
+    "actions.touchbar-info.use-24h.label": "24-Stunden-Format",
+    "actions.touchbar-info.use-24h.subtitle": "Zwischen 12-Stunden- (AM/PM) und 24-Stunden-Format wechseln",
+    "actions.touchbar-info.show-seconds.label": "Sekunden anzeigen",
+    "actions.touchbar-info.show-seconds.subtitle": "Sekunden in der angezeigten Uhrzeit einschließen",
+    "actions.touchbar-info.date-format.label": "Datumsformat",
+    "actions.touchbar-info.date-format.subtitle": "Formatierung für die obere Datumszeile",
+    "actions.touchbar-info.date-format.mon-day-year": "Mon. Tag, Jahr (Aug. 11, 2026)",
+    "actions.touchbar-info.date-format.dow-day-year": "Wochentag. Tag, Jahr (Di. 11, 2026)",
+    "actions.touchbar-info.date-format.dow-mon-day-year": "Wochentag. Mon. Tag, Jahr (Di. Aug. 11, 2026)",
+    "actions.touchbar-info.date-format.year-mon-day": "Jahr-Mon-Tag (2026-Aug-11)"
+}

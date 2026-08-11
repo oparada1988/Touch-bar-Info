@@ -1,0 +1,14 @@
+{
+    "plugin.name": "Touch Bar Info",
+    "actions.touchbar-info.name": "Touch Bar Info",
+    "actions.touchbar-info.use-24h.label": "Use 24-Hour Clock",
+    "actions.touchbar-info.use-24h.subtitle": "Switch between 12-hour (AM/PM) and 24-hour time format",
+    "actions.touchbar-info.show-seconds.label": "Show Seconds",
+    "actions.touchbar-info.show-seconds.subtitle": "Include seconds in the displayed time",
+    "actions.touchbar-info.date-format.label": "Date Format",
+    "actions.touchbar-info.date-format.subtitle": "Format style for top date line",
+    "actions.touchbar-info.date-format.mon-day-year": "Mon. Day, Year (Aug. 11, 2026)",
+    "actions.touchbar-info.date-format.dow-day-year": "DayOfWeek. Day, Year (Tue. 11, 2026)",
+    "actions.touchbar-info.date-format.dow-mon-day-year": "DayOfWeek. Mon. Day, Year (Tue. Aug. 11, 2026)",
+    "actions.touchbar-info.date-format.year-mon-day": "Year-Mon-Day (2026-Aug-11)"
+}
