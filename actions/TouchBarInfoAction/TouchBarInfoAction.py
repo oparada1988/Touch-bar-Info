@@ -19,6 +19,7 @@ class TouchBarInfoAction(ActionBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.has_configuration = True
+        self.last_rendered_time_str = ""
 
     def on_ready(self) -> None:
         self.update_display()
@@ -84,6 +85,7 @@ class TouchBarInfoAction(ActionBase):
         if settings is not None:
             settings["use_24h"] = switch.get_active()
             self.set_settings(settings)
+            self.last_rendered_time_str = ""
             self.update_display()
 
     def on_show_seconds_toggled(self, switch, *args):
@@ -91,6 +93,7 @@ class TouchBarInfoAction(ActionBase):
         if settings is not None:
             settings["show_seconds"] = switch.get_active()
             self.set_settings(settings)
+            self.last_rendered_time_str = ""
             self.update_display()
 
     def on_date_format_changed(self, combo, *args):
@@ -98,6 +101,7 @@ class TouchBarInfoAction(ActionBase):
         if settings is not None:
             settings["date_format_idx"] = combo.get_selected()
             self.set_settings(settings)
+            self.last_rendered_time_str = ""
             self.update_display()
 
     def get_font(self, size: int):
@@ -145,6 +149,12 @@ class TouchBarInfoAction(ActionBase):
             time_fmt = "%I:%M:%S %p" if show_seconds else "%I:%M %p"
         
         time_str = now.strftime(time_fmt).lstrip("0") if not use_24h else now.strftime(time_fmt)
+        combined_key = f"{date_str}|{time_str}"
+
+        # Avoid redundant redraws if time text hasn't changed
+        if combined_key == self.last_rendered_time_str:
+            return
+        self.last_rendered_time_str = combined_key
 
         width, height = self.get_canvas_size()
 
@@ -181,37 +191,46 @@ class TouchBarInfoAction(ActionBase):
         self.render_to_input(image)
 
     def render_to_input(self, image: Image.Image) -> None:
-        if not hasattr(self, "page") or self.page is None:
-            return
-
         is_touchscreen = isinstance(self.input_ident, Input.Touchscreen) or getattr(self.input_ident, "input_type", "") == "touchscreens"
 
         if is_touchscreen:
-            # Save rendered image as page touchscreen background image
-            temp_dir = os.path.join(self.plugin_base.PATH, "assets")
-            os.makedirs(temp_dir, exist_ok=True)
-            render_path = os.path.join(temp_dir, f"touchbar_render_{self.state}.png")
+            if not hasattr(self, "deck_controller") or self.deck_controller is None:
+                return
 
-            try:
-                image.save(render_path)
-                self.page.set_background_image(self.input_ident, self.state, render_path, update=True)
-            except Exception as e:
-                log.error(f"Failed to set touchscreen background image: {e}")
+            c_input = self.deck_controller.get_input(self.input_ident)
 
-            # Direct task push for hardware deck update
-            if hasattr(self, "deck_controller") and self.deck_controller is not None:
-                if hasattr(self.deck_controller, "deck") and hasattr(self.deck_controller.deck, "set_touchscreen_image"):
-                    try:
+            # 1. Update hardware Touch Bar via non-blocking StreamDeck media_player task
+            if hasattr(self.deck_controller, "deck") and hasattr(self.deck_controller.deck, "set_touchscreen_image"):
+                try:
+                    if image.mode == "RGBA":
                         bg = Image.new("RGB", image.size, (15, 16, 22))
-                        if image.mode == "RGBA":
-                            bg.paste(image, (0, 0), image)
-                        else:
-                            bg = image
-                        
-                        from StreamDeck.ImageHelpers import PILHelper
-                        native_img = PILHelper.to_native_touchscreen_format(self.deck_controller.deck, bg)
-                        self.deck_controller.media_player.add_touchscreen_task(native_img)
-                    except Exception as e:
-                        log.debug(f"Direct touchscreen task push exception: {e}")
+                        bg.paste(image, (0, 0), image)
+                        rgb_img = bg
+                    else:
+                        rgb_img = image
+
+                    from StreamDeck.ImageHelpers import PILHelper
+                    native_img = PILHelper.to_native_touchscreen_format(self.deck_controller.deck, rgb_img)
+                    self.deck_controller.media_player.add_touchscreen_task(native_img)
+                except Exception as e:
+                    log.error(f"TouchBarInfo: Hardware touchscreen task error: {e}")
+
+            # 2. Update StreamController UI screenbar element
+            if c_input is not None and hasattr(c_input, "set_ui_image"):
+                try:
+                    c_input.set_ui_image(image)
+                except Exception as e:
+                    log.error(f"TouchBarInfo: UI screenbar set_ui_image error: {e}")
+
+            # 3. Update background image path on page WITHOUT triggering blocking update loop (update=False)
+            if hasattr(self, "page") and self.page is None:
+                try:
+                    temp_dir = os.path.join(self.plugin_base.PATH, "assets")
+                    os.makedirs(temp_dir, exist_ok=True)
+                    render_path = os.path.join(temp_dir, f"touchbar_render_{self.state}.png")
+                    image.save(render_path)
+                    self.page.set_background_image(self.input_ident, self.state, render_path, update=False)
+                except Exception:
+                    pass
         else:
             self.set_media(image=image, update=True)
