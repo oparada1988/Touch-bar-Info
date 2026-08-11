@@ -1,7 +1,6 @@
 # Import StreamController modules
 from src.backend.PluginManager.ActionBase import ActionBase
 from src.backend.DeckManagement.InputIdentifier import Input
-from src.backend.DeckManagement.Subclasses.KeyImage import InputImage
 
 # Import python modules
 import os
@@ -13,6 +12,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib
+from loguru import logger as log
 import globals as gl
 
 class TouchBarInfoAction(ActionBase):
@@ -181,10 +181,37 @@ class TouchBarInfoAction(ActionBase):
         self.render_to_input(image)
 
     def render_to_input(self, image: Image.Image) -> None:
-        state = self.get_state()
-        if state is None:
+        if not hasattr(self, "page") or self.page is None:
             return
-        if hasattr(state, "set_current_image"):
-            state.set_current_image(image)
+
+        is_touchscreen = isinstance(self.input_ident, Input.Touchscreen) or getattr(self.input_ident, "input_type", "") == "touchscreens"
+
+        if is_touchscreen:
+            # Save rendered image as page touchscreen background image
+            temp_dir = os.path.join(self.plugin_base.PATH, "assets")
+            os.makedirs(temp_dir, exist_ok=True)
+            render_path = os.path.join(temp_dir, f"touchbar_render_{self.state}.png")
+
+            try:
+                image.save(render_path)
+                self.page.set_background_image(self.input_ident, self.state, render_path, update=True)
+            except Exception as e:
+                log.error(f"Failed to set touchscreen background image: {e}")
+
+            # Direct task push for hardware deck update
+            if hasattr(self, "deck_controller") and self.deck_controller is not None:
+                if hasattr(self.deck_controller, "deck") and hasattr(self.deck_controller.deck, "set_touchscreen_image"):
+                    try:
+                        bg = Image.new("RGB", image.size, (15, 16, 22))
+                        if image.mode == "RGBA":
+                            bg.paste(image, (0, 0), image)
+                        else:
+                            bg = image
+                        
+                        from StreamDeck.ImageHelpers import PILHelper
+                        native_img = PILHelper.to_native_touchscreen_format(self.deck_controller.deck, bg)
+                        self.deck_controller.media_player.add_touchscreen_task(native_img)
+                    except Exception as e:
+                        log.debug(f"Direct touchscreen task push exception: {e}")
         else:
             self.set_media(image=image, update=True)
