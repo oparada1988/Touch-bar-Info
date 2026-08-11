@@ -377,15 +377,15 @@ class TouchBarInfoAction(ActionBase):
 
             # --- 2. Top Subsection Expander ---
             top_expander = Adw.ExpanderRow(
-                title=self.get_locale_text("actions.touchbar-info.top-subsection.label", "Top Subsection (Y: 0-50px)"),
-                subtitle=self.get_locale_text("actions.touchbar-info.top-subsection.subtitle", "Configure widget for top half of section")
+                title=self.get_locale_text("actions.touchbar-info.top-subsection.label", "Top Slot"),
+                subtitle=self.get_locale_text("actions.touchbar-info.top-subsection.subtitle", "Configure widget for the top 50px slot")
             )
             top_model = Gtk.StringList()
             for opt in self.split_widget_options: top_model.append(opt)
             top_combo = Adw.ComboRow(
                 model=top_model,
                 title=self.get_locale_text("actions.touchbar-info.widget-selector.label", "Select Widget"),
-                subtitle=self.get_locale_text("actions.touchbar-info.widget-selector.subtitle", "Choose widget to display in this subsection")
+                subtitle=self.get_locale_text("actions.touchbar-info.widget-selector.subtitle", "Choose widget to display in this slot")
             )
             td_fmt, td_fam, td_size, td_col_row, _ = build_date_controls()
             tt_24h, tt_sec, tt_fam, tt_size, tt_col_row, _ = build_time_controls()
@@ -401,15 +401,15 @@ class TouchBarInfoAction(ActionBase):
 
             # --- 3. Bottom Subsection Expander ---
             bot_expander = Adw.ExpanderRow(
-                title=self.get_locale_text("actions.touchbar-info.bottom-subsection.label", "Bottom Subsection (Y: 50-100px)"),
-                subtitle=self.get_locale_text("actions.touchbar-info.bottom-subsection.subtitle", "Configure widget for bottom half of section")
+                title=self.get_locale_text("actions.touchbar-info.bottom-subsection.label", "Bottom Slot"),
+                subtitle=self.get_locale_text("actions.touchbar-info.bottom-subsection.subtitle", "Configure widget for the bottom 50px slot")
             )
             bot_model = Gtk.StringList()
             for opt in self.split_widget_options: bot_model.append(opt)
             bot_combo = Adw.ComboRow(
                 model=bot_model,
                 title=self.get_locale_text("actions.touchbar-info.widget-selector.label", "Select Widget"),
-                subtitle=self.get_locale_text("actions.touchbar-info.widget-selector.subtitle", "Choose widget to display in this subsection")
+                subtitle=self.get_locale_text("actions.touchbar-info.widget-selector.subtitle", "Choose widget to display in this slot")
             )
             bd_fmt, bd_fam, bd_size, bd_col_row, _ = build_date_controls()
             bt_24h, bt_sec, bt_fam, bt_size, bt_col_row, _ = build_time_controls()
