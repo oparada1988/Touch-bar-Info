@@ -10,16 +10,18 @@ from .actions.TouchBarInfoAction.TouchBarInfoAction import TouchBarInfoAction
 class TouchBarInfoPlugin(PluginBase):
     def __init__(self):
         super().__init__()
+        # Expose locale manager alias
+        self.lm = self.locale_manager
 
-        ## Register actions
+        ## Register action exclusively for Touchscreen (Stream Deck Plus Touch Bar)
         self.touchbar_info_holder = ActionHolder(
             plugin_base = self,
             action_base = TouchBarInfoAction,
             action_id = "com_core447_TouchBarInfo::TouchBarInfoAction",
             action_name = "Touch Bar Info",
             action_support = {
-                Input.Key: ActionInputSupport.SUPPORTED,
-                Input.Dial: ActionInputSupport.SUPPORTED,
+                Input.Key: ActionInputSupport.UNSUPPORTED,
+                Input.Dial: ActionInputSupport.UNSUPPORTED,
                 Input.Touchscreen: ActionInputSupport.SUPPORTED
             }
         )

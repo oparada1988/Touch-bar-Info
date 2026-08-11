@@ -21,6 +21,21 @@ class TouchBarInfoAction(ActionBase):
         self.has_configuration = True
         self.last_rendered_time_str = ""
 
+    def get_locale_text(self, key: str, default: str) -> str:
+        if hasattr(self.plugin_base, "lm") and self.plugin_base.lm is not None:
+            try:
+                val = self.plugin_base.lm.get(key)
+                if val: return val
+            except Exception:
+                pass
+        if hasattr(self.plugin_base, "locale_manager") and self.plugin_base.locale_manager is not None:
+            try:
+                val = self.plugin_base.locale_manager.get(key)
+                if val: return val
+            except Exception:
+                pass
+        return default
+
     def on_ready(self) -> None:
         self.update_display()
 
@@ -30,29 +45,29 @@ class TouchBarInfoAction(ActionBase):
     def get_config_rows(self) -> "list[Adw.PreferencesRow]":
         # 24-hour clock switch
         self.use_24h_switch = Adw.SwitchRow(
-            title=self.plugin_base.lm.get("actions.touchbar-info.use-24h.label"),
-            subtitle=self.plugin_base.lm.get("actions.touchbar-info.use-24h.subtitle")
+            title=self.get_locale_text("actions.touchbar-info.use-24h.label", "Use 24-Hour Clock"),
+            subtitle=self.get_locale_text("actions.touchbar-info.use-24h.subtitle", "Switch between 12-hour (AM/PM) and 24-hour time format")
         )
 
         # Show seconds switch
         self.show_seconds_switch = Adw.SwitchRow(
-            title=self.plugin_base.lm.get("actions.touchbar-info.show-seconds.label"),
-            subtitle=self.plugin_base.lm.get("actions.touchbar-info.show-seconds.subtitle")
+            title=self.get_locale_text("actions.touchbar-info.show-seconds.label", "Show Seconds"),
+            subtitle=self.get_locale_text("actions.touchbar-info.show-seconds.subtitle", "Include seconds in the displayed time")
         )
 
         # Date format selector
         self.date_format_model = Gtk.StringList()
         self.date_format_combo = Adw.ComboRow(
             model=self.date_format_model,
-            title=self.plugin_base.lm.get("actions.touchbar-info.date-format.label"),
-            subtitle=self.plugin_base.lm.get("actions.touchbar-info.date-format.subtitle")
+            title=self.get_locale_text("actions.touchbar-info.date-format.label", "Date Format"),
+            subtitle=self.get_locale_text("actions.touchbar-info.date-format.subtitle", "Format style for top date line")
         )
 
         self.date_format_options = [
-            ("%b. %d, %Y", self.plugin_base.lm.get("actions.touchbar-info.date-format.mon-day-year")),
-            ("%a. %d, %Y", self.plugin_base.lm.get("actions.touchbar-info.date-format.dow-day-year")),
-            ("%a. %b. %d, %Y", self.plugin_base.lm.get("actions.touchbar-info.date-format.dow-mon-day-year")),
-            ("%Y-%b-%d", self.plugin_base.lm.get("actions.touchbar-info.date-format.year-mon-day"))
+            ("%b. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.mon-day-year", "Mon. Day, Year (Aug. 11, 2026)")),
+            ("%a. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.dow-day-year", "DayOfWeek. Day, Year (Tue. 11, 2026)")),
+            ("%a. %b. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.dow-mon-day-year", "DayOfWeek. Mon. Day, Year (Tue. Aug. 11, 2026)")),
+            ("%Y-%b-%d", self.get_locale_text("actions.touchbar-info.date-format.year-mon-day", "Year-Mon-Day (2026-Aug-11)"))
         ]
 
         for _, label in self.date_format_options:
@@ -120,14 +135,8 @@ class TouchBarInfoAction(ActionBase):
 
     def get_canvas_size(self) -> tuple[int, int]:
         if hasattr(self, "deck_controller") and self.deck_controller is not None:
-            if isinstance(self.input_ident, Input.Touchscreen) or getattr(self.input_ident, "input_type", "") == "touchscreens":
-                if hasattr(self.deck_controller, "get_touchscreen_image_size"):
-                    size = self.deck_controller.get_touchscreen_image_size()
-                    if size is not None:
-                        return size
-                return (800, 100)
-            elif hasattr(self.deck_controller, "get_key_image_size"):
-                size = self.deck_controller.get_key_image_size()
+            if hasattr(self.deck_controller, "get_touchscreen_image_size"):
+                size = self.deck_controller.get_touchscreen_image_size()
                 if size is not None:
                     return size
         return (800, 100)
@@ -138,7 +147,13 @@ class TouchBarInfoAction(ActionBase):
         show_seconds = settings.get("show_seconds", False)
         date_format_idx = settings.get("date_format_idx", 0)
 
-        fmt_str, _ = self.date_format_options[min(date_format_idx, len(self.date_format_options) - 1)]
+        date_options = [
+            ("%b. %d, %Y", "Mon. Day, Year"),
+            ("%a. %d, %Y", "DayOfWeek. Day, Year"),
+            ("%a. %b. %d, %Y", "DayOfWeek. Mon. Day, Year"),
+            ("%Y-%b-%d", "Year-Mon-Day")
+        ]
+        fmt_str, _ = date_options[min(date_format_idx, len(date_options) - 1)]
 
         now = datetime.datetime.now()
         date_str = now.strftime(fmt_str)
@@ -151,7 +166,7 @@ class TouchBarInfoAction(ActionBase):
         time_str = now.strftime(time_fmt).lstrip("0") if not use_24h else now.strftime(time_fmt)
         combined_key = f"{date_str}|{time_str}"
 
-        # Avoid redundant redraws if time text hasn't changed
+        # Avoid redundant redraws if text hasn't changed
         if combined_key == self.last_rendered_time_str:
             return
         self.last_rendered_time_str = combined_key
@@ -191,46 +206,26 @@ class TouchBarInfoAction(ActionBase):
         self.render_to_input(image)
 
     def render_to_input(self, image: Image.Image) -> None:
-        is_touchscreen = isinstance(self.input_ident, Input.Touchscreen) or getattr(self.input_ident, "input_type", "") == "touchscreens"
+        if not hasattr(self, "page") or self.page is None:
+            return
 
-        if is_touchscreen:
-            if not hasattr(self, "deck_controller") or self.deck_controller is None:
-                return
+        # Save rendered date/time image to assets directory
+        assets_dir = os.path.join(self.plugin_base.PATH, "assets")
+        os.makedirs(assets_dir, exist_ok=True)
+        render_path = os.path.join(assets_dir, f"touchbar_render_{self.state}.png")
 
+        try:
+            image.save(render_path)
+            # Set page background image path for touchscreen (update=False prevents recursive page reload)
+            self.page.set_background_image(self.input_ident, self.state, render_path, update=False)
+        except Exception as e:
+            log.error(f"TouchBarInfo: Error saving touchscreen background: {e}")
+
+        # Trigger non-recursive update on the touchscreen controller
+        if hasattr(self, "deck_controller") and self.deck_controller is not None:
             c_input = self.deck_controller.get_input(self.input_ident)
-
-            # 1. Update hardware Touch Bar via non-blocking StreamDeck media_player task
-            if hasattr(self.deck_controller, "deck") and hasattr(self.deck_controller.deck, "set_touchscreen_image"):
+            if c_input is not None and hasattr(c_input, "update"):
                 try:
-                    if image.mode == "RGBA":
-                        bg = Image.new("RGB", image.size, (15, 16, 22))
-                        bg.paste(image, (0, 0), image)
-                        rgb_img = bg
-                    else:
-                        rgb_img = image
-
-                    from StreamDeck.ImageHelpers import PILHelper
-                    native_img = PILHelper.to_native_touchscreen_format(self.deck_controller.deck, rgb_img)
-                    self.deck_controller.media_player.add_touchscreen_task(native_img)
+                    c_input.update()
                 except Exception as e:
-                    log.error(f"TouchBarInfo: Hardware touchscreen task error: {e}")
-
-            # 2. Update StreamController UI screenbar element
-            if c_input is not None and hasattr(c_input, "set_ui_image"):
-                try:
-                    c_input.set_ui_image(image)
-                except Exception as e:
-                    log.error(f"TouchBarInfo: UI screenbar set_ui_image error: {e}")
-
-            # 3. Update background image path on page WITHOUT triggering blocking update loop (update=False)
-            if hasattr(self, "page") and self.page is None:
-                try:
-                    temp_dir = os.path.join(self.plugin_base.PATH, "assets")
-                    os.makedirs(temp_dir, exist_ok=True)
-                    render_path = os.path.join(temp_dir, f"touchbar_render_{self.state}.png")
-                    image.save(render_path)
-                    self.page.set_background_image(self.input_ident, self.state, render_path, update=False)
-                except Exception:
-                    pass
-        else:
-            self.set_media(image=image, update=True)
+                    log.error(f"TouchBarInfo: Error updating touchscreen controller: {e}")
