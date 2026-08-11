@@ -231,9 +231,10 @@ class TouchBarInfoAction(ActionBase):
                 subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
             )
             font_btn = Gtk.FontButton.new()
-            font_btn.set_use_font(True)
-            font_btn.set_use_size(True)
+            font_btn.set_use_font(False)
+            font_btn.set_use_size(False)
             font_btn.set_valign(Gtk.Align.CENTER)
+            font_btn.set_hexpand(False)
             font_row.add_suffix(font_btn)
 
             fill_sw = Adw.SwitchRow(
@@ -302,9 +303,10 @@ class TouchBarInfoAction(ActionBase):
                 subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
             )
             font_btn = Gtk.FontButton.new()
-            font_btn.set_use_font(True)
-            font_btn.set_use_size(True)
+            font_btn.set_use_font(False)
+            font_btn.set_use_size(False)
             font_btn.set_valign(Gtk.Align.CENTER)
+            font_btn.set_hexpand(False)
             font_row.add_suffix(font_btn)
 
             fill_sw = Adw.SwitchRow(
@@ -392,9 +394,10 @@ class TouchBarInfoAction(ActionBase):
                 subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
             )
             font_btn = Gtk.FontButton.new()
-            font_btn.set_use_font(True)
-            font_btn.set_use_size(True)
+            font_btn.set_use_font(False)
+            font_btn.set_use_size(False)
             font_btn.set_valign(Gtk.Align.CENTER)
+            font_btn.set_hexpand(False)
             font_row.add_suffix(font_btn)
 
             fill_sw = Adw.SwitchRow(
