@@ -1001,9 +1001,26 @@ class TouchBarInfoAction(ActionBase):
         for combo in self.all_net_unit_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("net_unit_idx", c.get_selected()))
         for combo in self.all_ram_mode_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("ram_mode_idx", c.get_selected()))
         for combo in self.all_disk_mode_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("disk_mode_idx", c.get_selected()))
-        for combo in self.all_disk_mount_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("disk_mount_idx", c.get_selected()))
+        for combo in self.all_disk_mount_combos: combo.connect("notify::selected", self.on_disk_mount_changed)
+
+        # Custom Touch Bar Background Row
+        self.bg_image_row = Adw.ActionRow(
+            title=self.get_locale_text("actions.touchbar-info.bg-image.label", "Custom Touch Bar Background Wallpaper"),
+            subtitle=self.get_locale_text("actions.touchbar-info.bg-image.subtitle", "Select custom wallpaper image (PNG/JPG) to render behind all Touch Bar widgets")
+        )
+        bg_image_btn = Gtk.Button(label=self.get_locale_text("actions.touchbar-info.bg-image.choose", "Choose Image..."))
+        bg_image_btn.set_valign(Gtk.Align.CENTER)
+        bg_image_btn.connect("clicked", self.on_select_custom_bg_clicked)
+
+        bg_clear_btn = Gtk.Button(label=self.get_locale_text("actions.touchbar-info.bg-image.clear", "Clear"))
+        bg_clear_btn.set_valign(Gtk.Align.CENTER)
+        bg_clear_btn.connect("clicked", self.on_clear_custom_bg_clicked)
+
+        self.bg_image_row.add_suffix(bg_image_btn)
+        self.bg_image_row.add_suffix(bg_clear_btn)
 
         return [
+            self.bg_image_row,
             self.sec_a_expander,
             self.sec_b_expander,
             self.sec_c_expander
@@ -1165,6 +1182,56 @@ class TouchBarInfoAction(ActionBase):
         settings = self.get_settings()
         if settings is not None:
             settings[setting_name] = value
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_disk_mount_changed(self, combo, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = combo.get_selected()
+            settings["disk_mount_idx"] = val
+            for c in self.all_disk_mount_combos:
+                if c != combo and c.get_selected() != val:
+                    c.set_selected(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_select_custom_bg_clicked(self, button):
+        dialog = Gtk.FileChooserNative.new(
+            title=self.get_locale_text("actions.touchbar-info.bg-image.dialog-title", "Select Touch Bar Background Image"),
+            parent=None,
+            action=Gtk.FileChooserAction.OPEN,
+            accept_label=self.get_locale_text("actions.touchbar-info.bg-image.open", "Open"),
+            cancel_label=self.get_locale_text("actions.touchbar-info.bg-image.cancel", "Cancel")
+        )
+        filter_img = Gtk.FileFilter()
+        filter_img.set_name("Images (*.png, *.jpg, *.jpeg)")
+        filter_img.add_mime_type("image/png")
+        filter_img.add_mime_type("image/jpeg")
+        dialog.add_filter(filter_img)
+
+        def on_response(dialog_obj, response_id):
+            if response_id == Gtk.ResponseType.ACCEPT:
+                file_obj = dialog_obj.get_file()
+                if file_obj:
+                    path = file_obj.get_path()
+                    settings = self.get_settings()
+                    if settings is not None:
+                        settings["custom_bg_path"] = path
+                        self.set_settings(settings)
+                        self.last_rendered_key = ""
+                        self.update_display()
+            dialog_obj.destroy()
+
+        dialog.connect("response", on_response)
+        dialog.show()
+
+    def on_clear_custom_bg_clicked(self, button):
+        settings = self.get_settings()
+        if settings is not None:
+            settings["custom_bg_path"] = ""
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()

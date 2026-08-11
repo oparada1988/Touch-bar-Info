@@ -86,5 +86,12 @@
     "actions.touchbar-info.weather-unit.label": "Temperature Unit",
     "actions.touchbar-info.weather-unit.subtitle": "Select Fahrenheit (°F) or Celsius (°C)",
     "actions.touchbar-info.weather-refresh.label": "Refresh Interval",
-    "actions.touchbar-info.weather-refresh.subtitle": "Automatic weather update frequency"
+    "actions.touchbar-info.weather-refresh.subtitle": "Automatic weather update frequency",
+    "actions.touchbar-info.bg-image.label": "Custom Touch Bar Background Wallpaper",
+    "actions.touchbar-info.bg-image.subtitle": "Select custom wallpaper image (PNG/JPG) to render behind all Touch Bar widgets",
+    "actions.touchbar-info.bg-image.choose": "Choose Image...",
+    "actions.touchbar-info.bg-image.clear": "Clear",
+    "actions.touchbar-info.bg-image.dialog-title": "Select Touch Bar Background Image",
+    "actions.touchbar-info.bg-image.open": "Open",
+    "actions.touchbar-info.bg-image.cancel": "Cancel"
 }

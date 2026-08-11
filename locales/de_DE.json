@@ -86,5 +86,12 @@
     "actions.touchbar-info.weather-unit.label": "Temperatureinheit",
     "actions.touchbar-info.weather-unit.subtitle": "Fahrenheit (°F) oder Celsius (°C) wählen",
     "actions.touchbar-info.weather-refresh.label": "Aktualisierungsintervall",
-    "actions.touchbar-info.weather-refresh.subtitle": "Automatische Wetteraktualisierung"
+    "actions.touchbar-info.weather-refresh.subtitle": "Automatische Wetter-Aktualisierungshäufigkeit",
+    "actions.touchbar-info.bg-image.label": "Benutzerdefiniertes Touch Bar Hintergrundbild",
+    "actions.touchbar-info.bg-image.subtitle": "Benutzerdefiniertes Hintergrundbild (PNG/JPG) auswählen",
+    "actions.touchbar-info.bg-image.choose": "Bild auswählen...",
+    "actions.touchbar-info.bg-image.clear": "Löschen",
+    "actions.touchbar-info.bg-image.dialog-title": "Touch Bar Hintergrundbild auswählen",
+    "actions.touchbar-info.bg-image.open": "Öffnen",
+    "actions.touchbar-info.bg-image.cancel": "Abbrechen"
 }
