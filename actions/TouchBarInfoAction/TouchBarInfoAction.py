@@ -78,7 +78,13 @@ class TouchBarInfoAction(ActionBase):
         # Available font families
         self.font_families = ["DejaVu Sans", "Liberation Sans", "Ubuntu", "Noto Sans", "Monospace", "Serif", "Sans"]
 
-        # 4. Date Font Family
+        # --- Date Font Expander Dropdown ---
+        self.date_expander = Adw.ExpanderRow(
+            title=self.get_locale_text("actions.touchbar-info.date-settings.label", "Date Font Customization"),
+            subtitle=self.get_locale_text("actions.touchbar-info.date-settings.subtitle", "Font family, size, and color for top date text")
+        )
+
+        # Date Font Family
         self.date_font_family_model = Gtk.StringList()
         self.date_font_family_combo = Adw.ComboRow(
             model=self.date_font_family_model,
@@ -88,12 +94,12 @@ class TouchBarInfoAction(ActionBase):
         for fam in self.font_families:
             self.date_font_family_model.append(fam)
 
-        # 5. Date Font Size
+        # Date Font Size
         self.date_font_size_spin = Adw.SpinRow.new_with_range(10, 80, 1)
         self.date_font_size_spin.set_title(self.get_locale_text("actions.touchbar-info.date-font-size.label", "Date Font Size"))
         self.date_font_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.date-font-size.subtitle", "Font size in pixels for the date line"))
 
-        # 6. Date Font Color
+        # Date Font Color
         self.date_font_color_row = Adw.ActionRow(
             title=self.get_locale_text("actions.touchbar-info.date-font-color.label", "Date Font Color"),
             subtitle=self.get_locale_text("actions.touchbar-info.date-font-color.subtitle", "Text color for the top date line")
@@ -102,7 +108,17 @@ class TouchBarInfoAction(ActionBase):
         self.date_font_color_button.set_valign(Gtk.Align.CENTER)
         self.date_font_color_row.add_suffix(self.date_font_color_button)
 
-        # 7. Time Font Family
+        self.date_expander.add_row(self.date_font_family_combo)
+        self.date_expander.add_row(self.date_font_size_spin)
+        self.date_expander.add_row(self.date_font_color_row)
+
+        # --- Time Font Expander Dropdown ---
+        self.time_expander = Adw.ExpanderRow(
+            title=self.get_locale_text("actions.touchbar-info.time-settings.label", "Time Font Customization"),
+            subtitle=self.get_locale_text("actions.touchbar-info.time-settings.subtitle", "Font family, size, and color for bottom time text")
+        )
+
+        # Time Font Family
         self.time_font_family_model = Gtk.StringList()
         self.time_font_family_combo = Adw.ComboRow(
             model=self.time_font_family_model,
@@ -112,12 +128,12 @@ class TouchBarInfoAction(ActionBase):
         for fam in self.font_families:
             self.time_font_family_model.append(fam)
 
-        # 8. Time Font Size
+        # Time Font Size
         self.time_font_size_spin = Adw.SpinRow.new_with_range(10, 100, 1)
         self.time_font_size_spin.set_title(self.get_locale_text("actions.touchbar-info.time-font-size.label", "Time Font Size"))
         self.time_font_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.time-font-size.subtitle", "Font size in pixels for the time line"))
 
-        # 9. Time Font Color
+        # Time Font Color
         self.time_font_color_row = Adw.ActionRow(
             title=self.get_locale_text("actions.touchbar-info.time-font-color.label", "Time Font Color"),
             subtitle=self.get_locale_text("actions.touchbar-info.time-font-color.subtitle", "Text color for the bottom time line")
@@ -125,6 +141,10 @@ class TouchBarInfoAction(ActionBase):
         self.time_font_color_button = Gtk.ColorButton()
         self.time_font_color_button.set_valign(Gtk.Align.CENTER)
         self.time_font_color_row.add_suffix(self.time_font_color_button)
+
+        self.time_expander.add_row(self.time_font_family_combo)
+        self.time_expander.add_row(self.time_font_size_spin)
+        self.time_expander.add_row(self.time_font_color_row)
 
         self.load_config_defaults()
 
@@ -145,12 +165,8 @@ class TouchBarInfoAction(ActionBase):
             self.use_24h_switch,
             self.show_seconds_switch,
             self.date_format_combo,
-            self.date_font_family_combo,
-            self.date_font_size_spin,
-            self.date_font_color_row,
-            self.time_font_family_combo,
-            self.time_font_size_spin,
-            self.time_font_color_row
+            self.date_expander,
+            self.time_expander
         ]
 
     def load_config_defaults(self):
