@@ -45,29 +45,10 @@ class TouchBarInfoAction(ActionBase):
         self.update_display()
 
     def get_config_rows(self) -> "list[Adw.PreferencesRow]":
-        # --- 1. Clock & Date Options Dropdown ---
-        self.clock_expander = Adw.ExpanderRow(
-            title=self.get_locale_text("actions.touchbar-info.clock-settings.label", "Clock & Date Options"),
-            subtitle=self.get_locale_text("actions.touchbar-info.clock-settings.subtitle", "Format choices, 24-hour mode, and seconds toggle")
-        )
+        # Available font families
+        self.font_families = ["DejaVu Sans", "Liberation Sans", "Ubuntu", "Noto Sans", "Monospace", "Serif", "Sans"]
 
-        self.use_24h_switch = Adw.SwitchRow(
-            title=self.get_locale_text("actions.touchbar-info.use-24h.label", "Use 24-Hour Clock"),
-            subtitle=self.get_locale_text("actions.touchbar-info.use-24h.subtitle", "Switch between 12-hour (AM/PM) and 24-hour time format")
-        )
-
-        self.show_seconds_switch = Adw.SwitchRow(
-            title=self.get_locale_text("actions.touchbar-info.show-seconds.label", "Show Seconds"),
-            subtitle=self.get_locale_text("actions.touchbar-info.show-seconds.subtitle", "Include seconds in the displayed time")
-        )
-
-        self.date_format_model = Gtk.StringList()
-        self.date_format_combo = Adw.ComboRow(
-            model=self.date_format_model,
-            title=self.get_locale_text("actions.touchbar-info.date-format.label", "Date Format"),
-            subtitle=self.get_locale_text("actions.touchbar-info.date-format.subtitle", "Format style for top date line")
-        )
-
+        # Date Format Options
         self.date_format_options = [
             ("%b. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.mon-day-year", "Mon. Day, Year (Aug. 11, 2026)")),
             ("%a. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.dow-day-year", "DayOfWeek. Day, Year (Tue. 11, 2026)")),
@@ -75,30 +56,97 @@ class TouchBarInfoAction(ActionBase):
             ("%Y-%b-%d", self.get_locale_text("actions.touchbar-info.date-format.year-mon-day", "Year-Mon-Day (2026-Aug-11)"))
         ]
 
-        for _, label in self.date_format_options:
-            self.date_format_model.append(label)
-
-        self.clock_expander.add_row(self.use_24h_switch)
-        self.clock_expander.add_row(self.show_seconds_switch)
-        self.clock_expander.add_row(self.date_format_combo)
-
-        # Widget choices
-        self.full_widget_options = [
-            self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
-            self.get_locale_text("actions.touchbar-info.widget.stacked", "Stacked Date & Time")
-        ]
-        self.split_widget_options = [
-            self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
-            self.get_locale_text("actions.touchbar-info.widget.date-only", "Date Only"),
-            self.get_locale_text("actions.touchbar-info.widget.time-only", "Time Only")
-        ]
+        # Mode Options
         self.mode_options = [
             self.get_locale_text("actions.touchbar-info.mode.full", "1 Widget (Full Section — 100px)"),
             self.get_locale_text("actions.touchbar-info.mode.split", "2 Widgets (Split Top/Bottom — 50px each)")
         ]
 
-        # --- Helper to create Section Expander ---
-        def create_section_expander(title_key, default_title, subtitle_key, default_sub):
+        # Widget choices (removed "Only")
+        self.full_widget_options = [
+            self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
+            self.get_locale_text("actions.touchbar-info.widget.stacked", "Stacked Date & Time"),
+            self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
+            self.get_locale_text("actions.touchbar-info.widget.time", "Time")
+        ]
+        self.split_widget_options = [
+            self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
+            self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
+            self.get_locale_text("actions.touchbar-info.widget.time", "Time")
+        ]
+
+        # Helper to create Date Controls Sub-group
+        def create_date_controls():
+            fmt_model = Gtk.StringList()
+            for _, label in self.date_format_options: fmt_model.append(label)
+            fmt_combo = Adw.ComboRow(
+                model=fmt_model,
+                title=self.get_locale_text("actions.touchbar-info.date-format.label", "Date Format"),
+                subtitle=self.get_locale_text("actions.touchbar-info.date-format.subtitle", "Format style for date text")
+            )
+
+            fam_model = Gtk.StringList()
+            for fam in self.font_families: fam_model.append(fam)
+            fam_combo = Adw.ComboRow(
+                model=fam_model,
+                title=self.get_locale_text("actions.touchbar-info.date-font-family.label", "Date Font Family"),
+                subtitle=self.get_locale_text("actions.touchbar-info.date-font-family.subtitle", "Select font typeface for date text")
+            )
+
+            size_spin = Adw.SpinRow.new_with_range(10, 80, 1)
+            size_spin.set_title(self.get_locale_text("actions.touchbar-info.date-font-size.label", "Date Font Size"))
+            size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.date-font-size.subtitle", "Font size in pixels for date text"))
+
+            color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.date-font-color.label", "Date Font Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.date-font-color.subtitle", "Text color for date text")
+            )
+            color_btn = Gtk.ColorButton()
+            color_btn.set_valign(Gtk.Align.CENTER)
+            color_row.add_suffix(color_btn)
+
+            return fmt_combo, fam_combo, size_spin, color_row, color_btn
+
+        # Helper to create Time Controls Sub-group
+        def create_time_controls():
+            sw_24h = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.use-24h.label", "Use 24-Hour Clock"),
+                subtitle=self.get_locale_text("actions.touchbar-info.use-24h.subtitle", "Switch between 12-hour (AM/PM) and 24-hour time format")
+            )
+
+            sw_sec = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.show-seconds.label", "Show Seconds"),
+                subtitle=self.get_locale_text("actions.touchbar-info.show-seconds.subtitle", "Include seconds in the displayed time")
+            )
+
+            fam_model = Gtk.StringList()
+            for fam in self.font_families: fam_model.append(fam)
+            fam_combo = Adw.ComboRow(
+                model=fam_model,
+                title=self.get_locale_text("actions.touchbar-info.time-font-family.label", "Time Font Family"),
+                subtitle=self.get_locale_text("actions.touchbar-info.time-font-family.subtitle", "Select font typeface for time text")
+            )
+
+            size_spin = Adw.SpinRow.new_with_range(10, 100, 1)
+            size_spin.set_title(self.get_locale_text("actions.touchbar-info.time-font-size.label", "Time Font Size"))
+            size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.time-font-size.subtitle", "Font size in pixels for time text"))
+
+            color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.time-font-color.label", "Time Font Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.time-font-color.subtitle", "Text color for time text")
+            )
+            color_btn = Gtk.ColorButton()
+            color_btn.set_valign(Gtk.Align.CENTER)
+            color_row.add_suffix(color_btn)
+
+            return sw_24h, sw_sec, fam_combo, size_spin, color_row, color_btn
+
+        # Shared Controls instances
+        self.date_fmt_combo, self.date_fam_combo, self.date_size_spin, self.date_color_row, self.date_color_btn = create_date_controls()
+        self.time_24h_sw, self.time_sec_sw, self.time_fam_combo, self.time_size_spin, self.time_color_row, self.time_color_btn = create_time_controls()
+
+        # Helper to create Section Expander with embedded in-line controls
+        def create_section_expander(title_key, default_title, subtitle_key, default_sub, prefix_key):
             expander = Adw.ExpanderRow(
                 title=self.get_locale_text(title_key, default_title),
                 subtitle=self.get_locale_text(subtitle_key, default_sub)
@@ -143,97 +191,84 @@ class TouchBarInfoAction(ActionBase):
 
             return expander, mode_combo, full_combo, top_combo, bot_combo
 
-        # Section A (Left)
+        # Create 3 Section Expanders
         self.sec_a_expander, self.sec_a_mode_combo, self.sec_a_full_combo, self.sec_a_top_combo, self.sec_a_bot_combo = create_section_expander(
             "actions.touchbar-info.section-a.label", "Section A (Left — 200px)",
-            "actions.touchbar-info.section-a.subtitle", "Configure widgets for the left Touch Bar section"
+            "actions.touchbar-info.section-a.subtitle", "Configure widgets for the left Touch Bar section", "sec_a"
         )
 
-        # Section B (Center)
         self.sec_b_expander, self.sec_b_mode_combo, self.sec_b_full_combo, self.sec_b_top_combo, self.sec_b_bot_combo = create_section_expander(
             "actions.touchbar-info.section-b.label", "Section B (Center — 400px)",
-            "actions.touchbar-info.section-b.subtitle", "Configure widgets for the center Touch Bar section"
+            "actions.touchbar-info.section-b.subtitle", "Configure widgets for the center Touch Bar section", "sec_b"
         )
 
-        # Section C (Right)
         self.sec_c_expander, self.sec_c_mode_combo, self.sec_c_full_combo, self.sec_c_top_combo, self.sec_c_bot_combo = create_section_expander(
             "actions.touchbar-info.section-c.label", "Section C (Right — 200px)",
-            "actions.touchbar-info.section-c.subtitle", "Configure widgets for the right Touch Bar section"
+            "actions.touchbar-info.section-c.subtitle", "Configure widgets for the right Touch Bar section", "sec_c"
         )
 
-        # Available font families
-        self.font_families = ["DejaVu Sans", "Liberation Sans", "Ubuntu", "Noto Sans", "Monospace", "Serif", "Sans"]
-
-        # --- Date Font Expander Dropdown ---
+        # Date & Time Settings Expander Dropdowns (Embedded under Sections)
         self.date_font_expander = Adw.ExpanderRow(
-            title=self.get_locale_text("actions.touchbar-info.date-settings.label", "Date Font Customization"),
-            subtitle=self.get_locale_text("actions.touchbar-info.date-settings.subtitle", "Font family, size, and color for date text")
+            title=self.get_locale_text("actions.touchbar-info.date-settings.label", "Date Options & Font Customization"),
+            subtitle=self.get_locale_text("actions.touchbar-info.date-settings.subtitle", "Date format, font family, size, and color")
         )
+        self.date_font_expander.add_row(self.date_fmt_combo)
+        self.date_font_expander.add_row(self.date_fam_combo)
+        self.date_font_expander.add_row(self.date_size_spin)
+        self.date_font_expander.add_row(self.date_color_row)
 
-        self.date_font_family_model = Gtk.StringList()
-        self.date_font_family_combo = Adw.ComboRow(
-            model=self.date_font_family_model,
-            title=self.get_locale_text("actions.touchbar-info.date-font-family.label", "Date Font Family"),
-            subtitle=self.get_locale_text("actions.touchbar-info.date-font-family.subtitle", "Select font typeface for date text")
-        )
-        for fam in self.font_families: self.date_font_family_model.append(fam)
-
-        self.date_font_size_spin = Adw.SpinRow.new_with_range(10, 80, 1)
-        self.date_font_size_spin.set_title(self.get_locale_text("actions.touchbar-info.date-font-size.label", "Date Font Size"))
-        self.date_font_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.date-font-size.subtitle", "Font size in pixels for date text"))
-
-        self.date_font_color_row = Adw.ActionRow(
-            title=self.get_locale_text("actions.touchbar-info.date-font-color.label", "Date Font Color"),
-            subtitle=self.get_locale_text("actions.touchbar-info.date-font-color.subtitle", "Text color for date text")
-        )
-        self.date_font_color_button = Gtk.ColorButton()
-        self.date_font_color_button.set_valign(Gtk.Align.CENTER)
-        self.date_font_color_row.add_suffix(self.date_font_color_button)
-
-        self.date_font_expander.add_row(self.date_font_family_combo)
-        self.date_font_expander.add_row(self.date_font_size_spin)
-        self.date_font_expander.add_row(self.date_font_color_row)
-
-        # --- Time Font Expander Dropdown ---
         self.time_font_expander = Adw.ExpanderRow(
-            title=self.get_locale_text("actions.touchbar-info.time-settings.label", "Time Font Customization"),
-            subtitle=self.get_locale_text("actions.touchbar-info.time-settings.subtitle", "Font family, size, and color for time text")
+            title=self.get_locale_text("actions.touchbar-info.time-settings.label", "Time Options & Font Customization"),
+            subtitle=self.get_locale_text("actions.touchbar-info.time-settings.subtitle", "Clock format, 24h mode, seconds, font family, size, and color")
         )
+        self.time_font_expander.add_row(self.time_24h_sw)
+        self.time_font_expander.add_row(self.time_sec_sw)
+        self.time_font_expander.add_row(self.time_fam_combo)
+        self.time_font_expander.add_row(self.time_size_spin)
+        self.time_font_expander.add_row(self.time_color_row)
 
-        self.time_font_family_model = Gtk.StringList()
-        self.time_font_family_combo = Adw.ComboRow(
-            model=self.time_font_family_model,
-            title=self.get_locale_text("actions.touchbar-info.time-font-family.label", "Time Font Family"),
-            subtitle=self.get_locale_text("actions.touchbar-info.time-font-family.subtitle", "Select font typeface for time text")
-        )
-        for fam in self.font_families: self.time_font_family_model.append(fam)
-
-        self.time_font_size_spin = Adw.SpinRow.new_with_range(10, 100, 1)
-        self.time_font_size_spin.set_title(self.get_locale_text("actions.touchbar-info.time-font-size.label", "Time Font Size"))
-        self.time_font_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.time-font-size.subtitle", "Font size in pixels for time text"))
-
-        self.time_font_color_row = Adw.ActionRow(
-            title=self.get_locale_text("actions.touchbar-info.time-font-color.label", "Time Font Color"),
-            subtitle=self.get_locale_text("actions.touchbar-info.time-font-color.subtitle", "Text color for time text")
-        )
-        self.time_font_color_button = Gtk.ColorButton()
-        self.time_font_color_button.set_valign(Gtk.Align.CENTER)
-        self.time_font_color_row.add_suffix(self.time_font_color_button)
-
-        self.time_font_expander.add_row(self.time_font_family_combo)
-        self.time_font_expander.add_row(self.time_font_size_spin)
-        self.time_font_expander.add_row(self.time_font_color_row)
+        # Append inline settings rows to Section Expanders
+        self.sec_a_expander.add_row(self.date_font_expander)
+        self.sec_a_expander.add_row(self.time_font_expander)
 
         self.load_config_defaults()
 
-        # Connect Visibility Toggles for Section Modes
+        # Connect Visibility Toggles for Section Modes and In-Line Settings
+        def update_section_visibility(mode_combo, full_combo, top_combo, bot_combo, key_prefix):
+            is_full = mode_combo.get_selected() == 0
+            full_combo.set_visible(is_full)
+            top_combo.set_visible(not is_full)
+            bot_combo.set_visible(not is_full)
+
+            # Update overall Date & Time settings expander visibility
+            needs_date = False
+            needs_time = False
+
+            for mode_c, full_c, top_c, bot_c in [
+                (self.sec_a_mode_combo, self.sec_a_full_combo, self.sec_a_top_combo, self.sec_a_bot_combo),
+                (self.sec_b_mode_combo, self.sec_b_full_combo, self.sec_b_top_combo, self.sec_b_bot_combo),
+                (self.sec_c_mode_combo, self.sec_c_full_combo, self.sec_c_top_combo, self.sec_c_bot_combo)
+            ]:
+                if mode_c.get_selected() == 0:
+                    sel = full_c.get_selected()
+                    if sel == 1: # Stacked Date & Time
+                        needs_date = True; needs_time = True
+                    elif sel == 2: # Date
+                        needs_date = True
+                    elif sel == 3: # Time
+                        needs_time = True
+                else:
+                    top_s = top_c.get_selected()
+                    bot_s = bot_c.get_selected()
+                    if top_s == 1 or bot_s == 1: needs_date = True
+                    if top_s == 2 or bot_s == 2: needs_time = True
+
+            self.date_font_expander.set_visible(needs_date)
+            self.time_font_expander.set_visible(needs_time)
+
         def setup_mode_listener(mode_combo, full_combo, top_combo, bot_combo, key_prefix):
             def on_mode_changed(combo, *args):
-                is_full = combo.get_selected() == 0
-                full_combo.set_visible(is_full)
-                top_combo.set_visible(not is_full)
-                bot_combo.set_visible(not is_full)
-
+                update_section_visibility(mode_combo, full_combo, top_combo, bot_combo, key_prefix)
                 settings = self.get_settings()
                 if settings is not None:
                     settings[f"{key_prefix}_mode"] = combo.get_selected()
@@ -242,20 +277,17 @@ class TouchBarInfoAction(ActionBase):
                     self.update_display()
 
             mode_combo.connect("notify::selected", on_mode_changed)
-            on_mode_changed(mode_combo)
 
         setup_mode_listener(self.sec_a_mode_combo, self.sec_a_full_combo, self.sec_a_top_combo, self.sec_a_bot_combo, "sec_a")
         setup_mode_listener(self.sec_b_mode_combo, self.sec_b_full_combo, self.sec_b_top_combo, self.sec_b_bot_combo, "sec_b")
         setup_mode_listener(self.sec_c_mode_combo, self.sec_c_full_combo, self.sec_c_top_combo, self.sec_c_bot_combo, "sec_c")
 
-        # General Option Signals
-        self.use_24h_switch.connect("notify::active", self.on_use_24h_toggled)
-        self.show_seconds_switch.connect("notify::active", self.on_show_seconds_toggled)
-        self.date_format_combo.connect("notify::selected", self.on_date_format_changed)
-        
         # Section Widget Choice Signals
         def bind_combo(combo, setting_name):
-            combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed(setting_name, c.get_selected()))
+            def on_combo_change(c, *a):
+                update_section_visibility(self.sec_a_mode_combo, self.sec_a_full_combo, self.sec_a_top_combo, self.sec_a_bot_combo, "sec_a")
+                self.on_setting_combo_changed(setting_name, c.get_selected())
+            combo.connect("notify::selected", on_combo_change)
 
         bind_combo(self.sec_a_full_combo, "sec_a_full_widget")
         bind_combo(self.sec_a_top_combo, "sec_a_top_widget")
@@ -269,22 +301,27 @@ class TouchBarInfoAction(ActionBase):
         bind_combo(self.sec_c_top_combo, "sec_c_top_widget")
         bind_combo(self.sec_c_bot_combo, "sec_c_bottom_widget")
 
-        # Font Signals
-        self.date_font_family_combo.connect("notify::selected", self.on_date_font_family_changed)
-        self.date_font_size_spin.connect("notify::value", self.on_date_font_size_changed)
-        self.date_font_color_button.connect("color-set", self.on_date_font_color_set)
+        # General Option Signals
+        self.time_24h_sw.connect("notify::active", self.on_use_24h_toggled)
+        self.time_sec_sw.connect("notify::active", self.on_show_seconds_toggled)
+        self.date_fmt_combo.connect("notify::selected", self.on_date_format_changed)
 
-        self.time_font_family_combo.connect("notify::selected", self.on_time_font_family_changed)
-        self.time_font_size_spin.connect("notify::value", self.on_time_font_size_changed)
-        self.time_font_color_button.connect("color-set", self.on_time_font_color_set)
+        # Font Signals
+        self.date_fam_combo.connect("notify::selected", self.on_date_font_family_changed)
+        self.date_size_spin.connect("notify::value", self.on_date_font_size_changed)
+        self.date_color_btn.connect("color-set", self.on_date_font_color_set)
+
+        self.time_fam_combo.connect("notify::selected", self.on_time_font_family_changed)
+        self.time_size_spin.connect("notify::value", self.on_time_font_size_changed)
+        self.time_color_btn.connect("color-set", self.on_time_font_color_set)
+
+        # Initial visibility update
+        update_section_visibility(self.sec_a_mode_combo, self.sec_a_full_combo, self.sec_a_top_combo, self.sec_a_bot_combo, "sec_a")
 
         return [
-            self.clock_expander,
             self.sec_a_expander,
             self.sec_b_expander,
-            self.sec_c_expander,
-            self.date_font_expander,
-            self.time_font_expander
+            self.sec_c_expander
         ]
 
     def load_config_defaults(self):
@@ -296,7 +333,7 @@ class TouchBarInfoAction(ActionBase):
         show_seconds = settings.setdefault("show_seconds", False)
         date_format_idx = settings.setdefault("date_format_idx", 0)
 
-        # Section Defaults: B default is Full Stacked Date & Time (or Split Date/Time)
+        # Section Defaults: B default is Full Stacked Date & Time
         sec_a_mode = settings.setdefault("sec_a_mode", 0)
         sec_a_full = settings.setdefault("sec_a_full_widget", 0)
         sec_a_top = settings.setdefault("sec_a_top_widget", 0)
@@ -320,10 +357,10 @@ class TouchBarInfoAction(ActionBase):
         time_font_size = settings.setdefault("time_font_size", 45)
         time_font_color = settings.setdefault("time_font_color", "#FFFFFFFF")
 
-        self.use_24h_switch.set_active(use_24h)
-        self.show_seconds_switch.set_active(show_seconds)
+        self.time_24h_sw.set_active(use_24h)
+        self.time_sec_sw.set_active(show_seconds)
         if 0 <= date_format_idx < len(self.date_format_options):
-            self.date_format_combo.set_selected(date_format_idx)
+            self.date_fmt_combo.set_selected(date_format_idx)
 
         # Apply Section selections
         self.sec_a_mode_combo.set_selected(sec_a_mode)
@@ -342,14 +379,14 @@ class TouchBarInfoAction(ActionBase):
         self.sec_c_bot_combo.set_selected(sec_c_bot)
 
         if 0 <= date_font_family_idx < len(self.font_families):
-            self.date_font_family_combo.set_selected(date_font_family_idx)
-        self.date_font_size_spin.set_value(date_font_size)
-        self.set_color_button_rgba(self.date_font_color_button, date_font_color)
+            self.date_fam_combo.set_selected(date_font_family_idx)
+        self.date_size_spin.set_value(date_font_size)
+        self.set_color_button_rgba(self.date_color_btn, date_font_color)
 
         if 0 <= time_font_family_idx < len(self.font_families):
-            self.time_font_family_combo.set_selected(time_font_family_idx)
-        self.time_font_size_spin.set_value(time_font_size)
-        self.set_color_button_rgba(self.time_font_color_button, time_font_color)
+            self.time_fam_combo.set_selected(time_font_family_idx)
+        self.time_size_spin.set_value(time_font_size)
+        self.set_color_button_rgba(self.time_color_btn, time_font_color)
 
     def set_color_button_rgba(self, button: Gtk.ColorButton, hex_str: str):
         try:
@@ -608,17 +645,21 @@ class TouchBarInfoAction(ActionBase):
             if mode == 0: # 1 Widget (Full Section)
                 if full_choice == 1: # Stacked Date & Time
                     self.draw_stacked(draw, full_box, date_str, time_str, font_date, font_time, date_color, time_color)
+                elif full_choice == 2: # Date
+                    self.draw_single(draw, full_box, date_str, font_date, date_color)
+                elif full_choice == 3: # Time
+                    self.draw_single(draw, full_box, time_str, font_time, time_color)
             else: # 2 Widgets (Split Top / Bottom)
                 # Top Sub-slot
-                if top_choice == 1: # Date Only
+                if top_choice == 1: # Date
                     self.draw_single(draw, top_box, date_str, font_date, date_color)
-                elif top_choice == 2: # Time Only
+                elif top_choice == 2: # Time
                     self.draw_single(draw, top_box, time_str, font_time, time_color)
 
                 # Bottom Sub-slot
-                if bot_choice == 1: # Date Only
+                if bot_choice == 1: # Date
                     self.draw_single(draw, bot_box, date_str, font_date, date_color)
-                elif bot_choice == 2: # Time Only
+                elif bot_choice == 2: # Time
                     self.draw_single(draw, bot_box, time_str, font_time, time_color)
 
         # Render Section A
