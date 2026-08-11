@@ -134,7 +134,7 @@ class TouchBarInfoAction(ActionBase):
 
     def get_system_disk_mounts(self, saved_path: str = None) -> list[tuple[str, str]]:
         disks = []
-        seen = set()
+        seen_paths = set()
 
         IGNORED_PREFIXES = (
             "/boot", "/run", "/sys", "/proc", "/dev",
@@ -142,107 +142,100 @@ class TouchBarInfoAction(ActionBase):
             "/lib", "/bin", "/sbin", "/snap", "/flatpak",
             "/.flatpak-info"
         )
-        VALID_FSTYPES = {"ext4", "ext3", "ext2", "btrfs", "xfs", "zfs", "ntfs", "vfat", "fat", "exfat", "fuseblk"}
 
-        def is_valid_user_mount(mount: str) -> bool:
-            if not mount or mount in seen:
-                return False
-            if mount == "/":
-                return True
-            if mount.startswith(("/mnt/", "/media/", "/run/media/", "/home")):
-                return True
-            if mount.startswith(IGNORED_PREFIXES):
-                return False
-            return True
-
-        def add_mount(mount: str, dev: str = "", label: str = ""):
-            if not is_valid_user_mount(mount):
+        def add_disk(mount_path: str, label: str = "", size: str = "", dev_name: str = ""):
+            if not mount_path:
                 return
-            seen.add(mount)
-            dev_node = os.path.basename(dev) if dev else ""
-            if label:
-                clean_name = label
-            elif mount == "/":
-                clean_name = "System Root"
-            elif mount.startswith("/home"):
-                parts = mount.split("/")
-                user_name = parts[2] if len(parts) > 2 and parts[2] else "Home"
-                clean_name = f"Home ({user_name})" if user_name != "Home" else "Home"
-            else:
-                base = mount.lstrip("/").replace("mnt/", "").replace("media/", "").replace("run/media/", "")
-                clean_name = base.capitalize() if base else mount
-            
-            if dev_node:
-                disp_name = f"{clean_name} — {mount} ({dev_node})"
-            else:
-                disp_name = f"{clean_name} — {mount}"
-            disks.append((mount, disp_name))
-
-        # Strategy 1: Host /proc/mounts query via flatpak-spawn (Instant & 100% reliable inside Flatpak)
-        lines = []
-        try:
-            p = subprocess.run(["flatpak-spawn", "--host", "cat", "/proc/mounts"], capture_output=True, text=True, timeout=2)
-            if p.stdout and p.returncode == 0:
-                lines = p.stdout.splitlines()
-        except Exception:
-            pass
-
-        # Strategy 2: Direct /proc/mounts reading (When running natively on host)
-        if not lines and os.path.exists("/proc/mounts"):
             try:
-                with open("/proc/mounts", "r") as f:
-                    lines = f.readlines()
+                norm_path = os.path.realpath(mount_path).rstrip("/") or "/"
+            except Exception:
+                norm_path = mount_path
+            
+            if norm_path in seen_paths:
+                return
+            
+            if norm_path != "/" and norm_path.startswith(IGNORED_PREFIXES):
+                return
+
+            seen_paths.add(norm_path)
+
+            if label and label.strip():
+                display_title = label.strip()
+            elif norm_path == "/":
+                display_title = "System Root"
+            elif norm_path.startswith("/home"):
+                parts = norm_path.split("/")
+                user_name = parts[2] if len(parts) > 2 and parts[2] else "User"
+                display_title = f"Home ({user_name})" if user_name != "Home" else "Home"
+            else:
+                base = norm_path.lstrip("/").replace("mnt/", "").replace("media/", "").replace("run/media/", "")
+                display_title = base.capitalize() if base else norm_path
+
+            size_str = f" ({size})" if size else ""
+            dev_str = f" [{dev_name}]" if dev_name else ""
+            
+            disp_name = f"{display_title}{size_str} — {norm_path}{dev_str}"
+            disks.append((norm_path, disp_name))
+
+        # 1. Primary Strategy: lsblk (Host via flatpak-spawn or Direct)
+        lsblk_cmds = [
+            ["flatpak-spawn", "--host", "lsblk", "-J", "-o", "NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS"],
+            ["lsblk", "-J", "-o", "NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS"]
+        ]
+
+        for cmd in lsblk_cmds:
+            try:
+                p = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+                if p.stdout and p.stdout.strip().startswith("{"):
+                    data = json.loads(p.stdout)
+                    def parse_devs(dev_list):
+                        for item in dev_list:
+                            dev_name = item.get("name", "")
+                            size = item.get("size", "")
+                            label = item.get("label", "")
+                            fstype = item.get("fstype", "")
+                            raw_mounts = list(item.get("mountpoints") or [])
+                            if item.get("mountpoint"):
+                                raw_mounts.append(item.get("mountpoint"))
+                            
+                            for m in raw_mounts:
+                                if m and fstype not in ["swap", "squashfs", "iso9660"]:
+                                    add_disk(m, label=label, size=size, dev_name=dev_name)
+                            
+                            if "children" in item:
+                                parse_devs(item["children"])
+
+                    parse_devs(data.get("blockdevices", []))
+                    if disks:
+                        break
             except Exception:
                 pass
 
-        if lines:
-            for line in lines:
-                parts = line.split()
-                if len(parts) >= 3:
-                    dev, mount, fstype = parts[0], parts[1], parts[2]
-                    if dev.startswith("/dev/") or fstype in VALID_FSTYPES:
-                        add_mount(mount, dev)
-
-        # Strategy 3: Host lsblk / Direct lsblk JSON query
+        # 2. Fallback Strategy: df -h (Host or Direct)
         if not disks:
-            lsblk_cmds = [
-                ["flatpak-spawn", "--host", "lsblk", "-J", "-o", "NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS"],
-                ["lsblk", "-J", "-o", "NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS"]
+            df_cmds = [
+                ["flatpak-spawn", "--host", "df", "-hP"],
+                ["df", "-hP"]
             ]
-            for cmd in lsblk_cmds:
+            for cmd in df_cmds:
                 try:
                     p = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
-                    if p.stdout and p.stdout.strip().startswith("{"):
-                        data = json.loads(p.stdout)
-                        def parse_devs(dev_list):
-                            for item in dev_list:
-                                dev_name = item.get("name", "")
-                                label = item.get("label", "")
-                                fstype = item.get("fstype", "")
-                                raw_mounts = list(item.get("mountpoints") or [])
-                                if item.get("mountpoint"): raw_mounts.append(item.get("mountpoint"))
-                                for m in raw_mounts:
-                                    if fstype in VALID_FSTYPES or not fstype:
-                                        add_mount(m, dev_name, label)
-                                if "children" in item:
-                                    parse_devs(item["children"])
-                        parse_devs(data.get("blockdevices", []))
+                    if p.stdout:
+                        lines = p.stdout.strip().splitlines()[1:]
+                        for line in lines:
+                            parts = line.split()
+                            if len(parts) >= 6:
+                                dev, size, mount = parts[0], parts[1], parts[5]
+                                if dev.startswith("/dev/"):
+                                    add_disk(mount, size=size, dev_name=os.path.basename(dev))
                         if disks:
                             break
                 except Exception:
                     pass
 
-        # Strategy 4: psutil fallback
-        try:
-            for p in psutil.disk_partitions(all=True):
-                if p.fstype in VALID_FSTYPES or p.device.startswith("/dev/"):
-                    add_mount(p.mountpoint, p.device)
-        except Exception:
-            pass
-
-        # Strategy 5: Guaranteed saved path inclusion
-        if saved_path and saved_path not in seen and os.path.exists(saved_path):
-            add_mount(saved_path, "", "")
+        # 3. Add saved path if missing
+        if saved_path and os.path.exists(saved_path):
+            add_disk(saved_path)
 
         if not disks:
             disks = [("/", "System Root — /")]
