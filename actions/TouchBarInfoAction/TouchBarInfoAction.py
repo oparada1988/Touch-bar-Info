@@ -724,15 +724,6 @@ class TouchBarInfoAction(ActionBase):
                 subtitle=self.get_locale_text("actions.touchbar-info.disk-select.subtitle", "Select system disk partition to monitor")
             )
 
-            browse_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.disk-browse.label", "Browse Custom Mount Directory"),
-                subtitle=self.get_locale_text("actions.touchbar-info.disk-browse.subtitle", "Visually choose any partition or folder path")
-            )
-            browse_btn = Gtk.Button(label=self.get_locale_text("actions.touchbar-info.disk-browse.choose", "Browse..."))
-            browse_btn.set_valign(Gtk.Align.CENTER)
-            browse_btn.connect("clicked", self.on_browse_disk_mount_clicked)
-            browse_row.add_suffix(browse_btn)
-
             mode_model = Gtk.StringList()
             for opt in self.disk_mode_options: mode_model.append(opt)
             mode_combo = Adw.ComboRow(
@@ -743,8 +734,7 @@ class TouchBarInfoAction(ActionBase):
 
             self.all_disk_mount_combos.append(mount_combo)
             self.all_disk_mode_combos.append(mode_combo)
-            self.all_disk_browse_rows.append(browse_row)
-            return {"mount_combo": mount_combo, "mode_combo": mode_combo, "browse_row": browse_row, "all_rows": [mount_combo, browse_row, mode_combo]}
+            return {"mount_combo": mount_combo, "mode_combo": mode_combo, "all_rows": [mount_combo, mode_combo]}
 
         # Helper to create Date controls
         def build_date_controls():
@@ -1017,28 +1007,7 @@ class TouchBarInfoAction(ActionBase):
             self.all_ram_mode_combos.append(mode_combo)
             return {"mode_combo": mode_combo, "all_rows": [mode_combo]}
 
-        # Helper to create Disk controls (Option 1: Native Mount Directory Chooser)
-        def build_disk_controls():
-            browse_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.disk-browse.label", "System Disk Mount Directory"),
-                subtitle=self.get_locale_text("actions.touchbar-info.disk-browse.subtitle", "Visually choose any partition or folder path to monitor")
-            )
-            browse_btn = Gtk.Button(label=self.get_locale_text("actions.touchbar-info.disk-browse.choose", "Browse..."))
-            browse_btn.set_valign(Gtk.Align.CENTER)
-            browse_btn.connect("clicked", self.on_browse_disk_mount_clicked)
-            browse_row.add_suffix(browse_btn)
 
-            mode_model = Gtk.StringList()
-            for opt in self.disk_mode_options: mode_model.append(opt)
-            mode_combo = Adw.ComboRow(
-                model=mode_model,
-                title=self.get_locale_text("actions.touchbar-info.disk-mode.label", "Disk Display Mode"),
-                subtitle=self.get_locale_text("actions.touchbar-info.disk-mode.subtitle", "Choose percentage, GB used/free, or mini graph")
-            )
-
-            self.all_disk_mode_combos.append(mode_combo)
-            self.all_disk_browse_rows.append(browse_row)
-            return {"browse_row": browse_row, "mode_combo": mode_combo, "all_rows": [browse_row, mode_combo]}
 
         # Helper to create Section Expander with clean subsection expanders for split mode
         def create_section_expander(title_key, default_title, subtitle_key, default_sub, prefix_key):
