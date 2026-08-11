@@ -216,7 +216,7 @@ class TouchBarInfoAction(ActionBase):
 
         self.search_results_data = []
 
-        # Helper to create Date controls with Gtk.FontButton, Fill, and Outline
+        # Helper to create Date controls
         def build_date_controls():
             fmt_model = Gtk.StringList()
             for _, label in self.date_format_options: fmt_model.append(label)
@@ -267,15 +267,6 @@ class TouchBarInfoAction(ActionBase):
             out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
             out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
 
-            def update_date_sub_vis():
-                fill_color_row.set_visible(fill_sw.get_active())
-                out_color_row.set_visible(out_sw.get_active())
-                out_size_spin.set_visible(out_sw.get_active())
-
-            fill_sw.connect("notify::active", lambda *a: update_date_sub_vis())
-            out_sw.connect("notify::active", lambda *a: update_date_sub_vis())
-            update_date_sub_vis()
-
             self.all_date_fmt_combos.append(fmt_combo)
             self.all_date_font_btns.append(font_btn)
             self.all_date_fill_switches.append(fill_sw)
@@ -284,9 +275,14 @@ class TouchBarInfoAction(ActionBase):
             self.all_date_out_color_btns.append(out_color_btn)
             self.all_date_out_size_spins.append(out_size_spin)
 
-            return [fmt_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+            return {
+                "fmt_combo": fmt_combo, "font_row": font_row, "fill_sw": fill_sw,
+                "fill_color_row": fill_color_row, "out_sw": out_sw,
+                "out_color_row": out_color_row, "out_size_spin": out_size_spin,
+                "all_rows": [fmt_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+            }
 
-        # Helper to create Time controls with Gtk.FontButton, Fill, and Outline
+        # Helper to create Time controls
         def build_time_controls():
             sw_24h = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.use-24h.label", "Use 24-Hour Clock"),
@@ -339,15 +335,6 @@ class TouchBarInfoAction(ActionBase):
             out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
             out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
 
-            def update_time_sub_vis():
-                fill_color_row.set_visible(fill_sw.get_active())
-                out_color_row.set_visible(out_sw.get_active())
-                out_size_spin.set_visible(out_sw.get_active())
-
-            fill_sw.connect("notify::active", lambda *a: update_time_sub_vis())
-            out_sw.connect("notify::active", lambda *a: update_time_sub_vis())
-            update_time_sub_vis()
-
             self.all_time_24h_switches.append(sw_24h)
             self.all_time_sec_switches.append(sw_sec)
             self.all_time_font_btns.append(font_btn)
@@ -357,9 +344,14 @@ class TouchBarInfoAction(ActionBase):
             self.all_time_out_color_btns.append(out_color_btn)
             self.all_time_out_size_spins.append(out_size_spin)
 
-            return [sw_24h, sw_sec, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+            return {
+                "sw_24h": sw_24h, "sw_sec": sw_sec, "font_row": font_row, "fill_sw": fill_sw,
+                "fill_color_row": fill_color_row, "out_sw": out_sw,
+                "out_color_row": out_color_row, "out_size_spin": out_size_spin,
+                "all_rows": [sw_24h, sw_sec, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+            }
 
-        # Helper to create Weather controls with Gtk.FontButton, Fill, and Outline
+        # Helper to create Weather controls
         def build_weather_controls():
             loc_entry = Adw.EntryRow(
                 title=self.get_locale_text("actions.touchbar-info.weather-location.label", "City / Location Search")
@@ -430,15 +422,6 @@ class TouchBarInfoAction(ActionBase):
             out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
             out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
 
-            def update_weather_sub_vis():
-                fill_color_row.set_visible(fill_sw.get_active())
-                out_color_row.set_visible(out_sw.get_active())
-                out_size_spin.set_visible(out_sw.get_active())
-
-            fill_sw.connect("notify::active", lambda *a: update_weather_sub_vis())
-            out_sw.connect("notify::active", lambda *a: update_weather_sub_vis())
-            update_weather_sub_vis()
-
             self.all_weather_loc_entries.append(loc_entry)
             self.all_weather_res_combos.append(res_combo)
             self.all_weather_unit_combos.append(unit_combo)
@@ -450,7 +433,13 @@ class TouchBarInfoAction(ActionBase):
             self.all_weather_out_color_btns.append(out_color_btn)
             self.all_weather_out_size_spins.append(out_size_spin)
 
-            return [loc_entry, res_combo, unit_combo, ref_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+            return {
+                "loc_entry": loc_entry, "res_combo": res_combo, "unit_combo": unit_combo,
+                "ref_combo": ref_combo, "font_row": font_row, "fill_sw": fill_sw,
+                "fill_color_row": fill_color_row, "out_sw": out_sw,
+                "out_color_row": out_color_row, "out_size_spin": out_size_spin,
+                "all_rows": [loc_entry, res_combo, unit_combo, ref_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+            }
 
         # Helper to create Section Expander with clean subsection expanders for split mode
         def create_section_expander(title_key, default_title, subtitle_key, default_sub, prefix_key):
@@ -475,10 +464,9 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.full-widget.label", "Full Section Widget"),
                 subtitle=self.get_locale_text("actions.touchbar-info.full-widget.subtitle", "Widget assigned to full section area")
             )
-            full_date_rows = build_date_controls()
-            full_time_rows = build_time_controls()
-            full_weather_rows = build_weather_controls()
-            fw_res = full_weather_rows[1] # Weather search results combo
+            full_date_ctrls = build_date_controls()
+            full_time_ctrls = build_time_controls()
+            full_weather_ctrls = build_weather_controls()
 
             # --- 2. Top Subsection Expander ---
             top_expander = Adw.ExpanderRow(
@@ -492,15 +480,14 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.widget-selector.label", "Select Widget"),
                 subtitle=self.get_locale_text("actions.touchbar-info.widget-selector.subtitle", "Choose widget to display in this slot")
             )
-            top_date_rows = build_date_controls()
-            top_time_rows = build_time_controls()
-            top_weather_rows = build_weather_controls()
-            tw_res = top_weather_rows[1]
+            top_date_ctrls = build_date_controls()
+            top_time_ctrls = build_time_controls()
+            top_weather_ctrls = build_weather_controls()
 
             top_expander.add_row(top_combo)
-            for r in top_date_rows: top_expander.add_row(r)
-            for r in top_time_rows: top_expander.add_row(r)
-            for r in top_weather_rows: top_expander.add_row(r)
+            for r in top_date_ctrls["all_rows"]: top_expander.add_row(r)
+            for r in top_time_ctrls["all_rows"]: top_expander.add_row(r)
+            for r in top_weather_ctrls["all_rows"]: top_expander.add_row(r)
 
             # --- 3. Bottom Subsection Expander ---
             bot_expander = Adw.ExpanderRow(
@@ -514,93 +501,116 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.widget-selector.label", "Select Widget"),
                 subtitle=self.get_locale_text("actions.touchbar-info.widget-selector.subtitle", "Choose widget to display in this slot")
             )
-            bot_date_rows = build_date_controls()
-            bot_time_rows = build_time_controls()
-            bot_weather_rows = build_weather_controls()
-            bw_res = bot_weather_rows[1]
+            bot_date_ctrls = build_date_controls()
+            bot_time_ctrls = build_time_controls()
+            bot_weather_ctrls = build_weather_controls()
 
             bot_expander.add_row(bot_combo)
-            for r in bot_date_rows: bot_expander.add_row(r)
-            for r in bot_time_rows: bot_expander.add_row(r)
-            for r in bot_weather_rows: bot_expander.add_row(r)
+            for r in bot_date_ctrls["all_rows"]: bot_expander.add_row(r)
+            for r in bot_time_ctrls["all_rows"]: bot_expander.add_row(r)
+            for r in bot_weather_ctrls["all_rows"]: bot_expander.add_row(r)
 
             # Add rows to parent section expander
             expander.add_row(mode_combo)
 
             expander.add_row(full_combo)
-            for r in full_date_rows: expander.add_row(r)
-            for r in full_time_rows: expander.add_row(r)
-            for r in full_weather_rows: expander.add_row(r)
+            for r in full_date_ctrls["all_rows"]: expander.add_row(r)
+            for r in full_time_ctrls["all_rows"]: expander.add_row(r)
+            for r in full_weather_ctrls["all_rows"]: expander.add_row(r)
 
             expander.add_row(top_expander)
             expander.add_row(bot_expander)
 
-            # Section Visibility Controller
+            # --- Unified Group Visibility Helper ---
+            def update_group_vis(widget_choice, is_active, date_ctrls, time_ctrls, weather_ctrls, is_full_mode=True):
+                # Hide all if group is not active (e.g. Full section is inactive in 2-widget mode)
+                if not is_active:
+                    for r in date_ctrls["all_rows"]: r.set_visible(False)
+                    for r in time_ctrls["all_rows"]: r.set_visible(False)
+                    for r in weather_ctrls["all_rows"]: r.set_visible(False)
+                    return
+
+                # Date Visibility
+                show_date = (widget_choice in [1, 2]) if is_full_mode else (widget_choice == 1)
+                date_ctrls["fmt_combo"].set_visible(show_date)
+                date_ctrls["font_row"].set_visible(show_date)
+                date_ctrls["fill_sw"].set_visible(show_date)
+                date_ctrls["fill_color_row"].set_visible(show_date and date_ctrls["fill_sw"].get_active())
+                date_ctrls["out_sw"].set_visible(show_date)
+                date_ctrls["out_color_row"].set_visible(show_date and date_ctrls["out_sw"].get_active())
+                date_ctrls["out_size_spin"].set_visible(show_date and date_ctrls["out_sw"].get_active())
+
+                # Time Visibility
+                show_time = (widget_choice in [1, 3]) if is_full_mode else (widget_choice == 2)
+                time_ctrls["sw_24h"].set_visible(show_time)
+                time_ctrls["sw_sec"].set_visible(show_time)
+                time_ctrls["font_row"].set_visible(show_time)
+                time_ctrls["fill_sw"].set_visible(show_time)
+                time_ctrls["fill_color_row"].set_visible(show_time and time_ctrls["fill_sw"].get_active())
+                time_ctrls["out_sw"].set_visible(show_time)
+                time_ctrls["out_color_row"].set_visible(show_time and time_ctrls["out_sw"].get_active())
+                time_ctrls["out_size_spin"].set_visible(show_time and time_ctrls["out_sw"].get_active())
+
+                # Weather Visibility
+                show_weather = (widget_choice == 4) if is_full_mode else (widget_choice == 3)
+                weather_ctrls["loc_entry"].set_visible(show_weather)
+                weather_ctrls["res_combo"].set_visible(show_weather and len(self.search_results_data) > 0)
+                weather_ctrls["unit_combo"].set_visible(show_weather)
+                weather_ctrls["ref_combo"].set_visible(show_weather)
+                weather_ctrls["font_row"].set_visible(show_weather)
+                weather_ctrls["fill_sw"].set_visible(show_weather)
+                weather_ctrls["fill_color_row"].set_visible(show_weather and weather_ctrls["fill_sw"].get_active())
+                weather_ctrls["out_sw"].set_visible(show_weather)
+                weather_ctrls["out_color_row"].set_visible(show_weather and weather_ctrls["out_sw"].get_active())
+                weather_ctrls["out_size_spin"].set_visible(show_weather and weather_ctrls["out_sw"].get_active())
+
+            # Main Section Visibility Controller
             def update_visibility():
-                is_full = mode_combo.get_selected() == 0
+                is_full = (mode_combo.get_selected() == 0)
                 full_combo.set_visible(is_full)
-
-                # Full Section Settings Visibility
-                if is_full:
-                    f_sel = full_combo.get_selected()
-                    show_date = f_sel in [1, 2] # 1: Stacked, 2: Date
-                    show_time = f_sel in [1, 3] # 1: Stacked, 3: Time
-                    show_weather = (f_sel == 4) # 4: Weather
-
-                    for r in full_date_rows: r.set_visible(show_date)
-                    for r in full_time_rows: r.set_visible(show_time)
-                    for r in full_weather_rows:
-                        if r == fw_res:
-                            r.set_visible(show_weather and len(self.search_results_data) > 0)
-                        else:
-                            r.set_visible(show_weather)
-                else:
-                    for r in full_date_rows: r.set_visible(False)
-                    for r in full_time_rows: r.set_visible(False)
-                    for r in full_weather_rows: r.set_visible(False)
-
-                # Split Subsection Rows Visibility
                 top_expander.set_visible(not is_full)
                 bot_expander.set_visible(not is_full)
 
-                if not is_full:
-                    t_sel = top_combo.get_selected()
-                    show_t_date = (t_sel == 1) # 1: Date
-                    show_t_time = (t_sel == 2) # 2: Time
-                    show_t_weather = (t_sel == 3) # 3: Weather
+                # 1. Update Full Section Controls Visibility
+                update_group_vis(
+                    full_combo.get_selected(),
+                    is_active=is_full,
+                    date_ctrls=full_date_ctrls,
+                    time_ctrls=full_time_ctrls,
+                    weather_ctrls=full_weather_ctrls,
+                    is_full_mode=True
+                )
 
-                    for r in top_date_rows: r.set_visible(show_t_date)
-                    for r in top_time_rows: r.set_visible(show_t_time)
-                    for r in top_weather_rows:
-                        if r == tw_res:
-                            r.set_visible(show_t_weather and len(self.search_results_data) > 0)
-                        else:
-                            r.set_visible(show_t_weather)
+                # 2. Update Top Subsection Controls Visibility
+                update_group_vis(
+                    top_combo.get_selected(),
+                    is_active=(not is_full),
+                    date_ctrls=top_date_ctrls,
+                    time_ctrls=top_time_ctrls,
+                    weather_ctrls=top_weather_ctrls,
+                    is_full_mode=False
+                )
 
-                    b_sel = bot_combo.get_selected()
-                    show_b_date = (b_sel == 1) # 1: Date
-                    show_b_time = (b_sel == 2) # 2: Time
-                    show_b_weather = (b_sel == 3) # 3: Weather
+                # 3. Update Bottom Subsection Controls Visibility
+                update_group_vis(
+                    bot_combo.get_selected(),
+                    is_active=(not is_full),
+                    date_ctrls=bot_date_ctrls,
+                    time_ctrls=bot_time_ctrls,
+                    weather_ctrls=bot_weather_ctrls,
+                    is_full_mode=False
+                )
 
-                    for r in bot_date_rows: r.set_visible(show_b_date)
-                    for r in bot_time_rows: r.set_visible(show_b_time)
-                    for r in bot_weather_rows:
-                        if r == bw_res:
-                            r.set_visible(show_b_weather and len(self.search_results_data) > 0)
-                        else:
-                            r.set_visible(show_b_weather)
-                else:
-                    for r in top_date_rows: r.set_visible(False)
-                    for r in top_time_rows: r.set_visible(False)
-                    for r in top_weather_rows: r.set_visible(False)
-                    for r in bot_date_rows: r.set_visible(False)
-                    for r in bot_time_rows: r.set_visible(False)
-                    for r in bot_weather_rows: r.set_visible(False)
-
+            # Connect Mode & Widget Combo Signals
             mode_combo.connect("notify::selected", lambda *a: update_visibility())
             full_combo.connect("notify::selected", lambda *a: update_visibility())
             top_combo.connect("notify::selected", lambda *a: update_visibility())
             bot_combo.connect("notify::selected", lambda *a: update_visibility())
+
+            # Connect Sub-switch Signals to update_visibility
+            for ctrls in [full_date_ctrls, full_time_ctrls, full_weather_ctrls, top_date_ctrls, top_time_ctrls, top_weather_ctrls, bot_date_ctrls, bot_time_ctrls, bot_weather_ctrls]:
+                ctrls["fill_sw"].connect("notify::active", lambda *a: update_visibility())
+                ctrls["out_sw"].connect("notify::active", lambda *a: update_visibility())
 
             update_visibility()
 
