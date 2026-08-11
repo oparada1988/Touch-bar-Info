@@ -8,6 +8,7 @@ import subprocess
 import datetime
 import requests
 import psutil
+import json
 from threading import Thread, Timer
 from PIL import Image, ImageDraw, ImageFont
 
@@ -131,17 +132,43 @@ class TouchBarInfoAction(ActionBase):
             log.error(f"TouchBarInfo: Error updating system stats: {e}")
 
     def get_system_disk_mounts(self) -> list[tuple[str, str]]:
-        mounts = []
+        disks = []
         try:
-            for p in psutil.disk_partitions(all=False):
-                if p.fstype and not p.mountpoint.startswith(("/proc", "/sys", "/dev", "/run/user")):
-                    disp = f"{p.mountpoint} ({p.device})"
-                    mounts.append((p.mountpoint, disp))
-        except Exception:
-            pass
-        if not mounts:
-            mounts = [("/", "/ (System Root)")]
-        return mounts
+            cmd = ['flatpak-spawn', '--host', 'lsblk', '-J', '-o', 'NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT']
+            out = subprocess.check_output(cmd, text=True, timeout=2)
+            data = json.loads(out)
+
+            def parse_devs(dev_list):
+                for item in dev_list:
+                    mount = item.get("mountpoint")
+                    name = item.get("name")
+                    label = item.get("label")
+                    fstype = item.get("fstype")
+                    if mount and fstype and fstype not in ["swap", "squashfs", "iso9660", "vfat"]:
+                        disp_name = f"{label} ({mount} — {name})" if label else f"{mount} ({name})"
+                        disks.append((mount, disp_name))
+                    if "children" in item:
+                        parse_devs(item["children"])
+
+            parse_devs(data.get("blockdevices", []))
+        except Exception as e:
+            log.warning(f"TouchBarInfo: Host lsblk query fallback: {e}")
+
+        if not disks:
+            seen_devs = set()
+            try:
+                for p in psutil.disk_partitions(all=False):
+                    if p.device.startswith("/dev/") and not p.mountpoint.startswith(("/usr", "/app", "/var", "/etc", "/run", "/dev", "/sys", "/proc")):
+                        if p.device not in seen_devs:
+                            seen_devs.add(p.device)
+                            disks.append((p.mountpoint, f"{p.mountpoint} ({p.device})"))
+            except Exception:
+                pass
+
+        if not disks:
+            disks = [("/", "/ (System Root)")]
+
+        return disks
 
     # --- Weather Fetcher & WMO Mapping ---
     def get_weather_icon_filename(self, wmo_code: int, is_day: int = 1) -> str:
@@ -1844,7 +1871,8 @@ class TouchBarInfoAction(ActionBase):
 
         width, height = self.get_canvas_size()
 
-        image = Image.new("RGBA", (width, height), (15, 16, 22, 255))
+        # 100% Transparent Background Canvas
+        image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
 
         font_date = self.get_font_from_desc(date_font_str, default_size=25)
