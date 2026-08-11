@@ -133,6 +133,7 @@ class TouchBarInfoAction(ActionBase):
             log.error(f"TouchBarInfo: Error updating system stats: {e}")
 
     def get_system_disk_mounts(self, saved_path: str = None) -> list[tuple[str, str]]:
+        import shutil
         disks = []
         seen_paths = set()
 
@@ -142,6 +143,7 @@ class TouchBarInfoAction(ActionBase):
             "/lib", "/bin", "/sbin", "/snap", "/flatpak",
             "/.flatpak-info"
         )
+        VALID_FSTYPES = {"ext4", "ext3", "ext2", "btrfs", "xfs", "zfs", "ntfs", "vfat", "fat", "exfat", "fuseblk"}
 
         def add_disk(mount_path: str, label: str = "", size: str = "", dev_name: str = ""):
             if not mount_path:
@@ -150,10 +152,10 @@ class TouchBarInfoAction(ActionBase):
                 norm_path = os.path.realpath(mount_path).rstrip("/") or "/"
             except Exception:
                 norm_path = mount_path
-            
+
             if norm_path in seen_paths:
                 return
-            
+
             if norm_path != "/" and norm_path.startswith(IGNORED_PREFIXES):
                 return
 
@@ -171,69 +173,89 @@ class TouchBarInfoAction(ActionBase):
                 base = norm_path.lstrip("/").replace("mnt/", "").replace("media/", "").replace("run/media/", "")
                 display_title = base.capitalize() if base else norm_path
 
-            size_str = f" ({size})" if size else ""
-            dev_str = f" [{dev_name}]" if dev_name else ""
-            
-            disp_name = f"{display_title}{size_str} — {norm_path}{dev_str}"
-            disks.append((norm_path, disp_name))
-
-        # 1. Primary Strategy: lsblk (Host via flatpak-spawn or Direct)
-        lsblk_cmds = [
-            ["flatpak-spawn", "--host", "lsblk", "-J", "-o", "NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS"],
-            ["lsblk", "-J", "-o", "NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS"]
-        ]
-
-        for cmd in lsblk_cmds:
-            try:
-                p = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
-                if p.stdout and p.stdout.strip().startswith("{"):
-                    data = json.loads(p.stdout)
-                    def parse_devs(dev_list):
-                        for item in dev_list:
-                            dev_name = item.get("name", "")
-                            size = item.get("size", "")
-                            label = item.get("label", "")
-                            fstype = item.get("fstype", "")
-                            raw_mounts = list(item.get("mountpoints") or [])
-                            if item.get("mountpoint"):
-                                raw_mounts.append(item.get("mountpoint"))
-                            
-                            for m in raw_mounts:
-                                if m and fstype not in ["swap", "squashfs", "iso9660"]:
-                                    add_disk(m, label=label, size=size, dev_name=dev_name)
-                            
-                            if "children" in item:
-                                parse_devs(item["children"])
-
-                    parse_devs(data.get("blockdevices", []))
-                    if disks:
-                        break
-            except Exception:
-                pass
-
-        # 2. Fallback Strategy: df -h (Host or Direct)
-        if not disks:
-            df_cmds = [
-                ["flatpak-spawn", "--host", "df", "-hP"],
-                ["df", "-hP"]
-            ]
-            for cmd in df_cmds:
+            if not size and os.path.exists(norm_path):
                 try:
-                    p = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
-                    if p.stdout:
-                        lines = p.stdout.strip().splitlines()[1:]
-                        for line in lines:
-                            parts = line.split()
-                            if len(parts) >= 6:
-                                dev, size, mount = parts[0], parts[1], parts[5]
-                                if dev.startswith("/dev/"):
-                                    add_disk(mount, size=size, dev_name=os.path.basename(dev))
-                        if disks:
-                            break
+                    du = psutil.disk_usage(norm_path)
+                    size_gb = du.total / (1024 ** 3)
+                    size = f"{size_gb:.1f}G"
                 except Exception:
                     pass
 
-        # 3. Add saved path if missing
+            size_str = f" ({size})" if size else ""
+            dev_str = f" [{dev_name}]" if dev_name else ""
+
+            disp_name = f"{display_title}{size_str} — {norm_path}{dev_str}"
+            disks.append((norm_path, disp_name))
+
+        def run_cmd(args):
+            try:
+                p = subprocess.run(args, capture_output=True, text=True, timeout=3)
+                if p.returncode == 0 and p.stdout:
+                    return p.stdout
+            except Exception:
+                pass
+            if shutil.which("flatpak-spawn"):
+                try:
+                    p = subprocess.run(["flatpak-spawn", "--host"] + args, capture_output=True, text=True, timeout=3)
+                    if p.returncode == 0 and p.stdout:
+                        return p.stdout
+                except Exception:
+                    pass
+            return None
+
+        # 1. Try lsblk JSON
+        stdout = run_cmd(["lsblk", "-J", "-o", "NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS"])
+        if stdout and stdout.strip().startswith("{"):
+            try:
+                data = json.loads(stdout)
+                def parse_devs(dev_list):
+                    for item in dev_list:
+                        dev_name = item.get("name", "")
+                        size = item.get("size", "")
+                        label = item.get("label", "")
+                        fstype = item.get("fstype", "")
+                        raw_mounts = list(item.get("mountpoints") or [])
+                        if item.get("mountpoint"):
+                            raw_mounts.append(item.get("mountpoint"))
+                        for m in raw_mounts:
+                            if m and (fstype in VALID_FSTYPES or not fstype):
+                                add_disk(m, label=label, size=size, dev_name=dev_name)
+                        if "children" in item:
+                            parse_devs(item["children"])
+                parse_devs(data.get("blockdevices", []))
+            except Exception:
+                pass
+
+        # 2. Try psutil disk_partitions
+        try:
+            for p in psutil.disk_partitions(all=True):
+                if p.fstype in VALID_FSTYPES or p.device.startswith("/dev/"):
+                    dev_node = os.path.basename(p.device)
+                    add_disk(p.mountpoint, dev_name=dev_node)
+        except Exception:
+            pass
+
+        # 3. Try /proc/mounts
+        lines = None
+        if os.path.exists("/proc/mounts"):
+            try:
+                with open("/proc/mounts", "r") as f:
+                    lines = f.readlines()
+            except Exception:
+                pass
+        if not lines:
+            out = run_cmd(["cat", "/proc/mounts"])
+            if out: lines = out.splitlines()
+
+        if lines:
+            for line in lines:
+                parts = line.split()
+                if len(parts) >= 3:
+                    dev, mount, fstype = parts[0], parts[1], parts[2]
+                    if dev.startswith("/dev/") or fstype in VALID_FSTYPES:
+                        add_disk(mount, dev_name=os.path.basename(dev))
+
+        # 4. Add saved path if missing
         if saved_path and os.path.exists(saved_path):
             add_disk(saved_path)
 
