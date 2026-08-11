@@ -150,7 +150,6 @@ class TouchBarInfoAction(ActionBase):
 
                     def parse_devs(dev_list):
                         for item in dev_list:
-                            name = item.get("name", "")
                             label = item.get("label", "")
                             fstype = item.get("fstype", "")
 
@@ -163,7 +162,12 @@ class TouchBarInfoAction(ActionBase):
                             for mount in valid_mounts:
                                 if mount not in seen and fstype not in ["swap", "squashfs", "iso9660"]:
                                     seen.add(mount)
-                                    disp_name = f"{label} ({mount} — {name})" if label else f"{mount} ({name})"
+                                    if label:
+                                        disp_name = label
+                                    elif mount == "/":
+                                        disp_name = "System Root"
+                                    else:
+                                        disp_name = mount.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
                                     disks.append((mount, disp_name))
 
                             if "children" in item:
@@ -189,7 +193,8 @@ class TouchBarInfoAction(ActionBase):
                                 if dev.startswith('/dev/') and not mount.startswith(('/boot', '/run', '/sys', '/proc', '/dev')):
                                     if mount not in seen:
                                         seen.add(mount)
-                                        disks.append((mount, f"{mount} ({dev})"))
+                                        clean_name = "System Root" if mount == "/" else mount.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
+                                        disks.append((mount, clean_name))
                         if disks:
                             break
                 except Exception:
@@ -202,12 +207,13 @@ class TouchBarInfoAction(ActionBase):
                     if p.device.startswith("/dev/") and not p.mountpoint.startswith(("/usr", "/app", "/var", "/etc", "/run", "/dev", "/sys", "/proc")):
                         if p.device not in seen_devs:
                             seen_devs.add(p.device)
-                            disks.append((p.mountpoint, f"{p.mountpoint} ({p.device})"))
+                            clean_name = "System Root" if p.mountpoint == "/" else p.mountpoint.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
+                            disks.append((p.mountpoint, clean_name))
             except Exception:
                 pass
 
         if not disks:
-            disks = [("/", "/ (System Root)")]
+            disks = [("/", "System Root")]
 
         return disks
 
@@ -1120,8 +1126,18 @@ class TouchBarInfoAction(ActionBase):
             if 0 <= ram_mode_idx < len(self.ram_mode_options): combo.set_selected(ram_mode_idx)
         for combo in self.all_disk_mode_combos:
             if 0 <= disk_mode_idx < len(self.disk_mode_options): combo.set_selected(disk_mode_idx)
+        disk_mount_path = settings.get("disk_mount_path", "")
+        if hasattr(self, "disk_mounts") and self.disk_mounts:
+            for idx, (m_path, _) in enumerate(self.disk_mounts):
+                if m_path == disk_mount_path:
+                    disk_mount_idx = idx
+                    break
+
         for combo in self.all_disk_mount_combos:
             if 0 <= disk_mount_idx < len(self.disk_mounts): combo.set_selected(disk_mount_idx)
+
+        custom_bg_path = settings.get("custom_bg_path", "")
+        self.update_bg_row_subtitle(custom_bg_path)
 
         # Sync Date Font & Fill/Outline Controls
         for fb in self.all_date_font_btns: fb.set_font(date_font_str)
@@ -1190,24 +1206,36 @@ class TouchBarInfoAction(ActionBase):
         settings = self.get_settings()
         if settings is not None:
             val = combo.get_selected()
-            settings["disk_mount_idx"] = val
-            for c in self.all_disk_mount_combos:
-                if c != combo and c.get_selected() != val:
-                    c.set_selected(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+            if 0 <= val < len(self.disk_mounts):
+                m_path, m_disp = self.disk_mounts[val]
+                settings["disk_mount_path"] = m_path
+                settings["disk_mount_idx"] = val
+                for c in self.all_disk_mount_combos:
+                    if c != combo and c.get_selected() != val:
+                        c.set_selected(val)
+                self.set_settings(settings)
+                self.last_rendered_key = ""
+                self.update_display()
+
+    def update_bg_row_subtitle(self, path: str):
+        if hasattr(self, "bg_image_row") and self.bg_image_row is not None:
+            if path:
+                fname = os.path.basename(path)
+                self.bg_image_row.set_subtitle(f"Active Wallpaper: {fname}")
+            else:
+                self.bg_image_row.set_subtitle(self.get_locale_text("actions.touchbar-info.bg-image.subtitle", "Select custom wallpaper image (PNG/JPG) to render behind all Touch Bar widgets"))
 
     def on_select_custom_bg_clicked(self, button):
         settings = self.get_settings() or {}
         curr_path = settings.get("custom_bg_path", "")
 
         def on_asset_selected(path: str):
-            if path and os.path.isfile(path):
+            if path:
                 st = self.get_settings()
                 if st is not None:
                     st["custom_bg_path"] = path
                     self.set_settings(st)
+                    self.update_bg_row_subtitle(path)
                     self.last_rendered_key = ""
                     self.update_display()
 
@@ -1241,6 +1269,7 @@ class TouchBarInfoAction(ActionBase):
                     if st is not None:
                         st["custom_bg_path"] = path
                         self.set_settings(st)
+                        self.update_bg_row_subtitle(path)
                         self.last_rendered_key = ""
                         self.update_display()
             dialog_obj.destroy()
@@ -1253,6 +1282,7 @@ class TouchBarInfoAction(ActionBase):
         if settings is not None:
             settings["custom_bg_path"] = ""
             self.set_settings(settings)
+            self.update_bg_row_subtitle("")
             self.last_rendered_key = ""
             self.update_display()
 
@@ -1896,8 +1926,16 @@ class TouchBarInfoAction(ActionBase):
             content_x = x_min + margin_x
 
         mount_path = "/"
-        if hasattr(self, "disk_mounts") and 0 <= disk_mount_idx < len(self.disk_mounts):
-            mount_path, _ = self.disk_mounts[disk_mount_idx]
+        disp_name = "System Root"
+        settings = self.get_settings() or {}
+        disk_mount_path = settings.get("disk_mount_path", "")
+
+        if hasattr(self, "disk_mounts") and self.disk_mounts:
+            matched = [m for m in self.disk_mounts if m[0] == disk_mount_path]
+            if matched:
+                mount_path, disp_name = matched[0]
+            elif 0 <= disk_mount_idx < len(self.disk_mounts):
+                mount_path, disp_name = self.disk_mounts[disk_mount_idx]
 
         pct, used_gb, free_gb = self.get_disk_usage_host(mount_path)
 
@@ -1934,8 +1972,8 @@ class TouchBarInfoAction(ActionBase):
 
             self.render_styled_text(draw, (center_x, top_y), top_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
             self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
-        else: # Percentage %
-            main_str = f"Disk {round(pct)}%"
+        else: # Percentage % with Clean Display Name
+            main_str = f"{disp_name} {round(pct)}%"
             center_x = content_x + ((x_max - margin_x - content_x) / 2)
             center_y = y_min + (box_h / 2)
             self.render_styled_text(draw, (center_x, center_y), main_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
@@ -1969,6 +2007,8 @@ class TouchBarInfoAction(ActionBase):
         ram_mode_idx = settings.get("ram_mode_idx", 0)
         disk_mode_idx = settings.get("disk_mode_idx", 0)
         disk_mount_idx = settings.get("disk_mount_idx", 0)
+        disk_mount_path = settings.get("disk_mount_path", "")
+        custom_bg_path = settings.get("custom_bg_path", "")
 
         # Date Font & Fill/Outline Settings
         date_font_str = settings.get("date_font_str", "DejaVu Sans Bold 25")
@@ -2017,7 +2057,7 @@ class TouchBarInfoAction(ActionBase):
         latest_cpu = self.cpu_history[-1] if self.cpu_history else 0.0
         latest_ram = self.ram_history[-1] if self.ram_history else 0.0
 
-        combined_key = f"{date_str}|{time_str}|{cache_temp}|{cache_loc}|{latest_cpu:.1f}|{latest_ram:.1f}|{self.net_tx_rate:.0f}|{self.net_rx_rate:.0f}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{cpu_mode_idx}|{net_mode_idx}|{net_unit_idx}|{ram_mode_idx}|{disk_mode_idx}|{disk_mount_idx}|{date_font_str}|{date_fill_en}|{date_fill_col_hex}|{date_out_en}|{date_out_col_hex}|{date_out_sz}|{time_font_str}|{time_fill_en}|{time_fill_col_hex}|{time_out_en}|{time_out_col_hex}|{time_out_sz}|{weather_font_str}|{weather_fill_en}|{weather_fill_col_hex}|{weather_out_en}|{weather_out_col_hex}|{weather_out_sz}"
+        combined_key = f"{date_str}|{time_str}|{cache_temp}|{cache_loc}|{latest_cpu:.1f}|{latest_ram:.1f}|{self.net_tx_rate:.0f}|{self.net_rx_rate:.0f}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{cpu_mode_idx}|{net_mode_idx}|{net_unit_idx}|{ram_mode_idx}|{disk_mode_idx}|{disk_mount_idx}|{disk_mount_path}|{custom_bg_path}|{date_font_str}|{date_fill_en}|{date_fill_col_hex}|{date_out_en}|{date_out_col_hex}|{date_out_sz}|{time_font_str}|{time_fill_en}|{time_fill_col_hex}|{time_out_en}|{time_out_col_hex}|{time_out_sz}|{weather_font_str}|{weather_fill_en}|{weather_fill_col_hex}|{weather_out_en}|{weather_out_col_hex}|{weather_out_sz}"
 
         if combined_key == self.last_rendered_key:
             return
@@ -2132,14 +2172,25 @@ class TouchBarInfoAction(ActionBase):
 
         final_image = image
         try:
-            custom_bg_path = None
-            if hasattr(self.page, "get_background_image"):
+            settings = self.get_settings() or {}
+            custom_bg = settings.get("custom_bg_path", "")
+
+            resolved_bg_path = None
+            if custom_bg:
+                if os.path.isabs(custom_bg) and os.path.isfile(custom_bg):
+                    resolved_bg_path = custom_bg
+                elif hasattr(gl, "DATA_PATH"):
+                    rel_p = os.path.join(gl.DATA_PATH, custom_bg)
+                    if os.path.isfile(rel_p):
+                        resolved_bg_path = rel_p
+
+            if not resolved_bg_path and hasattr(self.page, "get_background_image"):
                 bg_p = self.page.get_background_image(self.input_ident, self.state)
                 if bg_p and os.path.isfile(bg_p) and not bg_p.endswith(("touchbar_render_0.png", "touchbar_render_1.png")):
-                    custom_bg_path = bg_p
+                    resolved_bg_path = bg_p
 
-            if custom_bg_path:
-                with Image.open(custom_bg_path) as bg_img:
+            if resolved_bg_path and os.path.isfile(resolved_bg_path):
+                with Image.open(resolved_bg_path) as bg_img:
                     bg_conv = bg_img.convert("RGBA").resize(image.size, Image.Resampling.LANCZOS)
                     final_image = Image.alpha_composite(bg_conv, image)
         except Exception as e:
