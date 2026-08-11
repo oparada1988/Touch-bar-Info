@@ -62,7 +62,7 @@ class TouchBarInfoAction(ActionBase):
             self.get_locale_text("actions.touchbar-info.mode.split", "2 Widgets (Split Top/Bottom — 50px each)")
         ]
 
-        # Widget choices (removed "Only")
+        # Widget choices
         self.full_widget_options = [
             self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
             self.get_locale_text("actions.touchbar-info.widget.stacked", "Stacked Date & Time"),
@@ -75,8 +75,25 @@ class TouchBarInfoAction(ActionBase):
             self.get_locale_text("actions.touchbar-info.widget.time", "Time")
         ]
 
-        # Helper to create Date Controls Sub-group
-        def create_date_controls():
+        # Lists to keep track of all control widgets for global syncing
+        self.all_date_fmt_combos = []
+        self.all_date_fam_combos = []
+        self.all_date_size_spins = []
+        self.all_date_color_btns = []
+
+        self.all_time_24h_switches = []
+        self.all_time_sec_switches = []
+        self.all_time_fam_combos = []
+        self.all_time_size_spins = []
+        self.all_time_color_btns = []
+
+        # Helper to create Date Options Sub-expander
+        def build_date_expander():
+            exp = Adw.ExpanderRow(
+                title=self.get_locale_text("actions.touchbar-info.date-settings.label", "Date Options & Font Customization"),
+                subtitle=self.get_locale_text("actions.touchbar-info.date-settings.subtitle", "Date format, font family, size, and color")
+            )
+
             fmt_model = Gtk.StringList()
             for _, label in self.date_format_options: fmt_model.append(label)
             fmt_combo = Adw.ComboRow(
@@ -105,10 +122,25 @@ class TouchBarInfoAction(ActionBase):
             color_btn.set_valign(Gtk.Align.CENTER)
             color_row.add_suffix(color_btn)
 
-            return fmt_combo, fam_combo, size_spin, color_row, color_btn
+            exp.add_row(fmt_combo)
+            exp.add_row(fam_combo)
+            exp.add_row(size_spin)
+            exp.add_row(color_row)
 
-        # Helper to create Time Controls Sub-group
-        def create_time_controls():
+            self.all_date_fmt_combos.append(fmt_combo)
+            self.all_date_fam_combos.append(fam_combo)
+            self.all_date_size_spins.append(size_spin)
+            self.all_date_color_btns.append(color_btn)
+
+            return exp, fmt_combo, fam_combo, size_spin, color_btn
+
+        # Helper to create Time Options Sub-expander
+        def build_time_expander():
+            exp = Adw.ExpanderRow(
+                title=self.get_locale_text("actions.touchbar-info.time-settings.label", "Time Options & Font Customization"),
+                subtitle=self.get_locale_text("actions.touchbar-info.time-settings.subtitle", "Clock format, 24h mode, seconds, font family, size, and color")
+            )
+
             sw_24h = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.use-24h.label", "Use 24-Hour Clock"),
                 subtitle=self.get_locale_text("actions.touchbar-info.use-24h.subtitle", "Switch between 12-hour (AM/PM) and 24-hour time format")
@@ -139,13 +171,21 @@ class TouchBarInfoAction(ActionBase):
             color_btn.set_valign(Gtk.Align.CENTER)
             color_row.add_suffix(color_btn)
 
-            return sw_24h, sw_sec, fam_combo, size_spin, color_row, color_btn
+            exp.add_row(sw_24h)
+            exp.add_row(sw_sec)
+            exp.add_row(fam_combo)
+            exp.add_row(size_spin)
+            exp.add_row(color_row)
 
-        # Shared Controls instances
-        self.date_fmt_combo, self.date_fam_combo, self.date_size_spin, self.date_color_row, self.date_color_btn = create_date_controls()
-        self.time_24h_sw, self.time_sec_sw, self.time_fam_combo, self.time_size_spin, self.time_color_row, self.time_color_btn = create_time_controls()
+            self.all_time_24h_switches.append(sw_24h)
+            self.all_time_sec_switches.append(sw_sec)
+            self.all_time_fam_combos.append(fam_combo)
+            self.all_time_size_spins.append(size_spin)
+            self.all_time_color_btns.append(color_btn)
 
-        # Helper to create Section Expander with embedded in-line controls
+            return exp, sw_24h, sw_sec, fam_combo, size_spin, color_btn
+
+        # Helper to create Section Expander with inline sub-expanders under each combo
         def create_section_expander(title_key, default_title, subtitle_key, default_sub, prefix_key):
             expander = Adw.ExpanderRow(
                 title=self.get_locale_text(title_key, default_title),
@@ -160,6 +200,7 @@ class TouchBarInfoAction(ActionBase):
                 subtitle=self.get_locale_text("actions.touchbar-info.widget-mode.subtitle", "Choose full section height or split top/bottom subsections")
             )
 
+            # --- 1. Full Section Group ---
             full_model = Gtk.StringList()
             for opt in self.full_widget_options: full_model.append(opt)
             full_combo = Adw.ComboRow(
@@ -167,7 +208,10 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.full-widget.label", "Full Section Widget"),
                 subtitle=self.get_locale_text("actions.touchbar-info.full-widget.subtitle", "Widget assigned to full section area")
             )
+            full_date_exp, _, _, _, _ = build_date_expander()
+            full_time_exp, _, _, _, _ = build_time_expander()
 
+            # --- 2. Top Subsection Group ---
             top_model = Gtk.StringList()
             for opt in self.split_widget_options: top_model.append(opt)
             top_combo = Adw.ComboRow(
@@ -175,7 +219,10 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.top-widget.label", "Top Subsection Widget"),
                 subtitle=self.get_locale_text("actions.touchbar-info.top-widget.subtitle", "Widget assigned to top half (Y: 0-50px)")
             )
+            top_date_exp, _, _, _, _ = build_date_expander()
+            top_time_exp, _, _, _, _ = build_time_expander()
 
+            # --- 3. Bottom Subsection Group ---
             bot_model = Gtk.StringList()
             for opt in self.split_widget_options: bot_model.append(opt)
             bot_combo = Adw.ComboRow(
@@ -183,15 +230,66 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.bottom-widget.label", "Bottom Subsection Widget"),
                 subtitle=self.get_locale_text("actions.touchbar-info.bottom-widget.subtitle", "Widget assigned to bottom half (Y: 50-100px)")
             )
+            bot_date_exp, _, _, _, _ = build_date_expander()
+            bot_time_exp, _, _, _, _ = build_time_expander()
 
+            # Add rows in strict sequential order: Dropdown followed immediately by its inline settings
             expander.add_row(mode_combo)
+
             expander.add_row(full_combo)
+            expander.add_row(full_date_exp)
+            expander.add_row(full_time_exp)
+
             expander.add_row(top_combo)
+            expander.add_row(top_date_exp)
+            expander.add_row(top_time_exp)
+
             expander.add_row(bot_combo)
+            expander.add_row(bot_date_exp)
+            expander.add_row(bot_time_exp)
+
+            # Section Visibility Controller
+            def update_visibility():
+                is_full = mode_combo.get_selected() == 0
+                full_combo.set_visible(is_full)
+
+                # Full Section Settings Visibility
+                if is_full:
+                    f_sel = full_combo.get_selected()
+                    full_date_exp.set_visible(f_sel in [1, 2]) # 1: Stacked, 2: Date
+                    full_time_exp.set_visible(f_sel in [1, 3]) # 1: Stacked, 3: Time
+                else:
+                    full_date_exp.set_visible(False)
+                    full_time_exp.set_visible(False)
+
+                # Split Subsection Rows Visibility
+                top_combo.set_visible(not is_full)
+                bot_combo.set_visible(not is_full)
+
+                if not is_full:
+                    t_sel = top_combo.get_selected()
+                    top_date_exp.set_visible(t_sel == 1) # 1: Date
+                    top_time_exp.set_visible(t_sel == 2) # 2: Time
+
+                    b_sel = bot_combo.get_selected()
+                    bot_date_exp.set_visible(b_sel == 1) # 1: Date
+                    bot_time_exp.set_visible(b_sel == 2) # 2: Time
+                else:
+                    top_date_exp.set_visible(False)
+                    top_time_exp.set_visible(False)
+                    bot_date_exp.set_visible(False)
+                    bot_time_exp.set_visible(False)
+
+            mode_combo.connect("notify::selected", lambda *a: update_visibility())
+            full_combo.connect("notify::selected", lambda *a: update_visibility())
+            top_combo.connect("notify::selected", lambda *a: update_visibility())
+            bot_combo.connect("notify::selected", lambda *a: update_visibility())
+
+            update_visibility()
 
             return expander, mode_combo, full_combo, top_combo, bot_combo
 
-        # Create 3 Section Expanders
+        # Create Section Expanders
         self.sec_a_expander, self.sec_a_mode_combo, self.sec_a_full_combo, self.sec_a_top_combo, self.sec_a_bot_combo = create_section_expander(
             "actions.touchbar-info.section-a.label", "Section A (Left — 200px)",
             "actions.touchbar-info.section-a.subtitle", "Configure widgets for the left Touch Bar section", "sec_a"
@@ -207,87 +305,19 @@ class TouchBarInfoAction(ActionBase):
             "actions.touchbar-info.section-c.subtitle", "Configure widgets for the right Touch Bar section", "sec_c"
         )
 
-        # Date & Time Settings Expander Dropdowns (Embedded under Sections)
-        self.date_font_expander = Adw.ExpanderRow(
-            title=self.get_locale_text("actions.touchbar-info.date-settings.label", "Date Options & Font Customization"),
-            subtitle=self.get_locale_text("actions.touchbar-info.date-settings.subtitle", "Date format, font family, size, and color")
-        )
-        self.date_font_expander.add_row(self.date_fmt_combo)
-        self.date_font_expander.add_row(self.date_fam_combo)
-        self.date_font_expander.add_row(self.date_size_spin)
-        self.date_font_expander.add_row(self.date_color_row)
-
-        self.time_font_expander = Adw.ExpanderRow(
-            title=self.get_locale_text("actions.touchbar-info.time-settings.label", "Time Options & Font Customization"),
-            subtitle=self.get_locale_text("actions.touchbar-info.time-settings.subtitle", "Clock format, 24h mode, seconds, font family, size, and color")
-        )
-        self.time_font_expander.add_row(self.time_24h_sw)
-        self.time_font_expander.add_row(self.time_sec_sw)
-        self.time_font_expander.add_row(self.time_fam_combo)
-        self.time_font_expander.add_row(self.time_size_spin)
-        self.time_font_expander.add_row(self.time_color_row)
-
-        # Append inline settings rows to Section Expanders
-        self.sec_a_expander.add_row(self.date_font_expander)
-        self.sec_a_expander.add_row(self.time_font_expander)
-
         self.load_config_defaults()
 
-        # Connect Visibility Toggles for Section Modes and In-Line Settings
-        def update_section_visibility(mode_combo, full_combo, top_combo, bot_combo, key_prefix):
-            is_full = mode_combo.get_selected() == 0
-            full_combo.set_visible(is_full)
-            top_combo.set_visible(not is_full)
-            bot_combo.set_visible(not is_full)
+        # Mode Change Listeners
+        def bind_mode(combo, key_prefix):
+            combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed(f"{key_prefix}_mode", c.get_selected()))
 
-            # Update overall Date & Time settings expander visibility
-            needs_date = False
-            needs_time = False
+        bind_mode(self.sec_a_mode_combo, "sec_a")
+        bind_mode(self.sec_b_mode_combo, "sec_b")
+        bind_mode(self.sec_c_mode_combo, "sec_c")
 
-            for mode_c, full_c, top_c, bot_c in [
-                (self.sec_a_mode_combo, self.sec_a_full_combo, self.sec_a_top_combo, self.sec_a_bot_combo),
-                (self.sec_b_mode_combo, self.sec_b_full_combo, self.sec_b_top_combo, self.sec_b_bot_combo),
-                (self.sec_c_mode_combo, self.sec_c_full_combo, self.sec_c_top_combo, self.sec_c_bot_combo)
-            ]:
-                if mode_c.get_selected() == 0:
-                    sel = full_c.get_selected()
-                    if sel == 1: # Stacked Date & Time
-                        needs_date = True; needs_time = True
-                    elif sel == 2: # Date
-                        needs_date = True
-                    elif sel == 3: # Time
-                        needs_time = True
-                else:
-                    top_s = top_c.get_selected()
-                    bot_s = bot_c.get_selected()
-                    if top_s == 1 or bot_s == 1: needs_date = True
-                    if top_s == 2 or bot_s == 2: needs_time = True
-
-            self.date_font_expander.set_visible(needs_date)
-            self.time_font_expander.set_visible(needs_time)
-
-        def setup_mode_listener(mode_combo, full_combo, top_combo, bot_combo, key_prefix):
-            def on_mode_changed(combo, *args):
-                update_section_visibility(mode_combo, full_combo, top_combo, bot_combo, key_prefix)
-                settings = self.get_settings()
-                if settings is not None:
-                    settings[f"{key_prefix}_mode"] = combo.get_selected()
-                    self.set_settings(settings)
-                    self.last_rendered_key = ""
-                    self.update_display()
-
-            mode_combo.connect("notify::selected", on_mode_changed)
-
-        setup_mode_listener(self.sec_a_mode_combo, self.sec_a_full_combo, self.sec_a_top_combo, self.sec_a_bot_combo, "sec_a")
-        setup_mode_listener(self.sec_b_mode_combo, self.sec_b_full_combo, self.sec_b_top_combo, self.sec_b_bot_combo, "sec_b")
-        setup_mode_listener(self.sec_c_mode_combo, self.sec_c_full_combo, self.sec_c_top_combo, self.sec_c_bot_combo, "sec_c")
-
-        # Section Widget Choice Signals
+        # Widget Combo Listeners
         def bind_combo(combo, setting_name):
-            def on_combo_change(c, *a):
-                update_section_visibility(self.sec_a_mode_combo, self.sec_a_full_combo, self.sec_a_top_combo, self.sec_a_bot_combo, "sec_a")
-                self.on_setting_combo_changed(setting_name, c.get_selected())
-            combo.connect("notify::selected", on_combo_change)
+            combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed(setting_name, c.get_selected()))
 
         bind_combo(self.sec_a_full_combo, "sec_a_full_widget")
         bind_combo(self.sec_a_top_combo, "sec_a_top_widget")
@@ -301,22 +331,18 @@ class TouchBarInfoAction(ActionBase):
         bind_combo(self.sec_c_top_combo, "sec_c_top_widget")
         bind_combo(self.sec_c_bot_combo, "sec_c_bottom_widget")
 
-        # General Option Signals
-        self.time_24h_sw.connect("notify::active", self.on_use_24h_toggled)
-        self.time_sec_sw.connect("notify::active", self.on_show_seconds_toggled)
-        self.date_fmt_combo.connect("notify::selected", self.on_date_format_changed)
+        # Global Option Signals synced across all instances
+        for sw in self.all_time_24h_switches: sw.connect("notify::active", self.on_use_24h_toggled)
+        for sw in self.all_time_sec_switches: sw.connect("notify::active", self.on_show_seconds_toggled)
+        for combo in self.all_date_fmt_combos: combo.connect("notify::selected", self.on_date_format_changed)
 
-        # Font Signals
-        self.date_fam_combo.connect("notify::selected", self.on_date_font_family_changed)
-        self.date_size_spin.connect("notify::value", self.on_date_font_size_changed)
-        self.date_color_btn.connect("color-set", self.on_date_font_color_set)
+        for combo in self.all_date_fam_combos: combo.connect("notify::selected", self.on_date_font_family_changed)
+        for spin in self.all_date_size_spins: spin.connect("notify::value", self.on_date_font_size_changed)
+        for btn in self.all_date_color_btns: btn.connect("color-set", self.on_date_font_color_set)
 
-        self.time_fam_combo.connect("notify::selected", self.on_time_font_family_changed)
-        self.time_size_spin.connect("notify::value", self.on_time_font_size_changed)
-        self.time_color_btn.connect("color-set", self.on_time_font_color_set)
-
-        # Initial visibility update
-        update_section_visibility(self.sec_a_mode_combo, self.sec_a_full_combo, self.sec_a_top_combo, self.sec_a_bot_combo, "sec_a")
+        for combo in self.all_time_fam_combos: combo.connect("notify::selected", self.on_time_font_family_changed)
+        for spin in self.all_time_size_spins: spin.connect("notify::value", self.on_time_font_size_changed)
+        for btn in self.all_time_color_btns: btn.connect("color-set", self.on_time_font_color_set)
 
         return [
             self.sec_a_expander,
@@ -333,14 +359,13 @@ class TouchBarInfoAction(ActionBase):
         show_seconds = settings.setdefault("show_seconds", False)
         date_format_idx = settings.setdefault("date_format_idx", 0)
 
-        # Section Defaults: B default is Full Stacked Date & Time
         sec_a_mode = settings.setdefault("sec_a_mode", 0)
         sec_a_full = settings.setdefault("sec_a_full_widget", 0)
         sec_a_top = settings.setdefault("sec_a_top_widget", 0)
         sec_a_bot = settings.setdefault("sec_a_bottom_widget", 0)
 
         sec_b_mode = settings.setdefault("sec_b_mode", 0)
-        sec_b_full = settings.setdefault("sec_b_full_widget", 1) # Stacked
+        sec_b_full = settings.setdefault("sec_b_full_widget", 1) # Stacked Date & Time
         sec_b_top = settings.setdefault("sec_b_top_widget", 1)  # Date
         sec_b_bot = settings.setdefault("sec_b_bottom_widget", 2) # Time
 
@@ -357,12 +382,13 @@ class TouchBarInfoAction(ActionBase):
         time_font_size = settings.setdefault("time_font_size", 45)
         time_font_color = settings.setdefault("time_font_color", "#FFFFFFFF")
 
-        self.time_24h_sw.set_active(use_24h)
-        self.time_sec_sw.set_active(show_seconds)
-        if 0 <= date_format_idx < len(self.date_format_options):
-            self.date_fmt_combo.set_selected(date_format_idx)
+        # Sync all Date/Time controls
+        for sw in self.all_time_24h_switches: sw.set_active(use_24h)
+        for sw in self.all_time_sec_switches: sw.set_active(show_seconds)
+        for combo in self.all_date_fmt_combos:
+            if 0 <= date_format_idx < len(self.date_format_options): combo.set_selected(date_format_idx)
 
-        # Apply Section selections
+        # Section selections
         self.sec_a_mode_combo.set_selected(sec_a_mode)
         self.sec_a_full_combo.set_selected(sec_a_full)
         self.sec_a_top_combo.set_selected(sec_a_top)
@@ -378,15 +404,15 @@ class TouchBarInfoAction(ActionBase):
         self.sec_c_top_combo.set_selected(sec_c_top)
         self.sec_c_bot_combo.set_selected(sec_c_bot)
 
-        if 0 <= date_font_family_idx < len(self.font_families):
-            self.date_fam_combo.set_selected(date_font_family_idx)
-        self.date_size_spin.set_value(date_font_size)
-        self.set_color_button_rgba(self.date_color_btn, date_font_color)
+        for combo in self.all_date_fam_combos:
+            if 0 <= date_font_family_idx < len(self.font_families): combo.set_selected(date_font_family_idx)
+        for spin in self.all_date_size_spins: spin.set_value(date_font_size)
+        for btn in self.all_date_color_btns: self.set_color_button_rgba(btn, date_font_color)
 
-        if 0 <= time_font_family_idx < len(self.font_families):
-            self.time_fam_combo.set_selected(time_font_family_idx)
-        self.time_size_spin.set_value(time_font_size)
-        self.set_color_button_rgba(self.time_color_btn, time_font_color)
+        for combo in self.all_time_fam_combos:
+            if 0 <= time_font_family_idx < len(self.font_families): combo.set_selected(time_font_family_idx)
+        for spin in self.all_time_size_spins: spin.set_value(time_font_size)
+        for btn in self.all_time_color_btns: self.set_color_button_rgba(btn, time_font_color)
 
     def set_color_button_rgba(self, button: Gtk.ColorButton, hex_str: str):
         try:
