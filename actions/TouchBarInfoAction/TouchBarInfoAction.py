@@ -7,6 +7,7 @@ import os
 import subprocess
 import datetime
 import requests
+import psutil
 from threading import Thread, Timer
 from PIL import Image, ImageDraw, ImageFont
 
@@ -28,6 +29,15 @@ class TouchBarInfoAction(ActionBase):
         self.weather_cache = {}
         self.city_search_timer = None
 
+        # System Monitor Stats Buffers
+        self.cpu_history = [0.0] * 20
+        self.ram_history = [0.0] * 20
+        self.net_history = [0.0] * 20
+        self.last_net_io = None
+        self.net_tx_rate = 0.0
+        self.net_rx_rate = 0.0
+        self.process_count = 0
+
     def get_locale_text(self, key: str, default: str) -> str:
         if hasattr(self.plugin_base, "lm") and self.plugin_base.lm is not None:
             try:
@@ -44,10 +54,12 @@ class TouchBarInfoAction(ActionBase):
         return default
 
     def on_ready(self) -> None:
+        self.collect_system_stats()
         self.fetch_weather_async(force=True)
         self.update_display()
 
     def on_tick(self) -> None:
+        self.collect_system_stats()
         self.fetch_weather_async(force=False)
         self.update_display()
 
@@ -83,6 +95,54 @@ class TouchBarInfoAction(ActionBase):
         self.last_rendered_key = ""
         self.update_display()
 
+    # --- System Stats Collection ---
+    def collect_system_stats(self):
+        try:
+            # CPU
+            cpu_pct = psutil.cpu_percent(interval=None)
+            self.cpu_history.append(float(cpu_pct))
+            if len(self.cpu_history) > 20: self.cpu_history.pop(0)
+
+            # RAM
+            ram_info = psutil.virtual_memory()
+            self.ram_history.append(float(ram_info.percent))
+            if len(self.ram_history) > 20: self.ram_history.pop(0)
+
+            # Network
+            net_io = psutil.net_io_counters()
+            now_ts = datetime.datetime.now().timestamp()
+            if hasattr(self, "last_net_io") and self.last_net_io is not None:
+                old_sent, old_recv, old_ts = self.last_net_io
+                dt = max(0.1, now_ts - old_ts)
+                self.net_tx_rate = max(0.0, (net_io.bytes_sent - old_sent) / dt)
+                self.net_rx_rate = max(0.0, (net_io.bytes_recv - old_recv) / dt)
+            else:
+                self.net_tx_rate = 0.0
+                self.net_rx_rate = 0.0
+            self.last_net_io = (net_io.bytes_sent, net_io.bytes_recv, now_ts)
+
+            tot_rate = self.net_tx_rate + self.net_rx_rate
+            self.net_history.append(float(tot_rate))
+            if len(self.net_history) > 20: self.net_history.pop(0)
+
+            # Processes
+            self.process_count = len(psutil.pids())
+        except Exception as e:
+            log.error(f"TouchBarInfo: Error updating system stats: {e}")
+
+    def get_system_disk_mounts(self) -> list[tuple[str, str]]:
+        mounts = []
+        try:
+            for p in psutil.disk_partitions(all=False):
+                if p.fstype and not p.mountpoint.startswith(("/proc", "/sys", "/dev", "/run/user")):
+                    disp = f"{p.mountpoint} ({p.device})"
+                    mounts.append((p.mountpoint, disp))
+        except Exception:
+            pass
+        if not mounts:
+            mounts = [("/", "/ (System Root)")]
+        return mounts
+
     # --- Weather Fetcher & WMO Mapping ---
     def get_weather_icon_filename(self, wmo_code: int, is_day: int = 1) -> str:
         if wmo_code in [0, 1]:
@@ -109,7 +169,7 @@ class TouchBarInfoAction(ActionBase):
 
     def fetch_weather_async(self, force: bool = False):
         now_ts = datetime.datetime.now().timestamp()
-        refresh_intervals = [300, 600, 900, 1800, 3600] # 5m, 10m, 15m, 30m, 60m
+        refresh_intervals = [300, 600, 900, 1800, 3600]
         settings = self.get_settings() or {}
         ref_idx = settings.get("weather_refresh_idx", 2)
         interval_sec = refresh_intervals[min(ref_idx, len(refresh_intervals)-1)]
@@ -172,16 +232,56 @@ class TouchBarInfoAction(ActionBase):
             self.get_locale_text("actions.touchbar-info.widget.stacked", "Stacked Date and Time"),
             self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
             self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
-            self.get_locale_text("actions.touchbar-info.widget.weather", "Weather")
+            self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
+            self.get_locale_text("actions.touchbar-info.widget.cpu", "CPU Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.net", "Network Activity"),
+            self.get_locale_text("actions.touchbar-info.widget.ram", "RAM Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage")
         ]
         self.split_widget_options = [
             self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
             self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
             self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
-            self.get_locale_text("actions.touchbar-info.widget.weather", "Weather")
+            self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
+            self.get_locale_text("actions.touchbar-info.widget.cpu", "CPU Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.net", "Network Activity"),
+            self.get_locale_text("actions.touchbar-info.widget.ram", "RAM Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage")
         ]
 
-        # Temperature Units
+        # CPU Mode Options
+        self.cpu_mode_options = [
+            self.get_locale_text("actions.touchbar-info.cpu-mode.pct", "Percentage (%)"),
+            self.get_locale_text("actions.touchbar-info.cpu-mode.pct-procs", "Percentage and Process Count"),
+            self.get_locale_text("actions.touchbar-info.cpu-mode.graph", "Live CPU Graph")
+        ]
+
+        # Network Mode & Unit Options
+        self.net_mode_options = [
+            self.get_locale_text("actions.touchbar-info.net-mode.rates", "Download / Upload Rates"),
+            self.get_locale_text("actions.touchbar-info.net-mode.graph", "Live Network Graph")
+        ]
+        self.net_unit_options = [
+            "Bytes (KB/s, MB/s)",
+            "Bits (Kbit/s, Mbit/s)"
+        ]
+
+        # RAM Mode Options
+        self.ram_mode_options = [
+            self.get_locale_text("actions.touchbar-info.ram-mode.pct", "Percentage (%)"),
+            self.get_locale_text("actions.touchbar-info.ram-mode.used-total", "Used / Total Memory (GB)"),
+            self.get_locale_text("actions.touchbar-info.ram-mode.graph", "Live RAM Graph")
+        ]
+
+        # Disk Mode & Mount Options
+        self.disk_mode_options = [
+            self.get_locale_text("actions.touchbar-info.disk-mode.pct", "Percentage (%)"),
+            self.get_locale_text("actions.touchbar-info.disk-mode.used-free", "Used / Free Space (GB)"),
+            self.get_locale_text("actions.touchbar-info.disk-mode.graph", "Disk Usage Graph")
+        ]
+        self.disk_mounts = self.get_system_disk_mounts()
+
+        # Weather Options
         self.weather_units = ["Fahrenheit (°F)", "Celsius (°C)"]
         self.weather_intervals = ["5 Minutes", "10 Minutes", "15 Minutes", "30 Minutes", "60 Minutes"]
 
@@ -213,6 +313,14 @@ class TouchBarInfoAction(ActionBase):
         self.all_weather_out_switches = []
         self.all_weather_out_color_btns = []
         self.all_weather_out_size_spins = []
+
+        # System Monitor Global Trackers
+        self.all_cpu_mode_combos = []
+        self.all_net_mode_combos = []
+        self.all_net_unit_combos = []
+        self.all_ram_mode_combos = []
+        self.all_disk_mode_combos = []
+        self.all_disk_mount_combos = []
 
         self.search_results_data = []
 
@@ -441,6 +549,74 @@ class TouchBarInfoAction(ActionBase):
                 "all_rows": [loc_entry, res_combo, unit_combo, ref_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
             }
 
+        # Helper to create CPU controls
+        def build_cpu_controls():
+            mode_model = Gtk.StringList()
+            for opt in self.cpu_mode_options: mode_model.append(opt)
+            mode_combo = Adw.ComboRow(
+                model=mode_model,
+                title=self.get_locale_text("actions.touchbar-info.cpu-mode.label", "CPU Display Mode"),
+                subtitle=self.get_locale_text("actions.touchbar-info.cpu-mode.subtitle", "Choose percentage, processes, or live graph")
+            )
+            self.all_cpu_mode_combos.append(mode_combo)
+            return {"mode_combo": mode_combo, "all_rows": [mode_combo]}
+
+        # Helper to create Network controls
+        def build_net_controls():
+            mode_model = Gtk.StringList()
+            for opt in self.net_mode_options: mode_model.append(opt)
+            mode_combo = Adw.ComboRow(
+                model=mode_model,
+                title=self.get_locale_text("actions.touchbar-info.net-mode.label", "Network Display Mode"),
+                subtitle=self.get_locale_text("actions.touchbar-info.net-mode.subtitle", "Choose download/upload rates or live graph")
+            )
+
+            unit_model = Gtk.StringList()
+            for opt in self.net_unit_options: unit_model.append(opt)
+            unit_combo = Adw.ComboRow(
+                model=unit_model,
+                title=self.get_locale_text("actions.touchbar-info.net-unit.label", "Network Speed Unit"),
+                subtitle=self.get_locale_text("actions.touchbar-info.net-unit.subtitle", "Choose Bytes (KB/s, MB/s) or Bits (Kbit/s, Mbit/s)")
+            )
+
+            self.all_net_mode_combos.append(mode_combo)
+            self.all_net_unit_combos.append(unit_combo)
+            return {"mode_combo": mode_combo, "unit_combo": unit_combo, "all_rows": [mode_combo, unit_combo]}
+
+        # Helper to create RAM controls
+        def build_ram_controls():
+            mode_model = Gtk.StringList()
+            for opt in self.ram_mode_options: mode_model.append(opt)
+            mode_combo = Adw.ComboRow(
+                model=mode_model,
+                title=self.get_locale_text("actions.touchbar-info.ram-mode.label", "RAM Display Mode"),
+                subtitle=self.get_locale_text("actions.touchbar-info.ram-mode.subtitle", "Choose percentage, GB used/total, or live graph")
+            )
+            self.all_ram_mode_combos.append(mode_combo)
+            return {"mode_combo": mode_combo, "all_rows": [mode_combo]}
+
+        # Helper to create Disk controls
+        def build_disk_controls():
+            mount_model = Gtk.StringList()
+            for m_path, m_disp in self.disk_mounts: mount_model.append(m_disp)
+            mount_combo = Adw.ComboRow(
+                model=mount_model,
+                title=self.get_locale_text("actions.touchbar-info.disk-select.label", "System Disk Mount"),
+                subtitle=self.get_locale_text("actions.touchbar-info.disk-select.subtitle", "Select system disk partition to monitor")
+            )
+
+            mode_model = Gtk.StringList()
+            for opt in self.disk_mode_options: mode_model.append(opt)
+            mode_combo = Adw.ComboRow(
+                model=mode_model,
+                title=self.get_locale_text("actions.touchbar-info.disk-mode.label", "Disk Display Mode"),
+                subtitle=self.get_locale_text("actions.touchbar-info.disk-mode.subtitle", "Choose percentage, GB used/free, or mini graph")
+            )
+
+            self.all_disk_mount_combos.append(mount_combo)
+            self.all_disk_mode_combos.append(mode_combo)
+            return {"mount_combo": mount_combo, "mode_combo": mode_combo, "all_rows": [mount_combo, mode_combo]}
+
         # Helper to create Section Expander with clean subsection expanders for split mode
         def create_section_expander(title_key, default_title, subtitle_key, default_sub, prefix_key):
             expander = Adw.ExpanderRow(
@@ -467,6 +643,10 @@ class TouchBarInfoAction(ActionBase):
             full_date_ctrls = build_date_controls()
             full_time_ctrls = build_time_controls()
             full_weather_ctrls = build_weather_controls()
+            full_cpu_ctrls = build_cpu_controls()
+            full_net_ctrls = build_net_controls()
+            full_ram_ctrls = build_ram_controls()
+            full_disk_ctrls = build_disk_controls()
 
             # --- 2. Top Subsection Expander ---
             top_expander = Adw.ExpanderRow(
@@ -483,11 +663,19 @@ class TouchBarInfoAction(ActionBase):
             top_date_ctrls = build_date_controls()
             top_time_ctrls = build_time_controls()
             top_weather_ctrls = build_weather_controls()
+            top_cpu_ctrls = build_cpu_controls()
+            top_net_ctrls = build_net_controls()
+            top_ram_ctrls = build_ram_controls()
+            top_disk_ctrls = build_disk_controls()
 
             top_expander.add_row(top_combo)
             for r in top_date_ctrls["all_rows"]: top_expander.add_row(r)
             for r in top_time_ctrls["all_rows"]: top_expander.add_row(r)
             for r in top_weather_ctrls["all_rows"]: top_expander.add_row(r)
+            for r in top_cpu_ctrls["all_rows"]: top_expander.add_row(r)
+            for r in top_net_ctrls["all_rows"]: top_expander.add_row(r)
+            for r in top_ram_ctrls["all_rows"]: top_expander.add_row(r)
+            for r in top_disk_ctrls["all_rows"]: top_expander.add_row(r)
 
             # --- 3. Bottom Subsection Expander ---
             bot_expander = Adw.ExpanderRow(
@@ -504,11 +692,19 @@ class TouchBarInfoAction(ActionBase):
             bot_date_ctrls = build_date_controls()
             bot_time_ctrls = build_time_controls()
             bot_weather_ctrls = build_weather_controls()
+            bot_cpu_ctrls = build_cpu_controls()
+            bot_net_ctrls = build_net_controls()
+            bot_ram_ctrls = build_ram_controls()
+            bot_disk_ctrls = build_disk_controls()
 
             bot_expander.add_row(bot_combo)
             for r in bot_date_ctrls["all_rows"]: bot_expander.add_row(r)
             for r in bot_time_ctrls["all_rows"]: bot_expander.add_row(r)
             for r in bot_weather_ctrls["all_rows"]: bot_expander.add_row(r)
+            for r in bot_cpu_ctrls["all_rows"]: bot_expander.add_row(r)
+            for r in bot_net_ctrls["all_rows"]: bot_expander.add_row(r)
+            for r in bot_ram_ctrls["all_rows"]: bot_expander.add_row(r)
+            for r in bot_disk_ctrls["all_rows"]: bot_expander.add_row(r)
 
             # Add rows to parent section expander
             expander.add_row(mode_combo)
@@ -517,20 +713,28 @@ class TouchBarInfoAction(ActionBase):
             for r in full_date_ctrls["all_rows"]: expander.add_row(r)
             for r in full_time_ctrls["all_rows"]: expander.add_row(r)
             for r in full_weather_ctrls["all_rows"]: expander.add_row(r)
+            for r in full_cpu_ctrls["all_rows"]: expander.add_row(r)
+            for r in full_net_ctrls["all_rows"]: expander.add_row(r)
+            for r in full_ram_ctrls["all_rows"]: expander.add_row(r)
+            for r in full_disk_ctrls["all_rows"]: expander.add_row(r)
 
             expander.add_row(top_expander)
             expander.add_row(bot_expander)
 
             # --- Unified Group Visibility Helper ---
-            def update_group_vis(widget_choice, is_active, date_ctrls, time_ctrls, weather_ctrls, is_full_mode=True):
-                # Hide all if group is not active (e.g. Full section is inactive in 2-widget mode)
+            def update_group_vis(widget_choice, is_active, date_ctrls, time_ctrls, weather_ctrls, cpu_ctrls, net_ctrls, ram_ctrls, disk_ctrls, is_full_mode=True):
+                # Hide all if group is not active
                 if not is_active:
                     for r in date_ctrls["all_rows"]: r.set_visible(False)
                     for r in time_ctrls["all_rows"]: r.set_visible(False)
                     for r in weather_ctrls["all_rows"]: r.set_visible(False)
+                    for r in cpu_ctrls["all_rows"]: r.set_visible(False)
+                    for r in net_ctrls["all_rows"]: r.set_visible(False)
+                    for r in ram_ctrls["all_rows"]: r.set_visible(False)
+                    for r in disk_ctrls["all_rows"]: r.set_visible(False)
                     return
 
-                # Date Visibility
+                # Date Visibility (Full: 1, 2 | Split: 1)
                 show_date = (widget_choice in [1, 2]) if is_full_mode else (widget_choice == 1)
                 date_ctrls["fmt_combo"].set_visible(show_date)
                 date_ctrls["font_row"].set_visible(show_date)
@@ -540,7 +744,7 @@ class TouchBarInfoAction(ActionBase):
                 date_ctrls["out_color_row"].set_visible(show_date and date_ctrls["out_sw"].get_active())
                 date_ctrls["out_size_spin"].set_visible(show_date and date_ctrls["out_sw"].get_active())
 
-                # Time Visibility
+                # Time Visibility (Full: 1, 3 | Split: 2)
                 show_time = (widget_choice in [1, 3]) if is_full_mode else (widget_choice == 2)
                 time_ctrls["sw_24h"].set_visible(show_time)
                 time_ctrls["sw_sec"].set_visible(show_time)
@@ -551,7 +755,7 @@ class TouchBarInfoAction(ActionBase):
                 time_ctrls["out_color_row"].set_visible(show_time and time_ctrls["out_sw"].get_active())
                 time_ctrls["out_size_spin"].set_visible(show_time and time_ctrls["out_sw"].get_active())
 
-                # Weather Visibility
+                # Weather Visibility (Full: 4 | Split: 3)
                 show_weather = (widget_choice == 4) if is_full_mode else (widget_choice == 3)
                 weather_ctrls["loc_entry"].set_visible(show_weather)
                 weather_ctrls["res_combo"].set_visible(show_weather and len(self.search_results_data) > 0)
@@ -563,6 +767,22 @@ class TouchBarInfoAction(ActionBase):
                 weather_ctrls["out_sw"].set_visible(show_weather)
                 weather_ctrls["out_color_row"].set_visible(show_weather and weather_ctrls["out_sw"].get_active())
                 weather_ctrls["out_size_spin"].set_visible(show_weather and weather_ctrls["out_sw"].get_active())
+
+                # CPU Visibility (Full: 5 | Split: 4)
+                show_cpu = (widget_choice == 5) if is_full_mode else (widget_choice == 4)
+                for r in cpu_ctrls["all_rows"]: r.set_visible(show_cpu)
+
+                # Network Visibility (Full: 6 | Split: 5)
+                show_net = (widget_choice == 6) if is_full_mode else (widget_choice == 5)
+                for r in net_ctrls["all_rows"]: r.set_visible(show_net)
+
+                # RAM Visibility (Full: 7 | Split: 6)
+                show_ram = (widget_choice == 7) if is_full_mode else (widget_choice == 6)
+                for r in ram_ctrls["all_rows"]: r.set_visible(show_ram)
+
+                # Disk Visibility (Full: 8 | Split: 7)
+                show_disk = (widget_choice == 8) if is_full_mode else (widget_choice == 7)
+                for r in disk_ctrls["all_rows"]: r.set_visible(show_disk)
 
             # Main Section Visibility Controller
             def update_visibility():
@@ -578,6 +798,10 @@ class TouchBarInfoAction(ActionBase):
                     date_ctrls=full_date_ctrls,
                     time_ctrls=full_time_ctrls,
                     weather_ctrls=full_weather_ctrls,
+                    cpu_ctrls=full_cpu_ctrls,
+                    net_ctrls=full_net_ctrls,
+                    ram_ctrls=full_ram_ctrls,
+                    disk_ctrls=full_disk_ctrls,
                     is_full_mode=True
                 )
 
@@ -588,6 +812,10 @@ class TouchBarInfoAction(ActionBase):
                     date_ctrls=top_date_ctrls,
                     time_ctrls=top_time_ctrls,
                     weather_ctrls=top_weather_ctrls,
+                    cpu_ctrls=top_cpu_ctrls,
+                    net_ctrls=top_net_ctrls,
+                    ram_ctrls=top_ram_ctrls,
+                    disk_ctrls=top_disk_ctrls,
                     is_full_mode=False
                 )
 
@@ -598,6 +826,10 @@ class TouchBarInfoAction(ActionBase):
                     date_ctrls=bot_date_ctrls,
                     time_ctrls=bot_time_ctrls,
                     weather_ctrls=bot_weather_ctrls,
+                    cpu_ctrls=bot_cpu_ctrls,
+                    net_ctrls=bot_net_ctrls,
+                    ram_ctrls=bot_ram_ctrls,
+                    disk_ctrls=bot_disk_ctrls,
                     is_full_mode=False
                 )
 
@@ -692,6 +924,14 @@ class TouchBarInfoAction(ActionBase):
         for btn in self.all_weather_out_color_btns: btn.connect("color-set", self.on_weather_out_color_set)
         for spin in self.all_weather_out_size_spins: spin.connect("notify::value", self.on_weather_out_size_changed)
 
+        # System Monitor Signals
+        for combo in self.all_cpu_mode_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("cpu_mode_idx", c.get_selected()))
+        for combo in self.all_net_mode_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("net_mode_idx", c.get_selected()))
+        for combo in self.all_net_unit_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("net_unit_idx", c.get_selected()))
+        for combo in self.all_ram_mode_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("ram_mode_idx", c.get_selected()))
+        for combo in self.all_disk_mode_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("disk_mode_idx", c.get_selected()))
+        for combo in self.all_disk_mount_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("disk_mount_idx", c.get_selected()))
+
         return [
             self.sec_a_expander,
             self.sec_b_expander,
@@ -721,6 +961,14 @@ class TouchBarInfoAction(ActionBase):
         sec_c_full = settings.setdefault("sec_c_full_widget", 0)
         sec_c_top = settings.setdefault("sec_c_top_widget", 0)
         sec_c_bot = settings.setdefault("sec_c_bottom_widget", 0)
+
+        # System Monitor Defaults
+        cpu_mode_idx = settings.setdefault("cpu_mode_idx", 0)
+        net_mode_idx = settings.setdefault("net_mode_idx", 0)
+        net_unit_idx = settings.setdefault("net_unit_idx", 0)
+        ram_mode_idx = settings.setdefault("ram_mode_idx", 0)
+        disk_mode_idx = settings.setdefault("disk_mode_idx", 0)
+        disk_mount_idx = settings.setdefault("disk_mount_idx", 0)
 
         # Date Font & Fill/Outline Defaults
         date_font_str = settings.setdefault("date_font_str", "DejaVu Sans Bold 25")
@@ -772,6 +1020,20 @@ class TouchBarInfoAction(ActionBase):
         self.sec_c_full_combo.set_selected(sec_c_full)
         self.sec_c_top_combo.set_selected(sec_c_top)
         self.sec_c_bot_combo.set_selected(sec_c_bot)
+
+        # Sync System Monitor Combos
+        for combo in self.all_cpu_mode_combos:
+            if 0 <= cpu_mode_idx < len(self.cpu_mode_options): combo.set_selected(cpu_mode_idx)
+        for combo in self.all_net_mode_combos:
+            if 0 <= net_mode_idx < len(self.net_mode_options): combo.set_selected(net_mode_idx)
+        for combo in self.all_net_unit_combos:
+            if 0 <= net_unit_idx < len(self.net_unit_options): combo.set_selected(net_unit_idx)
+        for combo in self.all_ram_mode_combos:
+            if 0 <= ram_mode_idx < len(self.ram_mode_options): combo.set_selected(ram_mode_idx)
+        for combo in self.all_disk_mode_combos:
+            if 0 <= disk_mode_idx < len(self.disk_mode_options): combo.set_selected(disk_mode_idx)
+        for combo in self.all_disk_mount_combos:
+            if 0 <= disk_mount_idx < len(self.disk_mounts): combo.set_selected(disk_mount_idx)
 
         # Sync Date Font & Fill/Outline Controls
         for fb in self.all_date_font_btns: fb.set_font(date_font_str)
@@ -1191,14 +1453,34 @@ class TouchBarInfoAction(ActionBase):
                     return size
         return (800, 100)
 
-    # --- PIL Render Helper for Text with Fill and Outline ---
-    def render_styled_text(self, draw: ImageDraw.ImageDraw, pos: tuple[float, float], text: str, font, fill_enabled: bool, fill_color: tuple, outline_enabled: bool, outline_color: tuple, outline_size: int, anchor: str = "mm"):
+    # --- PIL Render Helpers ---
+    def render_styled_text(self, draw: ImageDraw.ImageDraw, pos: tuple[float, float], text: str, font, fill_enabled: bool = True, fill_color: tuple = (255, 255, 255, 255), outline_enabled: bool = False, outline_color: tuple = (0, 0, 0, 255), outline_size: int = 2, anchor: str = "mm"):
         fill = fill_color if fill_enabled else (0, 0, 0, 0)
         stroke_w = outline_size if outline_enabled else 0
         stroke_f = outline_color if outline_enabled else None
         draw.text(pos, text, fill=fill, font=font, stroke_width=stroke_w, stroke_fill=stroke_f, anchor=anchor)
 
-    # --- Render Helpers ---
+    def draw_history_graph(self, draw: ImageDraw.ImageDraw, graph_box: tuple[int, int, int, int], history: list[float], max_val: float = 100.0, color=(0, 200, 255, 255)):
+        gx_min, gy_min, gx_max, gy_max = graph_box
+        gw = gx_max - gx_min
+        gh = gy_max - gy_min
+        if gw < 10 or gh < 10 or not history:
+            return
+
+        points = []
+        step_x = gw / max(1, len(history) - 1)
+        for i, val in enumerate(history):
+            px = gx_min + (i * step_x)
+            norm = min(1.0, max(0.0, float(val) / max(1.0, float(max_val))))
+            py = gy_max - (norm * gh)
+            points.append((px, py))
+
+        if len(points) >= 2:
+            fill_poly = list(points) + [(gx_max, gy_max), (gx_min, gy_max)]
+            fill_color = (color[0], color[1], color[2], 60)
+            draw.polygon(fill_poly, fill=fill_color)
+            draw.line(points, fill=color, width=2)
+
     def draw_stacked(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], date_str: str, time_str: str, font_date, font_time, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz):
         x_min, y_min, x_max, y_max = box
         w = x_max - x_min
@@ -1221,11 +1503,23 @@ class TouchBarInfoAction(ActionBase):
         self.render_styled_text(draw, (center_x, date_y), date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz, anchor="mm")
         self.render_styled_text(draw, (center_x, time_y), time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz, anchor="mm")
 
-    def draw_single(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], text: str, font, fill_en, fill_col, out_en, out_col, out_sz):
+    def draw_single(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], text: str, font, fill_en=True, fill_col=(255, 255, 255, 255), out_en=False, out_col=(0, 0, 0, 255), out_sz=2):
         x_min, y_min, x_max, y_max = box
         center_x = x_min + (x_max - x_min) / 2
         center_y = y_min + (y_max - y_min) / 2
         self.render_styled_text(draw, (center_x, center_y), text, font, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+
+    def load_widget_icon(self, icon_filename: str, target_h: int) -> Image.Image | None:
+        icon_path = os.path.join(self.plugin_base.PATH, "assets", icon_filename)
+        if os.path.exists(icon_path):
+            try:
+                raw_img = Image.open(icon_path).convert("RGBA")
+                aspect = raw_img.width / max(1, raw_img.height)
+                target_w = int(target_h * aspect)
+                return raw_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+            except Exception as e:
+                log.error(f"TouchBarInfo: Error loading icon {icon_path}: {e}")
+        return None
 
     def draw_weather(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_weather, font_location, fill_en, fill_col, out_en, out_col, out_sz):
         x_min, y_min, x_max, y_max = box
@@ -1239,19 +1533,8 @@ class TouchBarInfoAction(ActionBase):
         location_str = cache.get("location", "Miami")
 
         icon_file = self.get_weather_icon_filename(wmo_code, is_day)
-        icon_path = os.path.join(self.plugin_base.PATH, "assets", "weather-icons", icon_file)
-
         target_icon_h = int(box_h * 0.70)
-        icon_img = None
-
-        if os.path.exists(icon_path):
-            try:
-                raw_img = Image.open(icon_path).convert("RGBA")
-                aspect = raw_img.width / max(1, raw_img.height)
-                target_icon_w = int(target_icon_h * aspect)
-                icon_img = raw_img.resize((target_icon_w, target_icon_h), Image.Resampling.LANCZOS)
-            except Exception as e:
-                log.error(f"TouchBarInfo: Failed loading weather icon {icon_path}: {e}")
+        icon_img = self.load_widget_icon(os.path.join("weather-icons", icon_file), target_icon_h)
 
         margin_x = int(box_w * 0.08)
         if icon_img is not None:
@@ -1283,6 +1566,199 @@ class TouchBarInfoAction(ActionBase):
         self.render_styled_text(draw, (center_text_x, temp_y), temp_str, font_weather, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
         self.render_styled_text(draw, (center_text_x, loc_y), location_str, font_location, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
+    # --- System Widget Drawers ---
+    def draw_cpu_widget(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_main, font_sub, fill_en, fill_col, out_en, out_col, out_sz, cpu_mode: int):
+        x_min, y_min, x_max, y_max = box
+        box_w = x_max - x_min
+        box_h = y_max - y_min
+
+        target_icon_h = int(box_h * 0.65)
+        icon_img = self.load_widget_icon("cpu_icon.png", target_icon_h)
+
+        margin_x = int(box_w * 0.08)
+        if icon_img is not None:
+            icon_x = x_min + margin_x
+            icon_y = y_min + int((box_h - target_icon_h) / 2)
+            image.paste(icon_img, (icon_x, icon_y), icon_img)
+            content_x = icon_x + icon_img.width + int(margin_x * 0.8)
+        else:
+            content_x = x_min + margin_x
+
+        latest_cpu = self.cpu_history[-1] if self.cpu_history else 0.0
+
+        if cpu_mode == 2: # Live Graph
+            graph_box = (content_x, y_min + int(box_h * 0.15), x_max - margin_x, y_max - int(box_h * 0.15))
+            self.draw_history_graph(draw, graph_box, self.cpu_history, max_val=100.0, color=(0, 200, 255, 255))
+        elif cpu_mode == 1: # Percentage + Process Count
+            top_str = f"CPU {round(latest_cpu)}%"
+            bot_str = f"{self.process_count} Procs"
+            bbox_t = draw.textbbox((0, 0), top_str, font=font_main)
+            bbox_b = draw.textbbox((0, 0), bot_str, font=font_sub)
+            th, bh = bbox_t[3] - bbox_t[1], bbox_b[3] - bbox_b[1]
+            tw, bw = bbox_t[2] - bbox_t[0], bbox_b[2] - bbox_b[0]
+            center_x = content_x + (max(tw, bw) / 2)
+
+            spacing = max(1, int(box_h * 0.04))
+            total_h = th + spacing + bh
+            start_y = y_min + (box_h - total_h) / 2
+            top_y = start_y + (th / 2)
+            bot_y = start_y + th + spacing + (bh / 2)
+
+            self.render_styled_text(draw, (center_x, top_y), top_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+        else: # Percentage %
+            main_str = f"CPU {round(latest_cpu)}%"
+            center_x = content_x + ((x_max - margin_x - content_x) / 2)
+            center_y = y_min + (box_h / 2)
+            self.render_styled_text(draw, (center_x, center_y), main_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+
+    def draw_net_widget(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_main, font_sub, fill_en, fill_col, out_en, out_col, out_sz, net_mode: int, net_unit: int):
+        x_min, y_min, x_max, y_max = box
+        box_w = x_max - x_min
+        box_h = y_max - y_min
+
+        target_icon_h = int(box_h * 0.65)
+        icon_img = self.load_widget_icon("net_icon.png", target_icon_h)
+
+        margin_x = int(box_w * 0.08)
+        if icon_img is not None:
+            icon_x = x_min + margin_x
+            icon_y = y_min + int((box_h - target_icon_h) / 2)
+            image.paste(icon_img, (icon_x, icon_y), icon_img)
+            content_x = icon_x + icon_img.width + int(margin_x * 0.8)
+        else:
+            content_x = x_min + margin_x
+
+        if net_mode == 1: # Live Graph
+            graph_box = (content_x, y_min + int(box_h * 0.15), x_max - margin_x, y_max - int(box_h * 0.15))
+            max_r = max(50.0, max(self.net_history) if self.net_history else 100.0)
+            self.draw_history_graph(draw, graph_box, self.net_history, max_val=max_r, color=(100, 255, 100, 255))
+        else: # Rates
+            if net_unit == 1: # Bits
+                rx_val, rx_u = (self.net_rx_rate * 8 / 1000, "Kbps") if (self.net_rx_rate * 8) < 1000000 else (self.net_rx_rate * 8 / 1000000, "Mbps")
+                tx_val, tx_u = (self.net_tx_rate * 8 / 1000, "Kbps") if (self.net_tx_rate * 8) < 1000000 else (self.net_tx_rate * 8 / 1000000, "Mbps")
+            else: # Bytes
+                rx_val, rx_u = (self.net_rx_rate / 1024, "KB/s") if self.net_rx_rate < 1048576 else (self.net_rx_rate / 1048576, "MB/s")
+                tx_val, tx_u = (self.net_tx_rate / 1024, "KB/s") if self.net_tx_rate < 1048576 else (self.net_tx_rate / 1048576, "MB/s")
+
+            rx_str = f"↓ {rx_val:.1f} {rx_u}"
+            tx_str = f"↑ {tx_val:.1f} {tx_u}"
+
+            bbox_r = draw.textbbox((0, 0), rx_str, font=font_main)
+            bbox_t = draw.textbbox((0, 0), tx_str, font=font_sub)
+            rh, th = bbox_r[3] - bbox_r[1], bbox_t[3] - bbox_t[1]
+            rw, tw = bbox_r[2] - bbox_r[0], bbox_t[2] - bbox_t[0]
+            center_x = content_x + (max(rw, tw) / 2)
+
+            spacing = max(1, int(box_h * 0.04))
+            total_h = rh + spacing + th
+            start_y = y_min + (box_h - total_h) / 2
+            rx_y = start_y + (rh / 2)
+            tx_y = start_y + rh + spacing + (th / 2)
+
+            self.render_styled_text(draw, (center_x, rx_y), rx_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            self.render_styled_text(draw, (center_x, tx_y), tx_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+
+    def draw_ram_widget(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_main, font_sub, fill_en, fill_col, out_en, out_col, out_sz, ram_mode: int):
+        x_min, y_min, x_max, y_max = box
+        box_w = x_max - x_min
+        box_h = y_max - y_min
+
+        target_icon_h = int(box_h * 0.65)
+        icon_img = self.load_widget_icon("ram_icon.png", target_icon_h)
+
+        margin_x = int(box_w * 0.08)
+        if icon_img is not None:
+            icon_x = x_min + margin_x
+            icon_y = y_min + int((box_h - target_icon_h) / 2)
+            image.paste(icon_img, (icon_x, icon_y), icon_img)
+            content_x = icon_x + icon_img.width + int(margin_x * 0.8)
+        else:
+            content_x = x_min + margin_x
+
+        latest_ram = self.ram_history[-1] if self.ram_history else 0.0
+
+        if ram_mode == 2: # Live Graph
+            graph_box = (content_x, y_min + int(box_h * 0.15), x_max - margin_x, y_max - int(box_h * 0.15))
+            self.draw_history_graph(draw, graph_box, self.ram_history, max_val=100.0, color=(255, 170, 0, 255))
+        elif ram_mode == 1: # Used / Total GB
+            mem = psutil.virtual_memory()
+            used_gb = mem.used / (1024**3)
+            tot_gb = mem.total / (1024**3)
+            main_str = f"{used_gb:.1f} / {tot_gb:.1f} GB"
+            center_x = content_x + ((x_max - margin_x - content_x) / 2)
+            center_y = y_min + (box_h / 2)
+            self.render_styled_text(draw, (center_x, center_y), main_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+        else: # Percentage %
+            main_str = f"RAM {round(latest_ram)}%"
+            center_x = content_x + ((x_max - margin_x - content_x) / 2)
+            center_y = y_min + (box_h / 2)
+            self.render_styled_text(draw, (center_x, center_y), main_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+
+    def draw_disk_widget(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_main, font_sub, fill_en, fill_col, out_en, out_col, out_sz, disk_mode: int, disk_mount_idx: int):
+        x_min, y_min, x_max, y_max = box
+        box_w = x_max - x_min
+        box_h = y_max - y_min
+
+        target_icon_h = int(box_h * 0.65)
+        icon_img = self.load_widget_icon("disk_icon.png", target_icon_h)
+
+        margin_x = int(box_w * 0.08)
+        if icon_img is not None:
+            icon_x = x_min + margin_x
+            icon_y = y_min + int((box_h - target_icon_h) / 2)
+            image.paste(icon_img, (icon_x, icon_y), icon_img)
+            content_x = icon_x + icon_img.width + int(margin_x * 0.8)
+        else:
+            content_x = x_min + margin_x
+
+        mount_path = "/"
+        if hasattr(self, "disk_mounts") and 0 <= disk_mount_idx < len(self.disk_mounts):
+            mount_path, _ = self.disk_mounts[disk_mount_idx]
+
+        pct = 0.0
+        used_gb = 0.0
+        free_gb = 0.0
+        try:
+            du = psutil.disk_usage(mount_path)
+            pct = du.percent
+            used_gb = du.used / (1024**3)
+            free_gb = du.free / (1024**3)
+        except Exception:
+            pass
+
+        if disk_mode == 2: # Mini bar graph
+            graph_box = (content_x, y_min + int(box_h * 0.25), x_max - margin_x, y_max - int(box_h * 0.25))
+            gx_min, gy_min, gx_max, gy_max = graph_box
+            gw = gx_max - gx_min
+            gh = gy_max - gy_min
+            fill_w = int(gw * (pct / 100.0))
+            draw.rectangle([gx_min, gy_min, gx_max, gy_max], outline=(150, 150, 150, 255), width=1)
+            if fill_w > 0:
+                draw.rectangle([gx_min, gy_min, gx_min + fill_w, gy_max], fill=(255, 100, 100, 200))
+        elif disk_mode == 1: # Used / Free GB
+            top_str = f"{used_gb:.0f}G Used"
+            bot_str = f"{free_gb:.0f}G Free"
+            bbox_t = draw.textbbox((0, 0), top_str, font=font_main)
+            bbox_b = draw.textbbox((0, 0), bot_str, font=font_sub)
+            th, bh = bbox_t[3] - bbox_t[1], bbox_b[3] - bbox_b[1]
+            tw, bw = bbox_t[2] - bbox_t[0], bbox_b[2] - bbox_b[0]
+            center_x = content_x + (max(tw, bw) / 2)
+
+            spacing = max(1, int(box_h * 0.04))
+            total_h = th + spacing + bh
+            start_y = y_min + (box_h - total_h) / 2
+            top_y = start_y + (th / 2)
+            bot_y = start_y + th + spacing + (bh / 2)
+
+            self.render_styled_text(draw, (center_x, top_y), top_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+        else: # Percentage %
+            main_str = f"Disk {round(pct)}%"
+            center_x = content_x + ((x_max - margin_x - content_x) / 2)
+            center_y = y_min + (box_h / 2)
+            self.render_styled_text(draw, (center_x, center_y), main_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+
     def update_display(self) -> None:
         settings = self.get_settings() or {}
         use_24h = settings.get("use_24h", False)
@@ -1304,6 +1780,14 @@ class TouchBarInfoAction(ActionBase):
         sec_c_full = settings.get("sec_c_full_widget", 0)
         sec_c_top = settings.get("sec_c_top_widget", 0)
         sec_c_bot = settings.get("sec_c_bottom_widget", 0)
+
+        # System Monitor Modes
+        cpu_mode_idx = settings.get("cpu_mode_idx", 0)
+        net_mode_idx = settings.get("net_mode_idx", 0)
+        net_unit_idx = settings.get("net_unit_idx", 0)
+        ram_mode_idx = settings.get("ram_mode_idx", 0)
+        disk_mode_idx = settings.get("disk_mode_idx", 0)
+        disk_mount_idx = settings.get("disk_mount_idx", 0)
 
         # Date Font & Fill/Outline Settings
         date_font_str = settings.get("date_font_str", "DejaVu Sans Bold 25")
@@ -1349,8 +1833,10 @@ class TouchBarInfoAction(ActionBase):
 
         cache_temp = self.weather_cache.get("temp_str", "--°") if hasattr(self, "weather_cache") else "--°"
         cache_loc = self.weather_cache.get("location", "") if hasattr(self, "weather_cache") else ""
+        latest_cpu = self.cpu_history[-1] if self.cpu_history else 0.0
+        latest_ram = self.ram_history[-1] if self.ram_history else 0.0
 
-        combined_key = f"{date_str}|{time_str}|{cache_temp}|{cache_loc}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{date_font_str}|{date_fill_en}|{date_fill_col_hex}|{date_out_en}|{date_out_col_hex}|{date_out_sz}|{time_font_str}|{time_fill_en}|{time_fill_col_hex}|{time_out_en}|{time_out_col_hex}|{time_out_sz}|{weather_font_str}|{weather_fill_en}|{weather_fill_col_hex}|{weather_out_en}|{weather_out_col_hex}|{weather_out_sz}"
+        combined_key = f"{date_str}|{time_str}|{cache_temp}|{cache_loc}|{latest_cpu:.1f}|{latest_ram:.1f}|{self.net_tx_rate:.0f}|{self.net_rx_rate:.0f}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{cpu_mode_idx}|{net_mode_idx}|{net_unit_idx}|{ram_mode_idx}|{disk_mode_idx}|{disk_mount_idx}|{date_font_str}|{date_fill_en}|{date_fill_col_hex}|{date_out_en}|{date_out_col_hex}|{date_out_sz}|{time_font_str}|{time_fill_en}|{time_fill_col_hex}|{time_out_en}|{time_out_col_hex}|{time_out_sz}|{weather_font_str}|{weather_fill_en}|{weather_fill_col_hex}|{weather_out_en}|{weather_out_col_hex}|{weather_out_sz}"
 
         if combined_key == self.last_rendered_key:
             return
@@ -1370,6 +1856,13 @@ class TouchBarInfoAction(ActionBase):
         font_weather_sub = self.get_font_from_desc(weather_font_str, default_size=22, scale_factor=1.0)
         font_loc_sub = self.get_font_from_desc(weather_font_str, default_size=22, scale_factor=0.75)
 
+        # Monitor Fonts
+        font_mon_main_full = self.get_font_from_desc("DejaVu Sans Bold 22", default_size=22, scale_factor=1.3)
+        font_mon_sub_full = self.get_font_from_desc("DejaVu Sans Bold 16", default_size=16, scale_factor=1.0)
+
+        font_mon_main_sub = self.get_font_from_desc("DejaVu Sans Bold 18", default_size=18, scale_factor=1.0)
+        font_mon_sub_sub = self.get_font_from_desc("DejaVu Sans Bold 13", default_size=13, scale_factor=1.0)
+
         date_fill_col = self.hex_to_rgba_tuple(date_fill_col_hex, default=(170, 200, 230, 255))
         date_out_col = self.hex_to_rgba_tuple(date_out_col_hex, default=(0, 0, 0, 255))
 
@@ -1378,6 +1871,8 @@ class TouchBarInfoAction(ActionBase):
 
         weather_fill_col = self.hex_to_rgba_tuple(weather_fill_col_hex, default=(255, 255, 255, 255))
         weather_out_col = self.hex_to_rgba_tuple(weather_out_col_hex, default=(0, 0, 0, 255))
+
+        white_col = (255, 255, 255, 255)
 
         # --- Section Bounding Boxes ---
         box_a_full = (0, 0, 200, 100)
@@ -1402,6 +1897,14 @@ class TouchBarInfoAction(ActionBase):
                     self.draw_single(draw, full_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
                 elif full_choice == 4: # Weather
                     self.draw_weather(image, draw, full_box, font_weather_full, font_loc_full, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
+                elif full_choice == 5: # CPU Usage
+                    self.draw_cpu_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, cpu_mode_idx)
+                elif full_choice == 6: # Network Activity
+                    self.draw_net_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
+                elif full_choice == 7: # RAM Usage
+                    self.draw_ram_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, ram_mode_idx)
+                elif full_choice == 8: # Disk Usage
+                    self.draw_disk_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
             else: # 2 Widgets (Split Top / Bottom)
                 # Top Sub-slot
                 if top_choice == 1: # Date
@@ -1410,6 +1913,14 @@ class TouchBarInfoAction(ActionBase):
                     self.draw_single(draw, top_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
                 elif top_choice == 3: # Weather
                     self.draw_weather(image, draw, top_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
+                elif top_choice == 4: # CPU Usage
+                    self.draw_cpu_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, cpu_mode_idx)
+                elif top_choice == 5: # Network Activity
+                    self.draw_net_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
+                elif top_choice == 6: # RAM Usage
+                    self.draw_ram_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, ram_mode_idx)
+                elif top_choice == 7: # Disk Usage
+                    self.draw_disk_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
 
                 # Bottom Sub-slot
                 if bot_choice == 1: # Date
@@ -1418,6 +1929,14 @@ class TouchBarInfoAction(ActionBase):
                     self.draw_single(draw, bot_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
                 elif bot_choice == 3: # Weather
                     self.draw_weather(image, draw, bot_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
+                elif bot_choice == 4: # CPU Usage
+                    self.draw_cpu_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, cpu_mode_idx)
+                elif bot_choice == 5: # Network Activity
+                    self.draw_net_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
+                elif bot_choice == 6: # RAM Usage
+                    self.draw_ram_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, ram_mode_idx)
+                elif bot_choice == 7: # Disk Usage
+                    self.draw_disk_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
 
         render_section(sec_a_mode, sec_a_full, sec_a_top, sec_a_bot, box_a_full, box_a_top, box_a_bot)
         render_section(sec_b_mode, sec_b_full, sec_b_top, sec_b_bot, box_b_full, box_b_top, box_b_bot)
