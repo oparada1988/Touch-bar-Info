@@ -345,7 +345,7 @@ class TouchBarInfoAction(ActionBase):
 
             return loc_entry, res_combo, unit_combo, ref_combo, fam_combo, size_spin, color_row, color_btn
 
-        # Helper to create Section Expander with direct flat control rows
+        # Helper to create Section Expander with clean subsection expanders for split mode
         def create_section_expander(title_key, default_title, subtitle_key, default_sub, prefix_key):
             expander = Adw.ExpanderRow(
                 title=self.get_locale_text(title_key, default_title),
@@ -375,13 +375,17 @@ class TouchBarInfoAction(ActionBase):
             full_time_rows = [ft_24h, ft_sec, ft_fam, ft_size, ft_col_row]
             full_weather_rows = [fw_loc, fw_res, fw_unit, fw_ref, fw_fam, fw_size, fw_col_row]
 
-            # --- 2. Top Subsection Group ---
+            # --- 2. Top Subsection Expander ---
+            top_expander = Adw.ExpanderRow(
+                title=self.get_locale_text("actions.touchbar-info.top-subsection.label", "Top Subsection (Y: 0-50px)"),
+                subtitle=self.get_locale_text("actions.touchbar-info.top-subsection.subtitle", "Configure widget for top half of section")
+            )
             top_model = Gtk.StringList()
             for opt in self.split_widget_options: top_model.append(opt)
             top_combo = Adw.ComboRow(
                 model=top_model,
-                title=self.get_locale_text("actions.touchbar-info.top-widget.label", "Top Subsection Widget"),
-                subtitle=self.get_locale_text("actions.touchbar-info.top-widget.subtitle", "Widget assigned to top half (Y: 0-50px)")
+                title=self.get_locale_text("actions.touchbar-info.widget-selector.label", "Select Widget"),
+                subtitle=self.get_locale_text("actions.touchbar-info.widget-selector.subtitle", "Choose widget to display in this subsection")
             )
             td_fmt, td_fam, td_size, td_col_row, _ = build_date_controls()
             tt_24h, tt_sec, tt_fam, tt_size, tt_col_row, _ = build_time_controls()
@@ -390,13 +394,22 @@ class TouchBarInfoAction(ActionBase):
             top_time_rows = [tt_24h, tt_sec, tt_fam, tt_size, tt_col_row]
             top_weather_rows = [tw_loc, tw_res, tw_unit, tw_ref, tw_fam, tw_size, tw_col_row]
 
-            # --- 3. Bottom Subsection Group ---
+            top_expander.add_row(top_combo)
+            for r in top_date_rows: top_expander.add_row(r)
+            for r in top_time_rows: top_expander.add_row(r)
+            for r in top_weather_rows: top_expander.add_row(r)
+
+            # --- 3. Bottom Subsection Expander ---
+            bot_expander = Adw.ExpanderRow(
+                title=self.get_locale_text("actions.touchbar-info.bottom-subsection.label", "Bottom Subsection (Y: 50-100px)"),
+                subtitle=self.get_locale_text("actions.touchbar-info.bottom-subsection.subtitle", "Configure widget for bottom half of section")
+            )
             bot_model = Gtk.StringList()
             for opt in self.split_widget_options: bot_model.append(opt)
             bot_combo = Adw.ComboRow(
                 model=bot_model,
-                title=self.get_locale_text("actions.touchbar-info.bottom-widget.label", "Bottom Subsection Widget"),
-                subtitle=self.get_locale_text("actions.touchbar-info.bottom-widget.subtitle", "Widget assigned to bottom half (Y: 50-100px)")
+                title=self.get_locale_text("actions.touchbar-info.widget-selector.label", "Select Widget"),
+                subtitle=self.get_locale_text("actions.touchbar-info.widget-selector.subtitle", "Choose widget to display in this subsection")
             )
             bd_fmt, bd_fam, bd_size, bd_col_row, _ = build_date_controls()
             bt_24h, bt_sec, bt_fam, bt_size, bt_col_row, _ = build_time_controls()
@@ -405,7 +418,12 @@ class TouchBarInfoAction(ActionBase):
             bot_time_rows = [bt_24h, bt_sec, bt_fam, bt_size, bt_col_row]
             bot_weather_rows = [bw_loc, bw_res, bw_unit, bw_ref, bw_fam, bw_size, bw_col_row]
 
-            # Add rows in strict sequential order: Dropdown followed immediately by its flat control rows
+            bot_expander.add_row(bot_combo)
+            for r in bot_date_rows: bot_expander.add_row(r)
+            for r in bot_time_rows: bot_expander.add_row(r)
+            for r in bot_weather_rows: bot_expander.add_row(r)
+
+            # Add rows to parent section expander
             expander.add_row(mode_combo)
 
             expander.add_row(full_combo)
@@ -413,15 +431,8 @@ class TouchBarInfoAction(ActionBase):
             for r in full_time_rows: expander.add_row(r)
             for r in full_weather_rows: expander.add_row(r)
 
-            expander.add_row(top_combo)
-            for r in top_date_rows: expander.add_row(r)
-            for r in top_time_rows: expander.add_row(r)
-            for r in top_weather_rows: expander.add_row(r)
-
-            expander.add_row(bot_combo)
-            for r in bot_date_rows: expander.add_row(r)
-            for r in bot_time_rows: expander.add_row(r)
-            for r in bot_weather_rows: expander.add_row(r)
+            expander.add_row(top_expander)
+            expander.add_row(bot_expander)
 
             # Section Visibility Controller
             def update_visibility():
@@ -448,8 +459,8 @@ class TouchBarInfoAction(ActionBase):
                     for r in full_weather_rows: r.set_visible(False)
 
                 # Split Subsection Rows Visibility
-                top_combo.set_visible(not is_full)
-                bot_combo.set_visible(not is_full)
+                top_expander.set_visible(not is_full)
+                bot_expander.set_visible(not is_full)
 
                 if not is_full:
                     t_sel = top_combo.get_selected()
