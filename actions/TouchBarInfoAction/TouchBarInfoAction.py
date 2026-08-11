@@ -144,50 +144,56 @@ class TouchBarInfoAction(ActionBase):
 
         for cmd in lsblk_cmds:
             try:
-                out = subprocess.check_output(cmd, text=True, timeout=2)
-                data = json.loads(out)
+                p = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+                if p.stdout and p.stdout.strip().startswith('{'):
+                    data = json.loads(p.stdout)
 
-                def parse_devs(dev_list):
-                    for item in dev_list:
-                        name = item.get("name", "")
-                        label = item.get("label", "")
-                        fstype = item.get("fstype", "")
+                    def parse_devs(dev_list):
+                        for item in dev_list:
+                            name = item.get("name", "")
+                            label = item.get("label", "")
+                            fstype = item.get("fstype", "")
 
-                        raw_mounts = list(item.get("mountpoints") or [])
-                        if item.get("mountpoint"):
-                            raw_mounts.append(item.get("mountpoint"))
+                            raw_mounts = list(item.get("mountpoints") or [])
+                            if item.get("mountpoint"):
+                                raw_mounts.append(item.get("mountpoint"))
 
-                        valid_mounts = [m for m in raw_mounts if m and not m.startswith(("/boot", "/run", "/sys", "/proc", "/dev"))]
+                            valid_mounts = [m for m in raw_mounts if m and not m.startswith(("/boot", "/run", "/sys", "/proc", "/dev"))]
 
-                        for mount in valid_mounts:
-                            if mount not in seen and fstype not in ["swap", "squashfs", "iso9660"]:
-                                seen.add(mount)
-                                disp_name = f"{label} ({mount} — {name})" if label else f"{mount} ({name})"
-                                disks.append((mount, disp_name))
+                            for mount in valid_mounts:
+                                if mount not in seen and fstype not in ["swap", "squashfs", "iso9660"]:
+                                    seen.add(mount)
+                                    disp_name = f"{label} ({mount} — {name})" if label else f"{mount} ({name})"
+                                    disks.append((mount, disp_name))
 
-                        if "children" in item:
-                            parse_devs(item["children"])
+                            if "children" in item:
+                                parse_devs(item["children"])
 
-                parse_devs(data.get("blockdevices", []))
-                if disks:
-                    break
+                    parse_devs(data.get("blockdevices", []))
+                    if disks:
+                        break
             except Exception:
                 pass
 
         if not disks:
-            try:
-                out = subprocess.check_output(['flatpak-spawn', '--host', 'df', '-h', '-x', 'tmpfs', '-x', 'devtmpfs', '-x', 'squashfs'], text=True, timeout=2)
-                lines = out.strip().splitlines()[1:]
-                for line in lines:
-                    parts = line.split()
-                    if len(parts) >= 6:
-                        dev, mount = parts[0], parts[5]
-                        if dev.startswith('/dev/') and not mount.startswith(('/boot', '/run', '/sys', '/proc', '/dev')):
-                            if mount not in seen:
-                                seen.add(mount)
-                                disks.append((mount, f"{mount} ({dev})"))
-            except Exception as e:
-                log.warning(f"TouchBarInfo: df fallback error: {e}")
+            for df_bin in ['/usr/bin/df', 'df']:
+                try:
+                    cmd = ['flatpak-spawn', '--host', df_bin, '-k']
+                    p = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+                    if p.stdout:
+                        lines = p.stdout.strip().splitlines()[1:]
+                        for line in lines:
+                            parts = line.split()
+                            if len(parts) >= 6:
+                                dev, mount = parts[0], parts[5]
+                                if dev.startswith('/dev/') and not mount.startswith(('/boot', '/run', '/sys', '/proc', '/dev')):
+                                    if mount not in seen:
+                                        seen.add(mount)
+                                        disks.append((mount, f"{mount} ({dev})"))
+                        if disks:
+                            break
+                except Exception:
+                    pass
 
         if not disks:
             seen_devs = set()
@@ -1761,21 +1767,23 @@ class TouchBarInfoAction(ActionBase):
             self.render_styled_text(draw, (center_x, center_y), main_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
     def get_disk_usage_host(self, mount_path: str) -> tuple[float, float, float]:
-        try:
-            cmd = ['flatpak-spawn', '--host', 'df', '-B1', mount_path]
-            out = subprocess.check_output(cmd, text=True, timeout=2)
-            lines = out.strip().splitlines()
-            if len(lines) >= 2:
-                parts = lines[-1].split()
-                if len(parts) >= 5:
-                    total_b = float(parts[1])
-                    used_b = float(parts[2])
-                    free_b = float(parts[3])
-                    pct_str = parts[4].rstrip('%')
-                    pct = float(pct_str) if pct_str.replace('.', '', 1).isdigit() else (used_b / max(1.0, total_b)) * 100.0
-                    return pct, used_b / (1024**3), free_b / (1024**3)
-        except Exception:
-            pass
+        for df_bin in ['/usr/bin/df', 'df']:
+            try:
+                cmd = ['flatpak-spawn', '--host', df_bin, '-B1', mount_path]
+                p = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+                if p.stdout:
+                    lines = p.stdout.strip().splitlines()
+                    if len(lines) >= 2:
+                        parts = lines[-1].split()
+                        if len(parts) >= 5:
+                            total_b = float(parts[1])
+                            used_b = float(parts[2])
+                            free_b = float(parts[3])
+                            pct_str = parts[4].rstrip('%')
+                            pct = float(pct_str) if pct_str.replace('.', '', 1).isdigit() else (used_b / max(1.0, total_b)) * 100.0
+                            return pct, used_b / (1024**3), free_b / (1024**3)
+            except Exception:
+                pass
 
         try:
             du = psutil.disk_usage(mount_path)
@@ -1811,10 +1819,17 @@ class TouchBarInfoAction(ActionBase):
             gx_min, gy_min, gx_max, gy_max = graph_box
             gw = gx_max - gx_min
             gh = gy_max - gy_min
+
+            # Fill entire bar background with Emerald Green for Available Space
+            draw.rectangle([gx_min, gy_min, gx_max, gy_max], fill=(46, 204, 113, 220))
+
+            # Fill left portion with Coral Red for Used Space
             fill_w = int(gw * (pct / 100.0))
-            draw.rectangle([gx_min, gy_min, gx_max, gy_max], outline=(150, 150, 150, 255), width=1)
             if fill_w > 0:
-                draw.rectangle([gx_min, gy_min, gx_min + fill_w, gy_max], fill=(255, 100, 100, 200))
+                draw.rectangle([gx_min, gy_min, gx_min + fill_w, gy_max], fill=(231, 76, 60, 220))
+
+            # Clean silver border outline
+            draw.rectangle([gx_min, gy_min, gx_max, gy_max], outline=(200, 200, 200, 255), width=1)
         elif disk_mode == 1: # Used / Free GB
             top_str = f"{used_gb:.0f}G Used"
             bot_str = f"{free_gb:.0f}G Free"
@@ -2028,12 +2043,27 @@ class TouchBarInfoAction(ActionBase):
         if not hasattr(self, "page") or self.page is None:
             return
 
+        final_image = image
+        try:
+            custom_bg_path = None
+            if hasattr(self.page, "get_background_image"):
+                bg_p = self.page.get_background_image(self.input_ident, self.state)
+                if bg_p and os.path.isfile(bg_p) and not bg_p.endswith(("touchbar_render_0.png", "touchbar_render_1.png")):
+                    custom_bg_path = bg_p
+
+            if custom_bg_path:
+                with Image.open(custom_bg_path) as bg_img:
+                    bg_conv = bg_img.convert("RGBA").resize(image.size, Image.Resampling.LANCZOS)
+                    final_image = Image.alpha_composite(bg_conv, image)
+        except Exception as e:
+            log.error(f"TouchBarInfo: Error compositing custom background image: {e}")
+
         assets_dir = os.path.join(self.plugin_base.PATH, "assets")
         os.makedirs(assets_dir, exist_ok=True)
         render_path = os.path.join(assets_dir, f"touchbar_render_{self.state}.png")
 
         try:
-            image.save(render_path)
+            final_image.save(render_path)
             self.page.set_background_image(self.input_ident, self.state, render_path, update=False)
         except Exception as e:
             log.error(f"TouchBarInfo: Error saving touchscreen background: {e}")
