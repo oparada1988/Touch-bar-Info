@@ -4,6 +4,7 @@ from src.backend.DeckManagement.InputIdentifier import Input
 
 # Import python modules
 import os
+import subprocess
 import datetime
 from PIL import Image, ImageDraw, ImageFont
 
@@ -11,7 +12,8 @@ from PIL import Image, ImageDraw, ImageFont
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, GLib
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gtk, Adw, Gdk, GLib
 from loguru import logger as log
 import globals as gl
 
@@ -19,7 +21,7 @@ class TouchBarInfoAction(ActionBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.has_configuration = True
-        self.last_rendered_time_str = ""
+        self.last_rendered_key = ""
 
     def get_locale_text(self, key: str, default: str) -> str:
         if hasattr(self.plugin_base, "lm") and self.plugin_base.lm is not None:
@@ -43,19 +45,19 @@ class TouchBarInfoAction(ActionBase):
         self.update_display()
 
     def get_config_rows(self) -> "list[Adw.PreferencesRow]":
-        # 24-hour clock switch
+        # 1. 24-hour clock switch
         self.use_24h_switch = Adw.SwitchRow(
             title=self.get_locale_text("actions.touchbar-info.use-24h.label", "Use 24-Hour Clock"),
             subtitle=self.get_locale_text("actions.touchbar-info.use-24h.subtitle", "Switch between 12-hour (AM/PM) and 24-hour time format")
         )
 
-        # Show seconds switch
+        # 2. Show seconds switch
         self.show_seconds_switch = Adw.SwitchRow(
             title=self.get_locale_text("actions.touchbar-info.show-seconds.label", "Show Seconds"),
             subtitle=self.get_locale_text("actions.touchbar-info.show-seconds.subtitle", "Include seconds in the displayed time")
         )
 
-        # Date format selector
+        # 3. Date format selector
         self.date_format_model = Gtk.StringList()
         self.date_format_combo = Adw.ComboRow(
             model=self.date_format_model,
@@ -73,13 +75,83 @@ class TouchBarInfoAction(ActionBase):
         for _, label in self.date_format_options:
             self.date_format_model.append(label)
 
+        # Available font families
+        self.font_families = ["DejaVu Sans", "Liberation Sans", "Ubuntu", "Noto Sans", "Monospace", "Serif", "Sans"]
+
+        # 4. Date Font Family
+        self.date_font_family_model = Gtk.StringList()
+        self.date_font_family_combo = Adw.ComboRow(
+            model=self.date_font_family_model,
+            title=self.get_locale_text("actions.touchbar-info.date-font-family.label", "Date Font Family"),
+            subtitle=self.get_locale_text("actions.touchbar-info.date-font-family.subtitle", "Select font typeface for the top date text")
+        )
+        for fam in self.font_families:
+            self.date_font_family_model.append(fam)
+
+        # 5. Date Font Size
+        self.date_font_size_spin = Adw.SpinRow.new_with_range(10, 80, 1)
+        self.date_font_size_spin.set_title(self.get_locale_text("actions.touchbar-info.date-font-size.label", "Date Font Size"))
+        self.date_font_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.date-font-size.subtitle", "Font size in pixels for the date line"))
+
+        # 6. Date Font Color
+        self.date_font_color_row = Adw.ActionRow(
+            title=self.get_locale_text("actions.touchbar-info.date-font-color.label", "Date Font Color"),
+            subtitle=self.get_locale_text("actions.touchbar-info.date-font-color.subtitle", "Text color for the top date line")
+        )
+        self.date_font_color_button = Gtk.ColorButton()
+        self.date_font_color_button.set_valign(Gtk.Align.CENTER)
+        self.date_font_color_row.add_suffix(self.date_font_color_button)
+
+        # 7. Time Font Family
+        self.time_font_family_model = Gtk.StringList()
+        self.time_font_family_combo = Adw.ComboRow(
+            model=self.time_font_family_model,
+            title=self.get_locale_text("actions.touchbar-info.time-font-family.label", "Time Font Family"),
+            subtitle=self.get_locale_text("actions.touchbar-info.time-font-family.subtitle", "Select font typeface for the bottom time text")
+        )
+        for fam in self.font_families:
+            self.time_font_family_model.append(fam)
+
+        # 8. Time Font Size
+        self.time_font_size_spin = Adw.SpinRow.new_with_range(10, 100, 1)
+        self.time_font_size_spin.set_title(self.get_locale_text("actions.touchbar-info.time-font-size.label", "Time Font Size"))
+        self.time_font_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.time-font-size.subtitle", "Font size in pixels for the time line"))
+
+        # 9. Time Font Color
+        self.time_font_color_row = Adw.ActionRow(
+            title=self.get_locale_text("actions.touchbar-info.time-font-color.label", "Time Font Color"),
+            subtitle=self.get_locale_text("actions.touchbar-info.time-font-color.subtitle", "Text color for the bottom time line")
+        )
+        self.time_font_color_button = Gtk.ColorButton()
+        self.time_font_color_button.set_valign(Gtk.Align.CENTER)
+        self.time_font_color_row.add_suffix(self.time_font_color_button)
+
         self.load_config_defaults()
 
+        # Signals
         self.use_24h_switch.connect("notify::active", self.on_use_24h_toggled)
         self.show_seconds_switch.connect("notify::active", self.on_show_seconds_toggled)
         self.date_format_combo.connect("notify::selected", self.on_date_format_changed)
+        
+        self.date_font_family_combo.connect("notify::selected", self.on_date_font_family_changed)
+        self.date_font_size_spin.connect("notify::value", self.on_date_font_size_changed)
+        self.date_font_color_button.connect("color-set", self.on_date_font_color_set)
 
-        return [self.use_24h_switch, self.show_seconds_switch, self.date_format_combo]
+        self.time_font_family_combo.connect("notify::selected", self.on_time_font_family_changed)
+        self.time_font_size_spin.connect("notify::value", self.on_time_font_size_changed)
+        self.time_font_color_button.connect("color-set", self.on_time_font_color_set)
+
+        return [
+            self.use_24h_switch,
+            self.show_seconds_switch,
+            self.date_format_combo,
+            self.date_font_family_combo,
+            self.date_font_size_spin,
+            self.date_font_color_row,
+            self.time_font_family_combo,
+            self.time_font_size_spin,
+            self.time_font_color_row
+        ]
 
     def load_config_defaults(self):
         settings = self.get_settings()
@@ -90,17 +162,61 @@ class TouchBarInfoAction(ActionBase):
         show_seconds = settings.setdefault("show_seconds", False)
         date_format_idx = settings.setdefault("date_format_idx", 0)
 
+        date_font_family_idx = settings.setdefault("date_font_family_idx", 0)
+        date_font_size = settings.setdefault("date_font_size", 25)
+        date_font_color = settings.setdefault("date_font_color", "#AAC8E6FF")
+
+        time_font_family_idx = settings.setdefault("time_font_family_idx", 0)
+        time_font_size = settings.setdefault("time_font_size", 45)
+        time_font_color = settings.setdefault("time_font_color", "#FFFFFFFF")
+
         self.use_24h_switch.set_active(use_24h)
         self.show_seconds_switch.set_active(show_seconds)
         if 0 <= date_format_idx < len(self.date_format_options):
             self.date_format_combo.set_selected(date_format_idx)
+
+        if 0 <= date_font_family_idx < len(self.font_families):
+            self.date_font_family_combo.set_selected(date_font_family_idx)
+        self.date_font_size_spin.set_value(date_font_size)
+        self.set_color_button_rgba(self.date_font_color_button, date_font_color)
+
+        if 0 <= time_font_family_idx < len(self.font_families):
+            self.time_font_family_combo.set_selected(time_font_family_idx)
+        self.time_font_size_spin.set_value(time_font_size)
+        self.set_color_button_rgba(self.time_font_color_button, time_font_color)
+
+    def set_color_button_rgba(self, button: Gtk.ColorButton, hex_str: str):
+        try:
+            rgba = Gdk.RGBA()
+            rgba.parse(hex_str)
+            button.set_rgba(rgba)
+        except Exception:
+            pass
+
+    def gdk_to_hex(self, rgba: Gdk.RGBA) -> str:
+        r = int(rgba.red * 255)
+        g = int(rgba.green * 255)
+        b = int(rgba.blue * 255)
+        a = int(rgba.alpha * 255)
+        return f"#{r:02X}{g:02X}{b:02X}{a:02X}"
+
+    def hex_to_rgba_tuple(self, hex_str: str, default=(255, 255, 255, 255)) -> tuple[int, int, int, int]:
+        try:
+            clean_hex = hex_str.lstrip("#")
+            if len(clean_hex) == 6:
+                return (int(clean_hex[0:2], 16), int(clean_hex[2:4], 16), int(clean_hex[4:6], 16), 255)
+            elif len(clean_hex) == 8:
+                return (int(clean_hex[0:2], 16), int(clean_hex[2:4], 16), int(clean_hex[4:6], 16), int(clean_hex[6:8], 16))
+        except Exception:
+            pass
+        return default
 
     def on_use_24h_toggled(self, switch, *args):
         settings = self.get_settings()
         if settings is not None:
             settings["use_24h"] = switch.get_active()
             self.set_settings(settings)
-            self.last_rendered_time_str = ""
+            self.last_rendered_key = ""
             self.update_display()
 
     def on_show_seconds_toggled(self, switch, *args):
@@ -108,7 +224,7 @@ class TouchBarInfoAction(ActionBase):
         if settings is not None:
             settings["show_seconds"] = switch.get_active()
             self.set_settings(settings)
-            self.last_rendered_time_str = ""
+            self.last_rendered_key = ""
             self.update_display()
 
     def on_date_format_changed(self, combo, *args):
@@ -116,10 +232,69 @@ class TouchBarInfoAction(ActionBase):
         if settings is not None:
             settings["date_format_idx"] = combo.get_selected()
             self.set_settings(settings)
-            self.last_rendered_time_str = ""
+            self.last_rendered_key = ""
             self.update_display()
 
-    def get_font(self, size: int):
+    def on_date_font_family_changed(self, combo, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            settings["date_font_family_idx"] = combo.get_selected()
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_date_font_size_changed(self, spin, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            settings["date_font_size"] = int(spin.get_value())
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_date_font_color_set(self, button):
+        settings = self.get_settings()
+        if settings is not None:
+            rgba = button.get_rgba()
+            settings["date_font_color"] = self.gdk_to_hex(rgba)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_time_font_family_changed(self, combo, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            settings["time_font_family_idx"] = combo.get_selected()
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_time_font_size_changed(self, spin, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            settings["time_font_size"] = int(spin.get_value())
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_time_font_color_set(self, button):
+        settings = self.get_settings()
+        if settings is not None:
+            rgba = button.get_rgba()
+            settings["time_font_color"] = self.gdk_to_hex(rgba)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def get_font_for_family(self, family_name: str, size: int, bold: bool = True):
+        style = "Bold" if bold else "Regular"
+        cmd = ["fc-match", "-f", "%{file}", f"{family_name}:style={style}"]
+        try:
+            res = subprocess.check_output(cmd, text=True).strip()
+            if res and os.path.isfile(res):
+                return ImageFont.truetype(res, size)
+        except Exception:
+            pass
+
         font_paths = [
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -147,6 +322,14 @@ class TouchBarInfoAction(ActionBase):
         show_seconds = settings.get("show_seconds", False)
         date_format_idx = settings.get("date_format_idx", 0)
 
+        date_font_family_idx = settings.get("date_font_family_idx", 0)
+        date_font_size = settings.get("date_font_size", 25)
+        date_font_color_hex = settings.get("date_font_color", "#AAC8E6FF")
+
+        time_font_family_idx = settings.get("time_font_family_idx", 0)
+        time_font_size = settings.get("time_font_size", 45)
+        time_font_color_hex = settings.get("time_font_color", "#FFFFFFFF")
+
         date_options = [
             ("%b. %d, %Y", "Mon. Day, Year"),
             ("%a. %d, %Y", "DayOfWeek. Day, Year"),
@@ -164,24 +347,24 @@ class TouchBarInfoAction(ActionBase):
             time_fmt = "%I:%M:%S %p" if show_seconds else "%I:%M %p"
         
         time_str = now.strftime(time_fmt).lstrip("0") if not use_24h else now.strftime(time_fmt)
-        combined_key = f"{date_str}|{time_str}"
 
-        # Avoid redundant redraws if text hasn't changed
-        if combined_key == self.last_rendered_time_str:
+        date_family = self.font_families[min(date_font_family_idx, len(self.font_families) - 1)] if hasattr(self, "font_families") else "DejaVu Sans"
+        time_family = self.font_families[min(time_font_family_idx, len(self.font_families) - 1)] if hasattr(self, "font_families") else "DejaVu Sans"
+
+        combined_key = f"{date_str}|{time_str}|{date_family}|{date_font_size}|{date_font_color_hex}|{time_family}|{time_font_size}|{time_font_color_hex}"
+
+        # Avoid redundant redraws if settings and time text haven't changed
+        if combined_key == self.last_rendered_key:
             return
-        self.last_rendered_time_str = combined_key
+        self.last_rendered_key = combined_key
 
         width, height = self.get_canvas_size()
 
         image = Image.new("RGBA", (width, height), (15, 16, 22, 255))
         draw = ImageDraw.Draw(image)
 
-        # Dynamic font sizes based on canvas height
-        date_font_size = max(14, int(height * 0.25))
-        time_font_size = max(20, int(height * 0.45))
-
-        font_date = self.get_font(date_font_size)
-        font_time = self.get_font(time_font_size)
+        font_date = self.get_font_for_family(date_family, date_font_size, bold=True)
+        font_time = self.get_font_for_family(time_family, time_font_size, bold=True)
 
         bbox_date = draw.textbbox((0, 0), date_str, font=font_date)
         bbox_time = draw.textbbox((0, 0), time_str, font=font_time)
@@ -197,11 +380,14 @@ class TouchBarInfoAction(ActionBase):
         date_y = start_y + (date_h / 2)
         time_y = start_y + date_h + spacing + (time_h / 2)
 
-        # Draw date (smaller font, soft muted accent color)
-        draw.text((center_x, date_y), date_str, fill=(170, 200, 230, 255), font=font_date, anchor="mm")
+        date_color = self.hex_to_rgba_tuple(date_font_color_hex, default=(170, 200, 230, 255))
+        time_color = self.hex_to_rgba_tuple(time_font_color_hex, default=(255, 255, 255, 255))
+
+        # Draw date line
+        draw.text((center_x, date_y), date_str, fill=date_color, font=font_date, anchor="mm")
         
-        # Draw time (larger font, crisp white color)
-        draw.text((center_x, time_y), time_str, fill=(255, 255, 255, 255), font=font_time, anchor="mm")
+        # Draw time line
+        draw.text((center_x, time_y), time_str, fill=time_color, font=font_time, anchor="mm")
 
         self.render_to_input(image)
 
