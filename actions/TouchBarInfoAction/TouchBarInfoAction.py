@@ -136,49 +136,70 @@ class TouchBarInfoAction(ActionBase):
         disks = []
         seen = set()
 
-        lsblk_cmds = [
-            ['flatpak-spawn', '--host', '/usr/bin/lsblk', '-J', '-o', 'NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS'],
-            ['flatpak-spawn', '--host', 'lsblk', '-J', '-o', 'NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS'],
-            ['flatpak-spawn', '--host', 'lsblk', '-J']
-        ]
-
-        for cmd in lsblk_cmds:
-            try:
-                p = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
-                if p.stdout and p.stdout.strip().startswith('{'):
-                    data = json.loads(p.stdout)
-
-                    def parse_devs(dev_list):
-                        for item in dev_list:
-                            label = item.get("label", "")
-                            fstype = item.get("fstype", "")
-
-                            raw_mounts = list(item.get("mountpoints") or [])
-                            if item.get("mountpoint"):
-                                raw_mounts.append(item.get("mountpoint"))
-
-                            valid_mounts = [m for m in raw_mounts if m and not m.startswith(("/boot", "/run", "/sys", "/proc", "/dev"))]
-
-                            for mount in valid_mounts:
-                                if mount not in seen and fstype not in ["swap", "squashfs", "iso9660"]:
+        # Strategy 1: Host /proc/mounts query (Instant & 100% reliable)
+        try:
+            cmd = ['flatpak-spawn', '--host', 'cat', '/proc/mounts']
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+            if p.stdout:
+                for line in p.stdout.splitlines():
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        dev, mount, fstype = parts[0], parts[1], parts[2]
+                        if dev.startswith('/dev/') and fstype not in ['swap', 'squashfs', 'iso9660', 'tmpfs', 'devtmpfs', 'vfat']:
+                            if not mount.startswith(('/boot', '/run', '/sys', '/proc', '/dev', '/var/lib/flatpak', '/var/lib/docker')):
+                                if mount not in seen:
                                     seen.add(mount)
-                                    if label:
-                                        disp_name = label
-                                    elif mount == "/":
-                                        disp_name = "System Root"
-                                    else:
-                                        disp_name = mount.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
-                                    disks.append((mount, disp_name))
+                                    clean_name = "System Root" if mount == "/" else mount.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
+                                    disks.append((mount, clean_name))
+        except Exception:
+            pass
 
-                            if "children" in item:
-                                parse_devs(item["children"])
+        # Strategy 2: Host lsblk JSON query
+        if not disks:
+            lsblk_cmds = [
+                ['flatpak-spawn', '--host', '/usr/bin/lsblk', '-J', '-o', 'NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS'],
+                ['flatpak-spawn', '--host', 'lsblk', '-J', '-o', 'NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS'],
+                ['flatpak-spawn', '--host', 'lsblk', '-J']
+            ]
 
-                    parse_devs(data.get("blockdevices", []))
-                    if disks:
-                        break
-            except Exception:
-                pass
+            for cmd in lsblk_cmds:
+                try:
+                    p = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+                    if p.stdout and p.stdout.strip().startswith('{'):
+                        data = json.loads(p.stdout)
 
+                        def parse_devs(dev_list):
+                            for item in dev_list:
+                                label = item.get("label", "")
+                                fstype = item.get("fstype", "")
+
+                                raw_mounts = list(item.get("mountpoints") or [])
+                                if item.get("mountpoint"):
+                                    raw_mounts.append(item.get("mountpoint"))
+
+                                valid_mounts = [m for m in raw_mounts if m and not m.startswith(("/boot", "/run", "/sys", "/proc", "/dev"))]
+
+                                for mount in valid_mounts:
+                                    if mount not in seen and fstype not in ["swap", "squashfs", "iso9660"]:
+                                        seen.add(mount)
+                                        if label:
+                                            disp_name = label
+                                        elif mount == "/":
+                                            disp_name = "System Root"
+                                        else:
+                                            disp_name = mount.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
+                                        disks.append((mount, disp_name))
+
+                                if "children" in item:
+                                    parse_devs(item["children"])
+
+                        parse_devs(data.get("blockdevices", []))
+                        if disks:
+                            break
+                except Exception:
+                    pass
+
+        # Strategy 3: Host df query
         if not disks:
             for df_bin in ['/usr/bin/df', 'df']:
                 try:
@@ -200,6 +221,7 @@ class TouchBarInfoAction(ActionBase):
                 except Exception:
                     pass
 
+        # Strategy 4: psutil fallback
         if not disks:
             seen_devs = set()
             try:
@@ -673,6 +695,11 @@ class TouchBarInfoAction(ActionBase):
 
         # Helper to create Disk controls
         def build_disk_controls():
+            if not hasattr(self, "disk_mounts") or not self.disk_mounts or len(self.disk_mounts) <= 1 or self.disk_mounts[0][0].startswith("/home"):
+                fresh = self.get_system_disk_mounts()
+                if fresh:
+                    self.disk_mounts = fresh
+
             mount_model = Gtk.StringList()
             for m_path, m_disp in self.disk_mounts: mount_model.append(m_disp)
             mount_combo = Adw.ComboRow(
