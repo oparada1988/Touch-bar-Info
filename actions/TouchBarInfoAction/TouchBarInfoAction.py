@@ -65,7 +65,7 @@ class TouchBarInfoAction(ActionBase):
         # Widget choices
         self.full_widget_options = [
             self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
-            self.get_locale_text("actions.touchbar-info.widget.stacked", "Stacked Date & Time"),
+            self.get_locale_text("actions.touchbar-info.widget.stacked", "Stacked Date and Time"),
             self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
             self.get_locale_text("actions.touchbar-info.widget.time", "Time")
         ]
@@ -90,7 +90,7 @@ class TouchBarInfoAction(ActionBase):
         # Helper to create Date Options Sub-expander
         def build_date_expander():
             exp = Adw.ExpanderRow(
-                title=self.get_locale_text("actions.touchbar-info.date-settings.label", "Date Options & Font Customization"),
+                title=self.get_locale_text("actions.touchbar-info.date-settings.label", "Date Options and Font Customization"),
                 subtitle=self.get_locale_text("actions.touchbar-info.date-settings.subtitle", "Date format, font family, size, and color")
             )
 
@@ -137,7 +137,7 @@ class TouchBarInfoAction(ActionBase):
         # Helper to create Time Options Sub-expander
         def build_time_expander():
             exp = Adw.ExpanderRow(
-                title=self.get_locale_text("actions.touchbar-info.time-settings.label", "Time Options & Font Customization"),
+                title=self.get_locale_text("actions.touchbar-info.time-settings.label", "Time Options and Font Customization"),
                 subtitle=self.get_locale_text("actions.touchbar-info.time-settings.subtitle", "Clock format, 24h mode, seconds, font family, size, and color")
             )
 
@@ -209,7 +209,7 @@ class TouchBarInfoAction(ActionBase):
                 subtitle=self.get_locale_text("actions.touchbar-info.full-widget.subtitle", "Widget assigned to full section area")
             )
             full_date_exp, _, _, _, _ = build_date_expander()
-            full_time_exp, _, _, _, _ = build_time_expander()
+            full_time_exp, _, _, _, _, _ = build_time_expander()
 
             # --- 2. Top Subsection Group ---
             top_model = Gtk.StringList()
@@ -220,7 +220,7 @@ class TouchBarInfoAction(ActionBase):
                 subtitle=self.get_locale_text("actions.touchbar-info.top-widget.subtitle", "Widget assigned to top half (Y: 0-50px)")
             )
             top_date_exp, _, _, _, _ = build_date_expander()
-            top_time_exp, _, _, _, _ = build_time_expander()
+            top_time_exp, _, _, _, _, _ = build_time_expander()
 
             # --- 3. Bottom Subsection Group ---
             bot_model = Gtk.StringList()
@@ -231,7 +231,7 @@ class TouchBarInfoAction(ActionBase):
                 subtitle=self.get_locale_text("actions.touchbar-info.bottom-widget.subtitle", "Widget assigned to bottom half (Y: 50-100px)")
             )
             bot_date_exp, _, _, _, _ = build_date_expander()
-            bot_time_exp, _, _, _, _ = build_time_expander()
+            bot_time_exp, _, _, _, _, _ = build_time_expander()
 
             # Add rows in strict sequential order: Dropdown followed immediately by its inline settings
             expander.add_row(mode_combo)
@@ -451,7 +451,11 @@ class TouchBarInfoAction(ActionBase):
     def on_use_24h_toggled(self, switch, *args):
         settings = self.get_settings()
         if settings is not None:
-            settings["use_24h"] = switch.get_active()
+            val = switch.get_active()
+            settings["use_24h"] = val
+            for sw in self.all_time_24h_switches:
+                if sw != switch and sw.get_active() != val:
+                    sw.set_active(val)
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()
@@ -459,7 +463,11 @@ class TouchBarInfoAction(ActionBase):
     def on_show_seconds_toggled(self, switch, *args):
         settings = self.get_settings()
         if settings is not None:
-            settings["show_seconds"] = switch.get_active()
+            val = switch.get_active()
+            settings["show_seconds"] = val
+            for sw in self.all_time_sec_switches:
+                if sw != switch and sw.get_active() != val:
+                    sw.set_active(val)
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()
@@ -467,7 +475,11 @@ class TouchBarInfoAction(ActionBase):
     def on_date_format_changed(self, combo, *args):
         settings = self.get_settings()
         if settings is not None:
-            settings["date_format_idx"] = combo.get_selected()
+            val = combo.get_selected()
+            settings["date_format_idx"] = val
+            for c in self.all_date_fmt_combos:
+                if c != combo and c.get_selected() != val:
+                    c.set_selected(val)
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()
@@ -475,7 +487,11 @@ class TouchBarInfoAction(ActionBase):
     def on_date_font_family_changed(self, combo, *args):
         settings = self.get_settings()
         if settings is not None:
-            settings["date_font_family_idx"] = combo.get_selected()
+            val = combo.get_selected()
+            settings["date_font_family_idx"] = val
+            for c in self.all_date_fam_combos:
+                if c != combo and c.get_selected() != val:
+                    c.set_selected(val)
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()
@@ -483,7 +499,11 @@ class TouchBarInfoAction(ActionBase):
     def on_date_font_size_changed(self, spin, *args):
         settings = self.get_settings()
         if settings is not None:
-            settings["date_font_size"] = int(spin.get_value())
+            val = int(spin.get_value())
+            settings["date_font_size"] = val
+            for s in self.all_date_size_spins:
+                if s != spin and int(s.get_value()) != val:
+                    s.set_value(val)
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()
@@ -492,7 +512,11 @@ class TouchBarInfoAction(ActionBase):
         settings = self.get_settings()
         if settings is not None:
             rgba = button.get_rgba()
-            settings["date_font_color"] = self.gdk_to_hex(rgba)
+            hex_val = self.gdk_to_hex(rgba)
+            settings["date_font_color"] = hex_val
+            for btn in self.all_date_color_btns:
+                if btn != button:
+                    self.set_color_button_rgba(btn, hex_val)
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()
@@ -500,7 +524,11 @@ class TouchBarInfoAction(ActionBase):
     def on_time_font_family_changed(self, combo, *args):
         settings = self.get_settings()
         if settings is not None:
-            settings["time_font_family_idx"] = combo.get_selected()
+            val = combo.get_selected()
+            settings["time_font_family_idx"] = val
+            for c in self.all_time_fam_combos:
+                if c != combo and c.get_selected() != val:
+                    c.set_selected(val)
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()
@@ -508,7 +536,11 @@ class TouchBarInfoAction(ActionBase):
     def on_time_font_size_changed(self, spin, *args):
         settings = self.get_settings()
         if settings is not None:
-            settings["time_font_size"] = int(spin.get_value())
+            val = int(spin.get_value())
+            settings["time_font_size"] = val
+            for s in self.all_time_size_spins:
+                if s != spin and int(s.get_value()) != val:
+                    s.set_value(val)
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()
@@ -517,7 +549,11 @@ class TouchBarInfoAction(ActionBase):
         settings = self.get_settings()
         if settings is not None:
             rgba = button.get_rgba()
-            settings["time_font_color"] = self.gdk_to_hex(rgba)
+            hex_val = self.gdk_to_hex(rgba)
+            settings["time_font_color"] = hex_val
+            for btn in self.all_time_color_btns:
+                if btn != button:
+                    self.set_color_button_rgba(btn, hex_val)
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()
