@@ -507,18 +507,18 @@ class TouchBarInfoAction(ActionBase):
 
         # Create Section Expanders
         self.sec_a_expander, self.sec_a_mode_combo, self.sec_a_full_combo, self.sec_a_top_combo, self.sec_a_bot_combo = create_section_expander(
-            "actions.touchbar-info.section-a.label", "Section A (Left — 200px)",
-            "actions.touchbar-info.section-a.subtitle", "Configure widgets for the left Touch Bar section", "sec_a"
+            "actions.touchbar-info.section-a.label", "Left Region (200px)",
+            "actions.touchbar-info.section-a.subtitle", "Configure widgets for the left Touch Bar region", "sec_a"
         )
 
         self.sec_b_expander, self.sec_b_mode_combo, self.sec_b_full_combo, self.sec_b_top_combo, self.sec_b_bot_combo = create_section_expander(
-            "actions.touchbar-info.section-b.label", "Section B (Center — 400px)",
-            "actions.touchbar-info.section-b.subtitle", "Configure widgets for the center Touch Bar section", "sec_b"
+            "actions.touchbar-info.section-b.label", "Center Region (400px)",
+            "actions.touchbar-info.section-b.subtitle", "Configure widgets for the center Touch Bar region", "sec_b"
         )
 
         self.sec_c_expander, self.sec_c_mode_combo, self.sec_c_full_combo, self.sec_c_top_combo, self.sec_c_bot_combo = create_section_expander(
-            "actions.touchbar-info.section-c.label", "Section C (Right — 200px)",
-            "actions.touchbar-info.section-c.subtitle", "Configure widgets for the right Touch Bar section", "sec_c"
+            "actions.touchbar-info.section-c.label", "Right Region (200px)",
+            "actions.touchbar-info.section-c.subtitle", "Configure widgets for the right Touch Bar region", "sec_c"
         )
 
         self.load_config_defaults()
