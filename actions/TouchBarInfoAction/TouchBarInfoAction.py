@@ -134,20 +134,30 @@ class TouchBarInfoAction(ActionBase):
 
     def get_system_disk_mounts(self) -> list[tuple[str, str]]:
         disks = []
+        seen = set()
         try:
-            cmd = ['flatpak-spawn', '--host', 'lsblk', '-J', '-o', 'NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT']
+            cmd = ['flatpak-spawn', '--host', 'lsblk', '-J', '-o', 'NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS']
             out = subprocess.check_output(cmd, text=True, timeout=2)
             data = json.loads(out)
 
             def parse_devs(dev_list):
                 for item in dev_list:
-                    mount = item.get("mountpoint")
-                    name = item.get("name")
-                    label = item.get("label")
-                    fstype = item.get("fstype")
-                    if mount and fstype and fstype not in ["swap", "squashfs", "iso9660", "vfat"]:
-                        disp_name = f"{label} ({mount} — {name})" if label else f"{mount} ({name})"
-                        disks.append((mount, disp_name))
+                    name = item.get("name", "")
+                    label = item.get("label", "")
+                    fstype = item.get("fstype", "")
+
+                    raw_mounts = list(item.get("mountpoints") or [])
+                    if item.get("mountpoint"):
+                        raw_mounts.append(item.get("mountpoint"))
+
+                    valid_mounts = [m for m in raw_mounts if m and not m.startswith(("/boot", "/run", "/sys", "/proc", "/dev"))]
+
+                    for mount in valid_mounts:
+                        if mount not in seen and fstype not in ["swap", "squashfs", "iso9660"]:
+                            seen.add(mount)
+                            disp_name = f"{label} ({mount} — {name})" if label else f"{mount} ({name})"
+                            disks.append((mount, disp_name))
+
                     if "children" in item:
                         parse_devs(item["children"])
 
