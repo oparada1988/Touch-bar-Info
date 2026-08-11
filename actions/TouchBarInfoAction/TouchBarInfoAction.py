@@ -6,6 +6,8 @@ from src.backend.DeckManagement.InputIdentifier import Input
 import os
 import subprocess
 import datetime
+import requests
+from threading import Thread, Timer
 from PIL import Image, ImageDraw, ImageFont
 
 # Import GTK modules
@@ -22,6 +24,8 @@ class TouchBarInfoAction(ActionBase):
         super().__init__(*args, **kwargs)
         self.has_configuration = True
         self.last_rendered_key = ""
+        self.weather_cache = {}
+        self.city_search_timer = None
 
     def get_locale_text(self, key: str, default: str) -> str:
         if hasattr(self.plugin_base, "lm") and self.plugin_base.lm is not None:
@@ -39,9 +43,11 @@ class TouchBarInfoAction(ActionBase):
         return default
 
     def on_ready(self) -> None:
+        self.fetch_weather_async(force=True)
         self.update_display()
 
     def on_tick(self) -> None:
+        self.fetch_weather_async(force=False)
         self.update_display()
 
     def on_remove(self) -> None:
@@ -72,6 +78,78 @@ class TouchBarInfoAction(ActionBase):
             except Exception as e:
                 log.error(f"TouchBarInfo: Error resetting touchscreen display on removal: {e}")
 
+    def trigger_redraw(self):
+        self.last_rendered_key = ""
+        self.update_display()
+
+    # --- Weather Fetcher & WMO Mapping ---
+    def get_weather_icon_filename(self, wmo_code: int, is_day: int = 1) -> str:
+        if wmo_code in [0, 1]:
+            return "sunny.png" if is_day == 1 else "clear_night.png"
+        elif wmo_code == 2:
+            return "partly_cloudy.png" if is_day == 1 else "cloudy_night.png"
+        elif wmo_code == 3:
+            return "cloud.png"
+        elif wmo_code in [45, 48]:
+            return "foggy.png"
+        elif wmo_code in [51, 53, 55, 56, 57, 61]:
+            return "rainy_light.png"
+        elif wmo_code in [63, 80, 81]:
+            return "rainy.png"
+        elif wmo_code in [65, 66, 67, 82]:
+            return "rainy_heavy.png"
+        elif wmo_code in [71, 73, 77]:
+            return "snowy.png"
+        elif wmo_code in [75, 85, 86]:
+            return "cloudy-snowing.png"
+        elif wmo_code in [95, 96, 99]:
+            return "thunderstorm.png"
+        return "sunny.png" if is_day == 1 else "clear_night.png"
+
+    def fetch_weather_async(self, force: bool = False):
+        now_ts = datetime.datetime.now().timestamp()
+        refresh_intervals = [300, 600, 900, 1800, 3600] # 5m, 10m, 15m, 30m, 60m
+        settings = self.get_settings() or {}
+        ref_idx = settings.get("weather_refresh_idx", 2)
+        interval_sec = refresh_intervals[min(ref_idx, len(refresh_intervals)-1)]
+
+        if not force and hasattr(self, "weather_cache") and self.weather_cache:
+            last_ts = self.weather_cache.get("last_fetch", 0)
+            if (now_ts - last_ts) < interval_sec:
+                return
+
+        def task():
+            try:
+                lat = settings.get("weather_lat", "25.7617")
+                lon = settings.get("weather_lon", "-80.1918")
+                unit_idx = settings.get("weather_unit_idx", 0)
+                temp_unit = "fahrenheit" if unit_idx == 0 else "celsius"
+
+                url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,weather_code,is_day&temperature_unit={temp_unit}"
+                resp = requests.get(url, timeout=5)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    curr = data.get("current", {})
+                    temp = curr.get("temperature_2m", None)
+                    code = curr.get("weather_code", 0)
+                    is_day = curr.get("is_day", 1)
+
+                    temp_str = f"{round(temp)}°" if temp is not None else "--°"
+                    location_name = settings.get("weather_location_name", "Miami")
+
+                    self.weather_cache = {
+                        "last_fetch": datetime.datetime.now().timestamp(),
+                        "temp_str": temp_str,
+                        "wmo_code": code,
+                        "is_day": is_day,
+                        "location": location_name
+                    }
+                    GLib.idle_add(self.trigger_redraw)
+            except Exception as e:
+                log.error(f"TouchBarInfo: Failed to fetch weather data: {e}")
+
+        Thread(target=task, daemon=True).start()
+
     def get_config_rows(self) -> "list[Adw.PreferencesRow]":
         # Available font families
         self.font_families = ["DejaVu Sans", "Liberation Sans", "Ubuntu", "Noto Sans", "Monospace", "Serif", "Sans"]
@@ -90,20 +168,26 @@ class TouchBarInfoAction(ActionBase):
             self.get_locale_text("actions.touchbar-info.mode.split", "2 Widgets (Split Top/Bottom — 50px each)")
         ]
 
-        # Widget choices
+        # Widget choices (Added Weather)
         self.full_widget_options = [
             self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
             self.get_locale_text("actions.touchbar-info.widget.stacked", "Stacked Date and Time"),
             self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
-            self.get_locale_text("actions.touchbar-info.widget.time", "Time")
+            self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
+            self.get_locale_text("actions.touchbar-info.widget.weather", "Weather")
         ]
         self.split_widget_options = [
             self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
             self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
-            self.get_locale_text("actions.touchbar-info.widget.time", "Time")
+            self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
+            self.get_locale_text("actions.touchbar-info.widget.weather", "Weather")
         ]
 
-        # Lists to keep track of all control widgets for global syncing
+        # Temperature Units
+        self.weather_units = ["Fahrenheit (°F)", "Celsius (°C)"]
+        self.weather_intervals = ["5 Minutes", "10 Minutes", "15 Minutes", "30 Minutes", "60 Minutes"]
+
+        # Control Widget trackers for global syncing
         self.all_date_fmt_combos = []
         self.all_date_fam_combos = []
         self.all_date_size_spins = []
@@ -114,6 +198,15 @@ class TouchBarInfoAction(ActionBase):
         self.all_time_fam_combos = []
         self.all_time_size_spins = []
         self.all_time_color_btns = []
+
+        self.all_weather_loc_entries = []
+        self.all_weather_res_combos = []
+        self.all_weather_unit_combos = []
+        self.all_weather_ref_combos = []
+        self.all_weather_fam_combos = []
+        self.all_weather_size_spins = []
+        self.all_weather_color_btns = []
+        self.search_results_data = []
 
         # Helper to create Date Options Sub-expander
         def build_date_expander():
@@ -213,6 +306,79 @@ class TouchBarInfoAction(ActionBase):
 
             return exp, sw_24h, sw_sec, fam_combo, size_spin, color_btn
 
+        # Helper to create Weather Options Sub-expander
+        def build_weather_expander():
+            exp = Adw.ExpanderRow(
+                title=self.get_locale_text("actions.touchbar-info.weather-settings.label", "Weather Options and Font Customization"),
+                subtitle=self.get_locale_text("actions.touchbar-info.weather-settings.subtitle", "Location, unit, refresh interval, and font customization")
+            )
+
+            loc_entry = Adw.EntryRow(
+                title=self.get_locale_text("actions.touchbar-info.weather-location.label", "City / Location Search")
+            )
+
+            res_model = Gtk.StringList()
+            res_combo = Adw.ComboRow(
+                model=res_model,
+                title=self.get_locale_text("actions.touchbar-info.weather-results.label", "Select Matching Location"),
+                subtitle=self.get_locale_text("actions.touchbar-info.weather-results.subtitle", "Choose city from Open-Meteo search results")
+            )
+            res_combo.set_visible(False)
+
+            unit_model = Gtk.StringList()
+            for u in self.weather_units: unit_model.append(u)
+            unit_combo = Adw.ComboRow(
+                model=unit_model,
+                title=self.get_locale_text("actions.touchbar-info.weather-unit.label", "Temperature Unit"),
+                subtitle=self.get_locale_text("actions.touchbar-info.weather-unit.subtitle", "Select Fahrenheit (°F) or Celsius (°C)")
+            )
+
+            ref_model = Gtk.StringList()
+            for r in self.weather_intervals: ref_model.append(r)
+            ref_combo = Adw.ComboRow(
+                model=ref_model,
+                title=self.get_locale_text("actions.touchbar-info.weather-refresh.label", "Refresh Interval"),
+                subtitle=self.get_locale_text("actions.touchbar-info.weather-refresh.subtitle", "Automatic weather update frequency")
+            )
+
+            fam_model = Gtk.StringList()
+            for fam in self.font_families: fam_model.append(fam)
+            fam_combo = Adw.ComboRow(
+                model=fam_model,
+                title=self.get_locale_text("actions.touchbar-info.weather-font-family.label", "Weather Font Family"),
+                subtitle=self.get_locale_text("actions.touchbar-info.weather-font-family.subtitle", "Select font typeface for weather text")
+            )
+
+            size_spin = Adw.SpinRow.new_with_range(10, 80, 1)
+            size_spin.set_title(self.get_locale_text("actions.touchbar-info.weather-font-size.label", "Weather Font Size"))
+            size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.weather-font-size.subtitle", "Font size in pixels for weather text"))
+
+            color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.weather-font-color.label", "Weather Font Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.weather-font-color.subtitle", "Text color for weather text")
+            )
+            color_btn = Gtk.ColorButton()
+            color_btn.set_valign(Gtk.Align.CENTER)
+            color_row.add_suffix(color_btn)
+
+            exp.add_row(loc_entry)
+            exp.add_row(res_combo)
+            exp.add_row(unit_combo)
+            exp.add_row(ref_combo)
+            exp.add_row(fam_combo)
+            exp.add_row(size_spin)
+            exp.add_row(color_row)
+
+            self.all_weather_loc_entries.append(loc_entry)
+            self.all_weather_res_combos.append(res_combo)
+            self.all_weather_unit_combos.append(unit_combo)
+            self.all_weather_ref_combos.append(ref_combo)
+            self.all_weather_fam_combos.append(fam_combo)
+            self.all_weather_size_spins.append(size_spin)
+            self.all_weather_color_btns.append(color_btn)
+
+            return exp, loc_entry, res_combo, unit_combo, ref_combo, fam_combo, size_spin, color_btn
+
         # Helper to create Section Expander with inline sub-expanders under each combo
         def create_section_expander(title_key, default_title, subtitle_key, default_sub, prefix_key):
             expander = Adw.ExpanderRow(
@@ -238,6 +404,7 @@ class TouchBarInfoAction(ActionBase):
             )
             full_date_exp, _, _, _, _ = build_date_expander()
             full_time_exp, _, _, _, _, _ = build_time_expander()
+            full_weather_exp, _, _, _, _, _, _, _ = build_weather_expander()
 
             # --- 2. Top Subsection Group ---
             top_model = Gtk.StringList()
@@ -249,6 +416,7 @@ class TouchBarInfoAction(ActionBase):
             )
             top_date_exp, _, _, _, _ = build_date_expander()
             top_time_exp, _, _, _, _, _ = build_time_expander()
+            top_weather_exp, _, _, _, _, _, _, _ = build_weather_expander()
 
             # --- 3. Bottom Subsection Group ---
             bot_model = Gtk.StringList()
@@ -260,6 +428,7 @@ class TouchBarInfoAction(ActionBase):
             )
             bot_date_exp, _, _, _, _ = build_date_expander()
             bot_time_exp, _, _, _, _, _ = build_time_expander()
+            bot_weather_exp, _, _, _, _, _, _, _ = build_weather_expander()
 
             # Add rows in strict sequential order: Dropdown followed immediately by its inline settings
             expander.add_row(mode_combo)
@@ -267,14 +436,17 @@ class TouchBarInfoAction(ActionBase):
             expander.add_row(full_combo)
             expander.add_row(full_date_exp)
             expander.add_row(full_time_exp)
+            expander.add_row(full_weather_exp)
 
             expander.add_row(top_combo)
             expander.add_row(top_date_exp)
             expander.add_row(top_time_exp)
+            expander.add_row(top_weather_exp)
 
             expander.add_row(bot_combo)
             expander.add_row(bot_date_exp)
             expander.add_row(bot_time_exp)
+            expander.add_row(bot_weather_exp)
 
             # Section Visibility Controller
             def update_visibility():
@@ -286,9 +458,11 @@ class TouchBarInfoAction(ActionBase):
                     f_sel = full_combo.get_selected()
                     full_date_exp.set_visible(f_sel in [1, 2]) # 1: Stacked, 2: Date
                     full_time_exp.set_visible(f_sel in [1, 3]) # 1: Stacked, 3: Time
+                    full_weather_exp.set_visible(f_sel == 4)   # 4: Weather
                 else:
                     full_date_exp.set_visible(False)
                     full_time_exp.set_visible(False)
+                    full_weather_exp.set_visible(False)
 
                 # Split Subsection Rows Visibility
                 top_combo.set_visible(not is_full)
@@ -298,15 +472,19 @@ class TouchBarInfoAction(ActionBase):
                     t_sel = top_combo.get_selected()
                     top_date_exp.set_visible(t_sel == 1) # 1: Date
                     top_time_exp.set_visible(t_sel == 2) # 2: Time
+                    top_weather_exp.set_visible(t_sel == 3) # 3: Weather
 
                     b_sel = bot_combo.get_selected()
                     bot_date_exp.set_visible(b_sel == 1) # 1: Date
                     bot_time_exp.set_visible(b_sel == 2) # 2: Time
+                    bot_weather_exp.set_visible(b_sel == 3) # 3: Weather
                 else:
                     top_date_exp.set_visible(False)
                     top_time_exp.set_visible(False)
+                    top_weather_exp.set_visible(False)
                     bot_date_exp.set_visible(False)
                     bot_time_exp.set_visible(False)
+                    bot_weather_exp.set_visible(False)
 
             mode_combo.connect("notify::selected", lambda *a: update_visibility())
             full_combo.connect("notify::selected", lambda *a: update_visibility())
@@ -372,6 +550,15 @@ class TouchBarInfoAction(ActionBase):
         for spin in self.all_time_size_spins: spin.connect("notify::value", self.on_time_font_size_changed)
         for btn in self.all_time_color_btns: btn.connect("color-set", self.on_time_font_color_set)
 
+        # Weather Signals
+        for entry in self.all_weather_loc_entries: entry.connect("changed", self.on_weather_location_entry_changed)
+        for combo in self.all_weather_res_combos: combo.connect("notify::selected", self.on_weather_result_selected)
+        for combo in self.all_weather_unit_combos: combo.connect("notify::selected", self.on_weather_unit_changed)
+        for combo in self.all_weather_ref_combos: combo.connect("notify::selected", self.on_weather_refresh_changed)
+        for combo in self.all_weather_fam_combos: combo.connect("notify::selected", self.on_weather_font_family_changed)
+        for spin in self.all_weather_size_spins: spin.connect("notify::value", self.on_weather_font_size_changed)
+        for btn in self.all_weather_color_btns: btn.connect("color-set", self.on_weather_font_color_set)
+
         return [
             self.sec_a_expander,
             self.sec_b_expander,
@@ -393,9 +580,9 @@ class TouchBarInfoAction(ActionBase):
         sec_a_bot = settings.setdefault("sec_a_bottom_widget", 0)
 
         sec_b_mode = settings.setdefault("sec_b_mode", 0)
-        sec_b_full = settings.setdefault("sec_b_full_widget", 0) # None (Empty)
-        sec_b_top = settings.setdefault("sec_b_top_widget", 0)  # None (Empty)
-        sec_b_bot = settings.setdefault("sec_b_bottom_widget", 0) # None (Empty)
+        sec_b_full = settings.setdefault("sec_b_full_widget", 0)
+        sec_b_top = settings.setdefault("sec_b_top_widget", 0)
+        sec_b_bot = settings.setdefault("sec_b_bottom_widget", 0)
 
         sec_c_mode = settings.setdefault("sec_c_mode", 0)
         sec_c_full = settings.setdefault("sec_c_full_widget", 0)
@@ -410,7 +597,14 @@ class TouchBarInfoAction(ActionBase):
         time_font_size = settings.setdefault("time_font_size", 45)
         time_font_color = settings.setdefault("time_font_color", "#FFFFFFFF")
 
-        # Sync all Date/Time controls
+        weather_location_name = settings.setdefault("weather_location_name", "Miami")
+        weather_unit_idx = settings.setdefault("weather_unit_idx", 0)
+        weather_refresh_idx = settings.setdefault("weather_refresh_idx", 2) # 15m
+        weather_font_family_idx = settings.setdefault("weather_font_family_idx", 0)
+        weather_font_size = settings.setdefault("weather_font_size", 22)
+        weather_font_color = settings.setdefault("weather_font_color", "#FFFFFFFF")
+
+        # Sync Date/Time controls
         for sw in self.all_time_24h_switches: sw.set_active(use_24h)
         for sw in self.all_time_sec_switches: sw.set_active(show_seconds)
         for combo in self.all_date_fmt_combos:
@@ -441,6 +635,17 @@ class TouchBarInfoAction(ActionBase):
             if 0 <= time_font_family_idx < len(self.font_families): combo.set_selected(time_font_family_idx)
         for spin in self.all_time_size_spins: spin.set_value(time_font_size)
         for btn in self.all_time_color_btns: self.set_color_button_rgba(btn, time_font_color)
+
+        # Sync Weather controls
+        for entry in self.all_weather_loc_entries: entry.set_text(weather_location_name)
+        for combo in self.all_weather_unit_combos:
+            if 0 <= weather_unit_idx < len(self.weather_units): combo.set_selected(weather_unit_idx)
+        for combo in self.all_weather_ref_combos:
+            if 0 <= weather_refresh_idx < len(self.weather_intervals): combo.set_selected(weather_refresh_idx)
+        for combo in self.all_weather_fam_combos:
+            if 0 <= weather_font_family_idx < len(self.font_families): combo.set_selected(weather_font_family_idx)
+        for spin in self.all_weather_size_spins: spin.set_value(weather_font_size)
+        for btn in self.all_weather_color_btns: self.set_color_button_rgba(btn, weather_font_color)
 
     def set_color_button_rgba(self, button: Gtk.ColorButton, hex_str: str):
         try:
@@ -476,6 +681,7 @@ class TouchBarInfoAction(ActionBase):
             self.last_rendered_key = ""
             self.update_display()
 
+    # --- Date / Time Callbacks ---
     def on_use_24h_toggled(self, switch, *args):
         settings = self.get_settings()
         if settings is not None:
@@ -586,6 +792,126 @@ class TouchBarInfoAction(ActionBase):
             self.last_rendered_key = ""
             self.update_display()
 
+    # --- Weather Callbacks ---
+    def on_weather_location_entry_changed(self, entry, *args):
+        text = entry.get_text().strip()
+        if len(text) < 3:
+            for combo in self.all_weather_res_combos: combo.set_visible(False)
+            return
+
+        if hasattr(self, "city_search_timer") and self.city_search_timer is not None:
+            self.city_search_timer.cancel()
+
+        self.city_search_timer = Timer(0.6, self.perform_open_meteo_search, args=(text,))
+        self.city_search_timer.start()
+
+    def perform_open_meteo_search(self, query: str):
+        url = "https://geocoding-api.open-meteo.com/v1/search"
+        params = {"name": query, "count": 5, "language": "en", "format": "json"}
+        try:
+            resp = requests.get(url, params=params, timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                results = data.get("results", [])
+                def update_ui():
+                    self.search_results_data = []
+                    string_list = Gtk.StringList()
+                    for item in results:
+                        name = item.get("name", "")
+                        country = item.get("country", "")
+                        admin1 = item.get("admin1", "")
+                        lat = float(item.get("latitude", 0.0))
+                        lon = float(item.get("longitude", 0.0))
+
+                        parts = [name]
+                        if admin1: parts.append(admin1)
+                        if country: parts.append(country)
+                        disp_str = f"{', '.join(parts)}"
+                        string_list.append(disp_str)
+                        self.search_results_data.append((disp_str, str(lat), str(lon), name))
+
+                    for combo in self.all_weather_res_combos:
+                        if len(results) > 0:
+                            combo.set_model(string_list)
+                            combo.set_visible(True)
+                        else:
+                            combo.set_visible(False)
+                GLib.idle_add(update_ui)
+        except Exception as e:
+            log.error(f"TouchBarInfo: City search failed: {e}")
+
+    def on_weather_result_selected(self, combo, *args):
+        sel = combo.get_selected()
+        if 0 <= sel < len(self.search_results_data):
+            disp_str, lat_str, lon_str, city_name = self.search_results_data[sel]
+            settings = self.get_settings()
+            if settings is not None:
+                settings["weather_lat"] = lat_str
+                settings["weather_lon"] = lon_str
+                settings["weather_location_name"] = city_name
+                self.set_settings(settings)
+
+                for entry in self.all_weather_loc_entries:
+                    if entry.get_text() != city_name:
+                        entry.set_text(city_name)
+
+                self.fetch_weather_async(force=True)
+
+    def on_weather_unit_changed(self, combo, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = combo.get_selected()
+            settings["weather_unit_idx"] = val
+            for c in self.all_weather_unit_combos:
+                if c != combo and c.get_selected() != val:
+                    c.set_selected(val)
+            self.set_settings(settings)
+            self.fetch_weather_async(force=True)
+
+    def on_weather_refresh_changed(self, combo, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = combo.get_selected()
+            settings["weather_refresh_idx"] = val
+            for c in self.all_weather_ref_combos:
+                if c != combo and c.get_selected() != val:
+                    c.set_selected(val)
+            self.set_settings(settings)
+
+    def on_weather_font_family_changed(self, combo, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = combo.get_selected()
+            settings["weather_font_family_idx"] = val
+            for c in self.all_weather_fam_combos:
+                if c != combo and c.get_selected() != val:
+                    c.set_selected(val)
+            self.set_settings(settings)
+            self.trigger_redraw()
+
+    def on_weather_font_size_changed(self, spin, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = int(spin.get_value())
+            settings["weather_font_size"] = val
+            for s in self.all_weather_size_spins:
+                if s != spin and int(s.get_value()) != val:
+                    s.set_value(val)
+            self.set_settings(settings)
+            self.trigger_redraw()
+
+    def on_weather_font_color_set(self, button):
+        settings = self.get_settings()
+        if settings is not None:
+            rgba = button.get_rgba()
+            hex_val = self.gdk_to_hex(rgba)
+            settings["weather_font_color"] = hex_val
+            for btn in self.all_weather_color_btns:
+                if btn != button:
+                    self.set_color_button_rgba(btn, hex_val)
+            self.set_settings(settings)
+            self.trigger_redraw()
+
     def get_font_for_family(self, family_name: str, size: int, bold: bool = True):
         style = "Bold" if bold else "Regular"
         cmd = ["fc-match", "-f", "%{file}", f"{family_name}:style={style}"]
@@ -646,6 +972,59 @@ class TouchBarInfoAction(ActionBase):
         center_y = y_min + (y_max - y_min) / 2
         draw.text((center_x, center_y), text, fill=color, font=font, anchor="mm")
 
+    def draw_weather(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_weather, font_location, color):
+        x_min, y_min, x_max, y_max = box
+        box_w = x_max - x_min
+        box_h = y_max - y_min
+
+        cache = self.weather_cache or {}
+        temp_str = cache.get("temp_str", "--°")
+        wmo_code = cache.get("wmo_code", 0)
+        is_day = cache.get("is_day", 1)
+        location_str = cache.get("location", "Miami")
+
+        icon_file = self.get_weather_icon_filename(wmo_code, is_day)
+        icon_path = os.path.join(self.plugin_base.PATH, "assets", "weather-icons", icon_file)
+
+        # Scale weather icon to fit section height
+        target_icon_h = int(box_h * 0.70)
+        icon_img = None
+
+        if os.path.exists(icon_path):
+            try:
+                raw_img = Image.open(icon_path).convert("RGBA")
+                aspect = raw_img.width / max(1, raw_img.height)
+                target_icon_w = int(target_icon_h * aspect)
+                icon_img = raw_img.resize((target_icon_w, target_icon_h), Image.Resampling.LANCZOS)
+            except Exception as e:
+                log.error(f"TouchBarInfo: Failed loading weather icon {icon_path}: {e}")
+
+        margin_x = int(box_w * 0.08)
+        if icon_img is not None:
+            icon_x = x_min + margin_x
+            icon_y = y_min + int((box_h - target_icon_h) / 2)
+            image.paste(icon_img, (icon_x, icon_y), icon_img)
+            text_x = icon_x + icon_img.width + int(margin_x * 0.8)
+        else:
+            text_x = x_min + margin_x
+
+        # Stacked Temperature (top) and Location Name (bottom) on right side of icon
+        bbox_temp = draw.textbbox((0, 0), temp_str, font=font_weather)
+        bbox_loc = draw.textbbox((0, 0), location_str, font=font_location)
+
+        temp_h = bbox_temp[3] - bbox_temp[1]
+        loc_h = bbox_loc[3] - bbox_loc[1]
+
+        spacing = max(1, int(box_h * 0.04))
+        total_h = temp_h + spacing + loc_h
+        start_y = y_min + (box_h - total_h) / 2
+
+        temp_y = start_y + (temp_h / 2)
+        loc_y = start_y + temp_h + spacing + (loc_h / 2)
+
+        draw.text((text_x, temp_y), temp_str, fill=color, font=font_weather, anchor="lm")
+        draw.text((text_x, loc_y), location_str, fill=color, font=font_location, anchor="lm")
+
     def update_display(self) -> None:
         settings = self.get_settings() or {}
         use_24h = settings.get("use_24h", False)
@@ -676,6 +1055,10 @@ class TouchBarInfoAction(ActionBase):
         time_font_size = settings.get("time_font_size", 45)
         time_font_color_hex = settings.get("time_font_color", "#FFFFFFFF")
 
+        weather_font_family_idx = settings.get("weather_font_family_idx", 0)
+        weather_font_size = settings.get("weather_font_size", 22)
+        weather_font_color_hex = settings.get("weather_font_color", "#FFFFFFFF")
+
         date_options = [
             ("%b. %d, %Y", "Mon. Day, Year"),
             ("%a. %d, %Y", "DayOfWeek. Day, Year"),
@@ -696,10 +1079,13 @@ class TouchBarInfoAction(ActionBase):
 
         date_family = self.font_families[min(date_font_family_idx, len(self.font_families) - 1)] if hasattr(self, "font_families") else "DejaVu Sans"
         time_family = self.font_families[min(time_font_family_idx, len(self.font_families) - 1)] if hasattr(self, "font_families") else "DejaVu Sans"
+        weather_family = self.font_families[min(weather_font_family_idx, len(self.font_families) - 1)] if hasattr(self, "font_families") else "DejaVu Sans"
 
-        combined_key = f"{date_str}|{time_str}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{date_family}|{date_font_size}|{date_font_color_hex}|{time_family}|{time_font_size}|{time_font_color_hex}"
+        cache_temp = self.weather_cache.get("temp_str", "--°") if hasattr(self, "weather_cache") else "--°"
+        cache_loc = self.weather_cache.get("location", "") if hasattr(self, "weather_cache") else ""
 
-        # Avoid redundant redraws if settings and time text haven't changed
+        combined_key = f"{date_str}|{time_str}|{cache_temp}|{cache_loc}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{date_family}|{date_font_size}|{date_font_color_hex}|{time_family}|{time_font_size}|{time_font_color_hex}|{weather_family}|{weather_font_size}|{weather_font_color_hex}"
+
         if combined_key == self.last_rendered_key:
             return
         self.last_rendered_key = combined_key
@@ -712,21 +1098,25 @@ class TouchBarInfoAction(ActionBase):
         font_date = self.get_font_for_family(date_family, date_font_size, bold=True)
         font_time = self.get_font_for_family(time_family, time_font_size, bold=True)
 
+        font_weather_full = self.get_font_for_family(weather_family, int(weather_font_size * 1.5), bold=True)
+        font_loc_full = self.get_font_for_family(weather_family, weather_font_size, bold=True)
+
+        font_weather_sub = self.get_font_for_family(weather_family, weather_font_size, bold=True)
+        font_loc_sub = self.get_font_for_family(weather_family, max(10, int(weather_font_size * 0.75)), bold=True)
+
         date_color = self.hex_to_rgba_tuple(date_font_color_hex, default=(170, 200, 230, 255))
         time_color = self.hex_to_rgba_tuple(time_font_color_hex, default=(255, 255, 255, 255))
+        weather_color = self.hex_to_rgba_tuple(weather_font_color_hex, default=(255, 255, 255, 255))
 
         # --- Section Bounding Boxes ---
-        # Section A: 0..200 (Left)
         box_a_full = (0, 0, 200, 100)
         box_a_top = (0, 0, 200, 50)
         box_a_bot = (0, 50, 200, 100)
 
-        # Section B: 200..600 (Center - full 400px width)
         box_b_full = (200, 0, 600, 100)
         box_b_top = (200, 0, 600, 50)
         box_b_bot = (200, 50, 600, 100)
 
-        # Section C: 600..800 (Right)
         box_c_full = (600, 0, 800, 100)
         box_c_top = (600, 0, 800, 50)
         box_c_bot = (600, 50, 800, 100)
@@ -739,26 +1129,27 @@ class TouchBarInfoAction(ActionBase):
                     self.draw_single(draw, full_box, date_str, font_date, date_color)
                 elif full_choice == 3: # Time
                     self.draw_single(draw, full_box, time_str, font_time, time_color)
+                elif full_choice == 4: # Weather
+                    self.draw_weather(image, draw, full_box, font_weather_full, font_loc_full, weather_color)
             else: # 2 Widgets (Split Top / Bottom)
                 # Top Sub-slot
                 if top_choice == 1: # Date
                     self.draw_single(draw, top_box, date_str, font_date, date_color)
                 elif top_choice == 2: # Time
                     self.draw_single(draw, top_box, time_str, font_time, time_color)
+                elif top_choice == 3: # Weather
+                    self.draw_weather(image, draw, top_box, font_weather_sub, font_loc_sub, weather_color)
 
                 # Bottom Sub-slot
                 if bot_choice == 1: # Date
                     self.draw_single(draw, bot_box, date_str, font_date, date_color)
                 elif bot_choice == 2: # Time
                     self.draw_single(draw, bot_box, time_str, font_time, time_color)
+                elif bot_choice == 3: # Weather
+                    self.draw_weather(image, draw, bot_box, font_weather_sub, font_loc_sub, weather_color)
 
-        # Render Section A
         render_section(sec_a_mode, sec_a_full, sec_a_top, sec_a_bot, box_a_full, box_a_top, box_a_bot)
-
-        # Render Section B
         render_section(sec_b_mode, sec_b_full, sec_b_top, sec_b_bot, box_b_full, box_b_top, box_b_bot)
-
-        # Render Section C
         render_section(sec_c_mode, sec_c_full, sec_c_top, sec_c_bot, box_c_full, box_c_top, box_c_bot)
 
         self.render_to_input(image)
@@ -767,19 +1158,16 @@ class TouchBarInfoAction(ActionBase):
         if not hasattr(self, "page") or self.page is None:
             return
 
-        # Save rendered date/time image to assets directory
         assets_dir = os.path.join(self.plugin_base.PATH, "assets")
         os.makedirs(assets_dir, exist_ok=True)
         render_path = os.path.join(assets_dir, f"touchbar_render_{self.state}.png")
 
         try:
             image.save(render_path)
-            # Set page background image path for touchscreen (update=False prevents recursive page reload)
             self.page.set_background_image(self.input_ident, self.state, render_path, update=False)
         except Exception as e:
             log.error(f"TouchBarInfo: Error saving touchscreen background: {e}")
 
-        # Trigger non-recursive update on the touchscreen controller
         if hasattr(self, "deck_controller") and self.deck_controller is not None:
             c_input = self.deck_controller.get_input(self.input_ident)
             if c_input is not None and hasattr(c_input, "update"):
