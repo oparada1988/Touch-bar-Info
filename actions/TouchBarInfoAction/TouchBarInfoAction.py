@@ -44,6 +44,34 @@ class TouchBarInfoAction(ActionBase):
     def on_tick(self) -> None:
         self.update_display()
 
+    def on_remove(self) -> None:
+        self.clear_background()
+
+    def on_removed_from_cache(self) -> None:
+        self.clear_background()
+
+    def clear_background(self) -> None:
+        if hasattr(self, "page") and self.page is not None:
+            try:
+                self.page.set_background_image(self.input_ident, self.state, "", update=False)
+                render_path = os.path.join(self.plugin_base.PATH, "assets", f"touchbar_render_{self.state}.png")
+                if os.path.exists(render_path):
+                    os.remove(render_path)
+            except Exception as e:
+                log.error(f"TouchBarInfo: Error clearing background on removal: {e}")
+
+        if hasattr(self, "deck_controller") and self.deck_controller is not None:
+            try:
+                c_input = self.deck_controller.get_input(self.input_ident)
+                if c_input is not None:
+                    empty_img = Image.new("RGBA", (800, 100), (0, 0, 0, 0))
+                    if hasattr(c_input, "set_ui_image"):
+                        c_input.set_ui_image(empty_img)
+                    if hasattr(c_input, "update"):
+                        c_input.update()
+            except Exception as e:
+                log.error(f"TouchBarInfo: Error resetting touchscreen display on removal: {e}")
+
     def get_config_rows(self) -> "list[Adw.PreferencesRow]":
         # Available font families
         self.font_families = ["DejaVu Sans", "Liberation Sans", "Ubuntu", "Noto Sans", "Monospace", "Serif", "Sans"]
