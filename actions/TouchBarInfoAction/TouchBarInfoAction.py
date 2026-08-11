@@ -29,6 +29,7 @@ class TouchBarInfoAction(ActionBase):
         self.last_rendered_key = ""
         self.weather_cache = {}
         self.city_search_timer = None
+        self.update_vis_callbacks = []
 
         # System Monitor Stats Buffers
         self.cpu_history = [0.0] * 20
@@ -239,6 +240,8 @@ class TouchBarInfoAction(ActionBase):
         Thread(target=task, daemon=True).start()
 
     def get_config_rows(self) -> "list[Adw.PreferencesRow]":
+        self.update_vis_callbacks = []
+
         # Date Format Options
         self.date_format_options = [
             ("%b. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.mon-day-year", "Mon. Day, Year (Aug. 11, 2026)")),
@@ -871,6 +874,7 @@ class TouchBarInfoAction(ActionBase):
                 ctrls["fill_sw"].connect("notify::active", lambda *a: update_visibility())
                 ctrls["out_sw"].connect("notify::active", lambda *a: update_visibility())
 
+            self.update_vis_callbacks.append(update_visibility)
             update_visibility()
 
             return expander, mode_combo, full_combo, top_combo, bot_combo
@@ -1302,11 +1306,11 @@ class TouchBarInfoAction(ActionBase):
                         self.search_results_data.append((disp_str, str(lat), str(lon), name))
 
                     for combo in self.all_weather_res_combos:
-                        if len(results) > 0:
-                            combo.set_model(string_list)
-                            combo.set_visible(True)
-                        else:
-                            combo.set_visible(False)
+                        combo.set_model(string_list)
+
+                    for cb in self.update_vis_callbacks:
+                        cb()
+
                 GLib.idle_add(update_ui)
         except Exception as e:
             log.error(f"TouchBarInfo: City search failed: {e}")
