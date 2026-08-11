@@ -135,35 +135,59 @@ class TouchBarInfoAction(ActionBase):
     def get_system_disk_mounts(self) -> list[tuple[str, str]]:
         disks = []
         seen = set()
-        try:
-            cmd = ['flatpak-spawn', '--host', 'lsblk', '-J', '-o', 'NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS']
-            out = subprocess.check_output(cmd, text=True, timeout=2)
-            data = json.loads(out)
 
-            def parse_devs(dev_list):
-                for item in dev_list:
-                    name = item.get("name", "")
-                    label = item.get("label", "")
-                    fstype = item.get("fstype", "")
+        lsblk_cmds = [
+            ['flatpak-spawn', '--host', '/usr/bin/lsblk', '-J', '-o', 'NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS'],
+            ['flatpak-spawn', '--host', 'lsblk', '-J', '-o', 'NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS'],
+            ['flatpak-spawn', '--host', 'lsblk', '-J']
+        ]
 
-                    raw_mounts = list(item.get("mountpoints") or [])
-                    if item.get("mountpoint"):
-                        raw_mounts.append(item.get("mountpoint"))
+        for cmd in lsblk_cmds:
+            try:
+                out = subprocess.check_output(cmd, text=True, timeout=2)
+                data = json.loads(out)
 
-                    valid_mounts = [m for m in raw_mounts if m and not m.startswith(("/boot", "/run", "/sys", "/proc", "/dev"))]
+                def parse_devs(dev_list):
+                    for item in dev_list:
+                        name = item.get("name", "")
+                        label = item.get("label", "")
+                        fstype = item.get("fstype", "")
 
-                    for mount in valid_mounts:
-                        if mount not in seen and fstype not in ["swap", "squashfs", "iso9660"]:
-                            seen.add(mount)
-                            disp_name = f"{label} ({mount} — {name})" if label else f"{mount} ({name})"
-                            disks.append((mount, disp_name))
+                        raw_mounts = list(item.get("mountpoints") or [])
+                        if item.get("mountpoint"):
+                            raw_mounts.append(item.get("mountpoint"))
 
-                    if "children" in item:
-                        parse_devs(item["children"])
+                        valid_mounts = [m for m in raw_mounts if m and not m.startswith(("/boot", "/run", "/sys", "/proc", "/dev"))]
 
-            parse_devs(data.get("blockdevices", []))
-        except Exception as e:
-            log.warning(f"TouchBarInfo: Host lsblk query fallback: {e}")
+                        for mount in valid_mounts:
+                            if mount not in seen and fstype not in ["swap", "squashfs", "iso9660"]:
+                                seen.add(mount)
+                                disp_name = f"{label} ({mount} — {name})" if label else f"{mount} ({name})"
+                                disks.append((mount, disp_name))
+
+                        if "children" in item:
+                            parse_devs(item["children"])
+
+                parse_devs(data.get("blockdevices", []))
+                if disks:
+                    break
+            except Exception:
+                pass
+
+        if not disks:
+            try:
+                out = subprocess.check_output(['flatpak-spawn', '--host', 'df', '-h', '-x', 'tmpfs', '-x', 'devtmpfs', '-x', 'squashfs'], text=True, timeout=2)
+                lines = out.strip().splitlines()[1:]
+                for line in lines:
+                    parts = line.split()
+                    if len(parts) >= 6:
+                        dev, mount = parts[0], parts[5]
+                        if dev.startswith('/dev/') and not mount.startswith(('/boot', '/run', '/sys', '/proc', '/dev')):
+                            if mount not in seen:
+                                seen.add(mount)
+                                disks.append((mount, f"{mount} ({dev})"))
+            except Exception as e:
+                log.warning(f"TouchBarInfo: df fallback error: {e}")
 
         if not disks:
             seen_devs = set()
@@ -1736,6 +1760,29 @@ class TouchBarInfoAction(ActionBase):
             center_y = y_min + (box_h / 2)
             self.render_styled_text(draw, (center_x, center_y), main_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
+    def get_disk_usage_host(self, mount_path: str) -> tuple[float, float, float]:
+        try:
+            cmd = ['flatpak-spawn', '--host', 'df', '-B1', mount_path]
+            out = subprocess.check_output(cmd, text=True, timeout=2)
+            lines = out.strip().splitlines()
+            if len(lines) >= 2:
+                parts = lines[-1].split()
+                if len(parts) >= 5:
+                    total_b = float(parts[1])
+                    used_b = float(parts[2])
+                    free_b = float(parts[3])
+                    pct_str = parts[4].rstrip('%')
+                    pct = float(pct_str) if pct_str.replace('.', '', 1).isdigit() else (used_b / max(1.0, total_b)) * 100.0
+                    return pct, used_b / (1024**3), free_b / (1024**3)
+        except Exception:
+            pass
+
+        try:
+            du = psutil.disk_usage(mount_path)
+            return du.percent, du.used / (1024**3), du.free / (1024**3)
+        except Exception:
+            return 0.0, 0.0, 0.0
+
     def draw_disk_widget(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_main, font_sub, fill_en, fill_col, out_en, out_col, out_sz, disk_mode: int, disk_mount_idx: int):
         x_min, y_min, x_max, y_max = box
         box_w = x_max - x_min
@@ -1757,16 +1804,7 @@ class TouchBarInfoAction(ActionBase):
         if hasattr(self, "disk_mounts") and 0 <= disk_mount_idx < len(self.disk_mounts):
             mount_path, _ = self.disk_mounts[disk_mount_idx]
 
-        pct = 0.0
-        used_gb = 0.0
-        free_gb = 0.0
-        try:
-            du = psutil.disk_usage(mount_path)
-            pct = du.percent
-            used_gb = du.used / (1024**3)
-            free_gb = du.free / (1024**3)
-        except Exception:
-            pass
+        pct, used_gb, free_gb = self.get_disk_usage_host(mount_path)
 
         if disk_mode == 2: # Mini bar graph
             graph_box = (content_x, y_min + int(box_h * 0.25), x_max - margin_x, y_max - int(box_h * 0.25))
