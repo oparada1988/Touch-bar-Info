@@ -93,5 +93,11 @@
     "actions.touchbar-info.bg-image.clear": "Löschen",
     "actions.touchbar-info.bg-image.dialog-title": "Touch Bar Hintergrundbild auswählen",
     "actions.touchbar-info.bg-image.open": "Öffnen",
-    "actions.touchbar-info.bg-image.cancel": "Abbrechen"
+    "actions.touchbar-info.bg-image.cancel": "Abbrechen",
+    "actions.touchbar-info.disk-browse.label": "Benutzerdefiniertes Einhängeverzeichnis durchsuchen",
+    "actions.touchbar-info.disk-browse.subtitle": "Partition oder Ordnerpfad visuell auswählen",
+    "actions.touchbar-info.disk-browse.choose": "Durchsuchen...",
+    "actions.touchbar-info.disk-browse.dialog-title": "Einhängeverzeichnis oder Ordner auswählen",
+    "actions.touchbar-info.disk-browse.open": "Ordner auswählen",
+    "actions.touchbar-info.disk-browse.cancel": "Abbrechen"
 }

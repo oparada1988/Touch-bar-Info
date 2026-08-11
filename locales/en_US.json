@@ -93,5 +93,11 @@
     "actions.touchbar-info.bg-image.clear": "Clear",
     "actions.touchbar-info.bg-image.dialog-title": "Select Touch Bar Background Image",
     "actions.touchbar-info.bg-image.open": "Open",
-    "actions.touchbar-info.bg-image.cancel": "Cancel"
+    "actions.touchbar-info.bg-image.cancel": "Cancel",
+    "actions.touchbar-info.disk-browse.label": "Browse Custom Mount Directory",
+    "actions.touchbar-info.disk-browse.subtitle": "Visually choose any partition or folder path",
+    "actions.touchbar-info.disk-browse.choose": "Browse...",
+    "actions.touchbar-info.disk-browse.dialog-title": "Select Mount Directory or Disk Folder",
+    "actions.touchbar-info.disk-browse.open": "Select Folder",
+    "actions.touchbar-info.disk-browse.cancel": "Cancel"
 }

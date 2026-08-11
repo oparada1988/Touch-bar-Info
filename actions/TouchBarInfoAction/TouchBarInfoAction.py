@@ -149,8 +149,10 @@ class TouchBarInfoAction(ActionBase):
                             if not mount.startswith(('/boot', '/run', '/sys', '/proc', '/dev', '/var/lib/flatpak', '/var/lib/docker')):
                                 if mount not in seen:
                                     seen.add(mount)
+                                    dev_node = os.path.basename(dev)
                                     clean_name = "System Root" if mount == "/" else mount.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
-                                    disks.append((mount, clean_name))
+                                    disp_name = f"{clean_name} — {mount} ({dev_node})"
+                                    disks.append((mount, disp_name))
         except Exception:
             pass
 
@@ -170,6 +172,7 @@ class TouchBarInfoAction(ActionBase):
 
                         def parse_devs(dev_list):
                             for item in dev_list:
+                                dev_name = item.get("name", "")
                                 label = item.get("label", "")
                                 fstype = item.get("fstype", "")
 
@@ -182,12 +185,8 @@ class TouchBarInfoAction(ActionBase):
                                 for mount in valid_mounts:
                                     if mount not in seen and fstype not in ["swap", "squashfs", "iso9660"]:
                                         seen.add(mount)
-                                        if label:
-                                            disp_name = label
-                                        elif mount == "/":
-                                            disp_name = "System Root"
-                                        else:
-                                            disp_name = mount.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
+                                        clean_name = label if label else ("System Root" if mount == "/" else mount.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize())
+                                        disp_name = f"{clean_name} — {mount} ({dev_name})" if dev_name else f"{clean_name} — {mount}"
                                         disks.append((mount, disp_name))
 
                                 if "children" in item:
@@ -214,8 +213,10 @@ class TouchBarInfoAction(ActionBase):
                                 if dev.startswith('/dev/') and not mount.startswith(('/boot', '/run', '/sys', '/proc', '/dev')):
                                     if mount not in seen:
                                         seen.add(mount)
+                                        dev_node = os.path.basename(dev)
                                         clean_name = "System Root" if mount == "/" else mount.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
-                                        disks.append((mount, clean_name))
+                                        disp_name = f"{clean_name} — {mount} ({dev_node})"
+                                        disks.append((mount, disp_name))
                         if disks:
                             break
                 except Exception:
@@ -229,13 +230,15 @@ class TouchBarInfoAction(ActionBase):
                     if p.device.startswith("/dev/") and not p.mountpoint.startswith(("/usr", "/app", "/var", "/etc", "/run", "/dev", "/sys", "/proc")):
                         if p.device not in seen_devs:
                             seen_devs.add(p.device)
+                            dev_node = os.path.basename(p.device)
                             clean_name = "System Root" if p.mountpoint == "/" else p.mountpoint.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
-                            disks.append((p.mountpoint, clean_name))
+                            disp_name = f"{clean_name} — {p.mountpoint} ({dev_node})"
+                            disks.append((p.mountpoint, disp_name))
             except Exception:
                 pass
 
         if not disks:
-            disks = [("/", "System Root")]
+            disks = [("/", "System Root — /")]
 
         return disks
 
@@ -419,8 +422,329 @@ class TouchBarInfoAction(ActionBase):
         self.all_ram_mode_combos = []
         self.all_disk_mode_combos = []
         self.all_disk_mount_combos = []
+        self.all_disk_browse_rows = []
 
         self.search_results_data = []
+
+        # Helper to create Date controls
+        def build_date_controls():
+            fmt_model = Gtk.StringList()
+            for _, label in self.date_format_options: fmt_model.append(label)
+            fmt_combo = Adw.ComboRow(
+                model=fmt_model,
+                title=self.get_locale_text("actions.touchbar-info.date-format.label", "Date Format"),
+                subtitle=self.get_locale_text("actions.touchbar-info.date-format.subtitle", "Format style for date text")
+            )
+
+            font_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
+                subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
+            )
+            font_btn = Gtk.FontButton.new()
+            font_btn.set_use_font(False)
+            font_btn.set_use_size(False)
+            font_btn.set_valign(Gtk.Align.CENTER)
+            font_btn.set_hexpand(False)
+            font_row.add_suffix(font_btn)
+
+            fill_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
+            )
+
+            fill_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for text interior fill")
+            )
+            fill_color_btn = Gtk.ColorButton()
+            fill_color_btn.set_valign(Gtk.Align.CENTER)
+            fill_color_row.add_suffix(fill_color_btn)
+
+            out_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
+            )
+
+            out_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for text stroke outline")
+            )
+            out_color_btn = Gtk.ColorButton()
+            out_color_btn.set_valign(Gtk.Align.CENTER)
+            out_color_row.add_suffix(out_color_btn)
+
+            out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
+            out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
+            out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+
+            self.all_date_fmt_combos.append(fmt_combo)
+            self.all_date_font_btns.append(font_btn)
+            self.all_date_fill_switches.append(fill_sw)
+            self.all_date_fill_color_btns.append(fill_color_btn)
+            self.all_date_out_switches.append(out_sw)
+            self.all_date_out_color_btns.append(out_color_btn)
+            self.all_date_out_size_spins.append(out_size_spin)
+
+            return {
+                "fmt_combo": fmt_combo,
+                "font_btn": font_btn,
+                "fill_sw": fill_sw,
+                "fill_color_btn": fill_color_btn,
+                "out_sw": out_sw,
+                "out_color_btn": out_color_btn,
+                "out_size_spin": out_size_spin,
+                "all_rows": [fmt_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+            }
+
+        # Helper to create Time controls
+        def build_time_controls():
+            use_24h_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.use-24h.label", "Use 24-Hour Clock"),
+                subtitle=self.get_locale_text("actions.touchbar-info.use-24h.subtitle", "Switch between 12-hour (AM/PM) and 24-hour time format")
+            )
+            sec_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.show-seconds.label", "Show Seconds"),
+                subtitle=self.get_locale_text("actions.touchbar-info.show-seconds.subtitle", "Include seconds in the displayed time")
+            )
+
+            font_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
+                subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
+            )
+            font_btn = Gtk.FontButton.new()
+            font_btn.set_use_font(False)
+            font_btn.set_use_size(False)
+            font_btn.set_valign(Gtk.Align.CENTER)
+            font_btn.set_hexpand(False)
+            font_row.add_suffix(font_btn)
+
+            fill_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
+            )
+
+            fill_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for text interior fill")
+            )
+            fill_color_btn = Gtk.ColorButton()
+            fill_color_btn.set_valign(Gtk.Align.CENTER)
+            fill_color_row.add_suffix(fill_color_btn)
+
+            out_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
+            )
+
+            out_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for text stroke outline")
+            )
+            out_color_btn = Gtk.ColorButton()
+            out_color_btn.set_valign(Gtk.Align.CENTER)
+            out_color_row.add_suffix(out_color_btn)
+
+            out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
+            out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
+            out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+
+            self.all_time_24h_switches.append(use_24h_sw)
+            self.all_time_sec_switches.append(sec_sw)
+            self.all_time_font_btns.append(font_btn)
+            self.all_time_fill_switches.append(fill_sw)
+            self.all_time_fill_color_btns.append(fill_color_btn)
+            self.all_time_out_switches.append(out_sw)
+            self.all_time_out_color_btns.append(out_color_btn)
+            self.all_time_out_size_spins.append(out_size_spin)
+
+            return {
+                "use_24h_sw": use_24h_sw,
+                "sec_sw": sec_sw,
+                "font_btn": font_btn,
+                "fill_sw": fill_sw,
+                "fill_color_btn": fill_color_btn,
+                "out_sw": out_sw,
+                "out_color_btn": out_color_btn,
+                "out_size_spin": out_size_spin,
+                "all_rows": [use_24h_sw, sec_sw, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+            }
+
+        # Helper to create Weather controls
+        def build_weather_controls():
+            loc_entry = Adw.EntryRow(
+                title=self.get_locale_text("actions.touchbar-info.weather-location.label", "City / Location Search")
+            )
+
+            res_combo = Adw.ComboRow(
+                title=self.get_locale_text("actions.touchbar-info.weather-results.label", "Select Matching Location"),
+                subtitle=self.get_locale_text("actions.touchbar-info.weather-results.subtitle", "Choose city from Open-Meteo search results")
+            )
+            res_combo.set_visible(False)
+
+            unit_model = Gtk.StringList()
+            for u in self.weather_units: unit_model.append(u)
+            unit_combo = Adw.ComboRow(
+                model=unit_model,
+                title=self.get_locale_text("actions.touchbar-info.weather-unit.label", "Temperature Unit"),
+                subtitle=self.get_locale_text("actions.touchbar-info.weather-unit.subtitle", "Select Fahrenheit (°F) or Celsius (°C)")
+            )
+
+            ref_model = Gtk.StringList()
+            for r in self.weather_intervals: ref_model.append(r)
+            ref_combo = Adw.ComboRow(
+                model=ref_model,
+                title=self.get_locale_text("actions.touchbar-info.weather-refresh.label", "Refresh Interval"),
+                subtitle=self.get_locale_text("actions.touchbar-info.weather-refresh.subtitle", "Automatic weather update frequency")
+            )
+
+            font_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
+                subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
+            )
+            font_btn = Gtk.FontButton.new()
+            font_btn.set_use_font(False)
+            font_btn.set_use_size(False)
+            font_btn.set_valign(Gtk.Align.CENTER)
+            font_btn.set_hexpand(False)
+            font_row.add_suffix(font_btn)
+
+            fill_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
+            )
+
+            fill_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for text interior fill")
+            )
+            fill_color_btn = Gtk.ColorButton()
+            fill_color_btn.set_valign(Gtk.Align.CENTER)
+            fill_color_row.add_suffix(fill_color_btn)
+
+            out_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
+            )
+
+            out_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for text stroke outline")
+            )
+            out_color_btn = Gtk.ColorButton()
+            out_color_btn.set_valign(Gtk.Align.CENTER)
+            out_color_row.add_suffix(out_color_btn)
+
+            out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
+            out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
+            out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+
+            self.all_weather_loc_entries.append(loc_entry)
+            self.all_weather_res_combos.append(res_combo)
+            self.all_weather_unit_combos.append(unit_combo)
+            self.all_weather_ref_combos.append(ref_combo)
+            self.all_weather_font_btns.append(font_btn)
+            self.all_weather_fill_switches.append(fill_sw)
+            self.all_weather_fill_color_btns.append(fill_color_btn)
+            self.all_weather_out_switches.append(out_sw)
+            self.all_weather_out_color_btns.append(out_color_btn)
+            self.all_weather_out_size_spins.append(out_size_spin)
+
+            return {
+                "loc_entry": loc_entry,
+                "res_combo": res_combo,
+                "unit_combo": unit_combo,
+                "ref_combo": ref_combo,
+                "font_btn": font_btn,
+                "fill_sw": fill_sw,
+                "fill_color_btn": fill_color_btn,
+                "out_sw": out_sw,
+                "out_color_btn": out_color_btn,
+                "out_size_spin": out_size_spin,
+                "all_rows": [loc_entry, res_combo, unit_combo, ref_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+            }
+
+        # Helper to create CPU controls
+        def build_cpu_controls():
+            mode_model = Gtk.StringList()
+            for opt in self.cpu_mode_options: mode_model.append(opt)
+            mode_combo = Adw.ComboRow(
+                model=mode_model,
+                title=self.get_locale_text("actions.touchbar-info.cpu-mode.label", "CPU Display Mode"),
+                subtitle=self.get_locale_text("actions.touchbar-info.cpu-mode.subtitle", "Choose percentage, processes, or live graph")
+            )
+            self.all_cpu_mode_combos.append(mode_combo)
+            return {"mode_combo": mode_combo, "all_rows": [mode_combo]}
+
+        # Helper to create Network controls
+        def build_net_controls():
+            mode_model = Gtk.StringList()
+            for opt in self.net_mode_options: mode_model.append(opt)
+            mode_combo = Adw.ComboRow(
+                model=mode_model,
+                title=self.get_locale_text("actions.touchbar-info.net-mode.label", "Network Display Mode"),
+                subtitle=self.get_locale_text("actions.touchbar-info.net-mode.subtitle", "Choose download/upload rates or live graph")
+            )
+
+            unit_model = Gtk.StringList()
+            for opt in self.net_unit_options: unit_model.append(opt)
+            unit_combo = Adw.ComboRow(
+                model=unit_model,
+                title=self.get_locale_text("actions.touchbar-info.net-unit.label", "Network Speed Unit"),
+                subtitle=self.get_locale_text("actions.touchbar-info.net-unit.subtitle", "Choose Bytes (KB/s, MB/s) or Bits (Kbit/s, Mbit/s)")
+            )
+
+            self.all_net_mode_combos.append(mode_combo)
+            self.all_net_unit_combos.append(unit_combo)
+            return {"mode_combo": mode_combo, "unit_combo": unit_combo, "all_rows": [mode_combo, unit_combo]}
+
+        # Helper to create RAM controls
+        def build_ram_controls():
+            mode_model = Gtk.StringList()
+            for opt in self.ram_mode_options: mode_model.append(opt)
+            mode_combo = Adw.ComboRow(
+                model=mode_model,
+                title=self.get_locale_text("actions.touchbar-info.ram-mode.label", "RAM Display Mode"),
+                subtitle=self.get_locale_text("actions.touchbar-info.ram-mode.subtitle", "Choose percentage, GB used/total, or live graph")
+            )
+            self.all_ram_mode_combos.append(mode_combo)
+            return {"mode_combo": mode_combo, "all_rows": [mode_combo]}
+
+        # Helper to create Disk controls
+        def build_disk_controls():
+            if not hasattr(self, "disk_mounts") or not self.disk_mounts or len(self.disk_mounts) <= 1 or self.disk_mounts[0][0].startswith("/home"):
+                fresh = self.get_system_disk_mounts()
+                if fresh:
+                    self.disk_mounts = fresh
+
+            mount_model = Gtk.StringList()
+            for m_path, m_disp in self.disk_mounts: mount_model.append(m_disp)
+            mount_combo = Adw.ComboRow(
+                model=mount_model,
+                title=self.get_locale_text("actions.touchbar-info.disk-select.label", "System Disk Mount"),
+                subtitle=self.get_locale_text("actions.touchbar-info.disk-select.subtitle", "Select system disk partition to monitor")
+            )
+
+            browse_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.disk-browse.label", "Browse Custom Mount Directory"),
+                subtitle=self.get_locale_text("actions.touchbar-info.disk-browse.subtitle", "Visually choose any partition or folder path")
+            )
+            browse_btn = Gtk.Button(label=self.get_locale_text("actions.touchbar-info.disk-browse.choose", "Browse..."))
+            browse_btn.set_valign(Gtk.Align.CENTER)
+            browse_btn.connect("clicked", self.on_browse_disk_mount_clicked)
+            browse_row.add_suffix(browse_btn)
+
+            mode_model = Gtk.StringList()
+            for opt in self.disk_mode_options: mode_model.append(opt)
+            mode_combo = Adw.ComboRow(
+                model=mode_model,
+                title=self.get_locale_text("actions.touchbar-info.disk-mode.label", "Disk Display Mode"),
+                subtitle=self.get_locale_text("actions.touchbar-info.disk-mode.subtitle", "Choose percentage, GB used/free, or mini graph")
+            )
+
+            self.all_disk_mount_combos.append(mount_combo)
+            self.all_disk_mode_combos.append(mode_combo)
+            self.all_disk_browse_rows.append(browse_row)
+            return {"mount_combo": mount_combo, "mode_combo": mode_combo, "browse_row": browse_row, "all_rows": [mount_combo, browse_row, mode_combo]}
 
         # Helper to create Date controls
         def build_date_controls():
@@ -708,6 +1032,15 @@ class TouchBarInfoAction(ActionBase):
                 subtitle=self.get_locale_text("actions.touchbar-info.disk-select.subtitle", "Select system disk partition to monitor")
             )
 
+            browse_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.disk-browse.label", "Browse Custom Mount Directory"),
+                subtitle=self.get_locale_text("actions.touchbar-info.disk-browse.subtitle", "Visually choose any partition or folder path")
+            )
+            browse_btn = Gtk.Button(label=self.get_locale_text("actions.touchbar-info.disk-browse.choose", "Browse..."))
+            browse_btn.set_valign(Gtk.Align.CENTER)
+            browse_btn.connect("clicked", self.on_browse_disk_mount_clicked)
+            browse_row.add_suffix(browse_btn)
+
             mode_model = Gtk.StringList()
             for opt in self.disk_mode_options: mode_model.append(opt)
             mode_combo = Adw.ComboRow(
@@ -718,7 +1051,8 @@ class TouchBarInfoAction(ActionBase):
 
             self.all_disk_mount_combos.append(mount_combo)
             self.all_disk_mode_combos.append(mode_combo)
-            return {"mount_combo": mount_combo, "mode_combo": mode_combo, "all_rows": [mount_combo, mode_combo]}
+            self.all_disk_browse_rows.append(browse_row)
+            return {"mount_combo": mount_combo, "mode_combo": mode_combo, "browse_row": browse_row, "all_rows": [mount_combo, browse_row, mode_combo]}
 
         # Helper to create Section Expander with clean subsection expanders for split mode
         def create_section_expander(title_key, default_title, subtitle_key, default_sub, prefix_key):
@@ -1165,6 +1499,7 @@ class TouchBarInfoAction(ActionBase):
 
         custom_bg_path = settings.get("custom_bg_path", "")
         self.update_bg_row_subtitle(custom_bg_path)
+        self.update_disk_browse_subtitles(disk_mount_path)
 
         # Sync Date Font & Fill/Outline Controls
         for fb in self.all_date_font_btns: fb.set_font(date_font_str)
@@ -1241,8 +1576,43 @@ class TouchBarInfoAction(ActionBase):
                     if c != combo and c.get_selected() != val:
                         c.set_selected(val)
                 self.set_settings(settings)
+                self.update_disk_browse_subtitles(m_path)
                 self.last_rendered_key = ""
                 self.update_display()
+
+    def on_browse_disk_mount_clicked(self, button):
+        dialog = Gtk.FileChooserNative.new(
+            title=self.get_locale_text("actions.touchbar-info.disk-browse.dialog-title", "Select Mount Directory or Disk Folder"),
+            parent=None,
+            action=Gtk.FileChooserAction.SELECT_FOLDER,
+            accept_label=self.get_locale_text("actions.touchbar-info.disk-browse.open", "Select Folder"),
+            cancel_label=self.get_locale_text("actions.touchbar-info.disk-browse.cancel", "Cancel")
+        )
+
+        def on_response(dialog_obj, response_id):
+            if response_id == Gtk.ResponseType.ACCEPT:
+                file_obj = dialog_obj.get_file()
+                if file_obj:
+                    path = file_obj.get_path()
+                    st = self.get_settings()
+                    if st is not None:
+                        st["disk_mount_path"] = path
+                        self.set_settings(st)
+                        self.update_disk_browse_subtitles(path)
+                        self.last_rendered_key = ""
+                        self.update_display()
+            dialog_obj.destroy()
+
+        dialog.connect("response", on_response)
+        dialog.show()
+
+    def update_disk_browse_subtitles(self, path: str):
+        if hasattr(self, "all_disk_browse_rows"):
+            for row in self.all_disk_browse_rows:
+                if path:
+                    row.set_subtitle(f"Selected Mount: {path}")
+                else:
+                    row.set_subtitle(self.get_locale_text("actions.touchbar-info.disk-browse.subtitle", "Visually choose any partition or folder path"))
 
     def update_bg_row_subtitle(self, path: str):
         if hasattr(self, "bg_image_row") and self.bg_image_row is not None:
