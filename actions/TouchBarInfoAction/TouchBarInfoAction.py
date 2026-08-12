@@ -2500,48 +2500,155 @@ class TouchBarInfoAction(ActionBase):
             except Exception:
                 offset_str = ""
 
-        # 4. Render Layout (Full 100px vs Split 50px)
-        center_x = x_min + (box_w / 2)
-        if box_h >= 80:
-            # Full section layout (3 lines: City, Time, Offset/Date)
-            bbox_city = draw.textbbox((0, 0), disp_city, font=font_city)
-            bbox_time = draw.textbbox((0, 0), time_str, font=font_time)
-            bbox_off = draw.textbbox((0, 0), offset_str, font=font_sub) if offset_str else (0, 0, 0, 0)
+        # 4. Render Layout (Analog vs Digital)
+        if clock_view == 1:
+            # --- ANALOG CLOCK VIEW ---
+            if box_h >= 80:
+                # Full Slot (100px height)
+                dial_r = int(min(box_h - 14, box_w * 0.45) / 2)
+                cx = x_min + dial_r + 14
+                cy = y_min + (box_h / 2)
 
-            ch = bbox_city[3] - bbox_city[1]
-            th = bbox_time[3] - bbox_time[1]
-            oh = (bbox_off[3] - bbox_off[1]) if offset_str else 0
+                # Outer circle dial
+                draw.ellipse((cx - dial_r, cy - dial_r, cx + dial_r, cy + dial_r), outline=fill_col, width=2)
+                # Ticks
+                for i in range(12):
+                    angle = math.radians(i * 30)
+                    tick_len = 5 if i % 3 == 0 else 3
+                    tick_w = 2 if i % 3 == 0 else 1
+                    x1 = cx + (dial_r - tick_len) * math.sin(angle)
+                    y1 = cy - (dial_r - tick_len) * math.cos(angle)
+                    x2 = cx + (dial_r - 1) * math.sin(angle)
+                    y2 = cy - (dial_r - 1) * math.cos(angle)
+                    draw.line((x1, y1, x2, y2), fill=fill_col, width=tick_w)
 
-            spacing = max(1, int(box_h * 0.03))
-            total_h = ch + spacing + th + (spacing + oh if offset_str else 0)
-            start_y = y_min + (box_h - total_h) / 2
+                # Clock Hands
+                hour = city_now.hour % 12
+                minute = city_now.minute
+                second = city_now.second
 
-            city_y = start_y + (ch / 2)
-            time_y = start_y + ch + spacing + (th / 2)
-            off_y = start_y + ch + spacing + th + spacing + (oh / 2)
+                h_angle = math.radians((hour + minute / 60.0) * 30)
+                m_angle = math.radians((minute + second / 60.0) * 6)
+                s_angle = math.radians(second * 6)
 
-            self.render_styled_text(draw, (center_x, city_y), disp_city, font_city, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
-            self.render_styled_text(draw, (center_x, time_y), time_str, font_time, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
-            if offset_str:
-                self.render_styled_text(draw, (center_x, off_y), offset_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+                hx = cx + (dial_r * 0.50) * math.sin(h_angle)
+                hy = cy - (dial_r * 0.50) * math.cos(h_angle)
+                draw.line((cx, cy, hx, hy), fill=fill_col, width=max(2, int(dial_r * 0.09)))
+
+                mx = cx + (dial_r * 0.76) * math.sin(m_angle)
+                my = cy - (dial_r * 0.76) * math.cos(m_angle)
+                draw.line((cx, cy, mx, my), fill=fill_col, width=max(1, int(dial_r * 0.05)))
+
+                if show_seconds:
+                    sx = cx + (dial_r * 0.85) * math.sin(s_angle)
+                    sy = cy - (dial_r * 0.85) * math.cos(s_angle)
+                    sec_col = (255, 85, 85, 255) if fill_col != (255, 85, 85, 255) else (255, 153, 0, 255)
+                    draw.line((cx, cy, sx, sy), fill=sec_col, width=1)
+
+                draw.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill=fill_col)
+
+                # Text Info on Right Side of Clock
+                text_x_start = cx + dial_r + 12
+                text_center_x = text_x_start + (x_max - text_x_start) / 2
+
+                bbox_city = draw.textbbox((0, 0), disp_city, font=font_city)
+                bbox_time = draw.textbbox((0, 0), time_str, font=font_sub)
+                bbox_off = draw.textbbox((0, 0), offset_str, font=font_sub) if offset_str else (0, 0, 0, 0)
+
+                ch = bbox_city[3] - bbox_city[1]
+                th = bbox_time[3] - bbox_time[1]
+                oh = (bbox_off[3] - bbox_off[1]) if offset_str else 0
+
+                spacing = max(1, int(box_h * 0.03))
+                total_h = ch + spacing + th + (spacing + oh if offset_str else 0)
+                start_y = y_min + (box_h - total_h) / 2
+
+                city_y = start_y + (ch / 2)
+                time_y = start_y + ch + spacing + (th / 2)
+                off_y = start_y + ch + spacing + th + spacing + (oh / 2)
+
+                self.render_styled_text(draw, (text_center_x, city_y), disp_city, font_city, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+                self.render_styled_text(draw, (text_center_x, time_y), time_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+                if offset_str:
+                    self.render_styled_text(draw, (text_center_x, off_y), offset_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            else:
+                # Split Slot (50px height)
+                dial_r = int(min(box_h - 8, box_w * 0.35) / 2)
+                cx = x_min + dial_r + 8
+                cy = y_min + (box_h / 2)
+
+                draw.ellipse((cx - dial_r, cy - dial_r, cx + dial_r, cy + dial_r), outline=fill_col, width=1)
+
+                hour = city_now.hour % 12
+                minute = city_now.minute
+                second = city_now.second
+
+                h_angle = math.radians((hour + minute / 60.0) * 30)
+                m_angle = math.radians((minute + second / 60.0) * 6)
+                s_angle = math.radians(second * 6)
+
+                hx = cx + (dial_r * 0.50) * math.sin(h_angle)
+                hy = cy - (dial_r * 0.50) * math.cos(h_angle)
+                draw.line((cx, cy, hx, hy), fill=fill_col, width=2)
+
+                mx = cx + (dial_r * 0.76) * math.sin(m_angle)
+                my = cy - (dial_r * 0.76) * math.cos(m_angle)
+                draw.line((cx, cy, mx, my), fill=fill_col, width=1)
+
+                if show_seconds:
+                    sx = cx + (dial_r * 0.85) * math.sin(s_angle)
+                    sy = cy - (dial_r * 0.85) * math.cos(s_angle)
+                    sec_col = (255, 85, 85, 255) if fill_col != (255, 85, 85, 255) else (255, 153, 0, 255)
+                    draw.line((cx, cy, sx, sy), fill=sec_col, width=1)
+
+                draw.ellipse((cx - 2, cy - 2, cx + 2, cy + 2), fill=fill_col)
+
+                text_x_start = cx + dial_r + 6
+                text_center_x = text_x_start + (x_max - text_x_start) / 2
+                full_time_line = f"{disp_city} ({offset_str})" if offset_str else disp_city
+
+                self.render_styled_text(draw, (text_center_x, cy), full_time_line, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
         else:
-            # Split section layout (2 lines: City top, Time + Offset bottom)
-            full_time_line = f"{time_str} ({offset_str})" if offset_str else time_str
-            bbox_city = draw.textbbox((0, 0), disp_city, font=font_city)
-            bbox_time = draw.textbbox((0, 0), full_time_line, font=font_sub)
+            # --- DIGITAL CLOCK VIEW ---
+            center_x = x_min + (box_w / 2)
+            if box_h >= 80:
+                bbox_city = draw.textbbox((0, 0), disp_city, font=font_city)
+                bbox_time = draw.textbbox((0, 0), time_str, font=font_time)
+                bbox_off = draw.textbbox((0, 0), offset_str, font=font_sub) if offset_str else (0, 0, 0, 0)
 
-            ch = bbox_city[3] - bbox_city[1]
-            th = bbox_time[3] - bbox_time[1]
+                ch = bbox_city[3] - bbox_city[1]
+                th = bbox_time[3] - bbox_time[1]
+                oh = (bbox_off[3] - bbox_off[1]) if offset_str else 0
 
-            spacing = max(1, int(box_h * 0.04))
-            total_h = ch + spacing + th
-            start_y = y_min + (box_h - total_h) / 2
+                spacing = max(1, int(box_h * 0.03))
+                total_h = ch + spacing + th + (spacing + oh if offset_str else 0)
+                start_y = y_min + (box_h - total_h) / 2
 
-            city_y = start_y + (ch / 2)
-            time_y = start_y + ch + spacing + (th / 2)
+                city_y = start_y + (ch / 2)
+                time_y = start_y + ch + spacing + (th / 2)
+                off_y = start_y + ch + spacing + th + spacing + (oh / 2)
 
-            self.render_styled_text(draw, (center_x, city_y), disp_city, font_city, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
-            self.render_styled_text(draw, (center_x, time_y), full_time_line, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+                self.render_styled_text(draw, (center_x, city_y), disp_city, font_city, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+                self.render_styled_text(draw, (center_x, time_y), time_str, font_time, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+                if offset_str:
+                    self.render_styled_text(draw, (center_x, off_y), offset_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            else:
+                full_time_line = f"{time_str} ({offset_str})" if offset_str else time_str
+                bbox_city = draw.textbbox((0, 0), disp_city, font=font_city)
+                bbox_time = draw.textbbox((0, 0), full_time_line, font=font_sub)
+
+                ch = bbox_city[3] - bbox_city[1]
+                th = bbox_time[3] - bbox_time[1]
+
+                spacing = max(1, int(box_h * 0.04))
+                total_h = ch + spacing + th
+                start_y = y_min + (box_h - total_h) / 2
+
+                city_y = start_y + (ch / 2)
+                time_y = start_y + ch + spacing + (th / 2)
+
+                self.render_styled_text(draw, (center_x, city_y), disp_city, font_city, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+                self.render_styled_text(draw, (center_x, time_y), full_time_line, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
     def update_display(self) -> None:
         settings = self.get_settings() or {}
