@@ -126,13 +126,13 @@ class TouchBarInfoAction(ActionBase):
         if hasattr(self.plugin_base, "lm") and self.plugin_base.lm is not None:
             try:
                 val = self.plugin_base.lm.get(key)
-                if val: return val
+                if val and val != key: return val
             except Exception:
                 pass
         if hasattr(self.plugin_base, "locale_manager") and self.plugin_base.locale_manager is not None:
             try:
                 val = self.plugin_base.locale_manager.get(key)
-                if val: return val
+                if val and val != key: return val
             except Exception:
                 pass
         return default
@@ -2601,8 +2601,10 @@ class TouchBarInfoAction(ActionBase):
 
         # World Clock Settings
         worldclock_city_idx = settings.get("worldclock_city_idx", 0)
+        worldclock_view = settings.get("worldclock_view", 0)
         worldclock_custom_label = settings.get("worldclock_custom_label", "")
         worldclock_custom_tz = settings.get("worldclock_custom_tz", "America/New_York")
+        worldclock_show_seconds = settings.get("worldclock_show_seconds", False)
         worldclock_show_offset = settings.get("worldclock_show_offset", True)
         worldclock_font_str = settings.get("worldclock_font_str", "DejaVu Sans Bold 25")
         wc_fill_en = settings.get("worldclock_fill_enabled", True)
@@ -2634,7 +2636,7 @@ class TouchBarInfoAction(ActionBase):
         latest_cpu = self.cpu_history[-1] if self.cpu_history else 0.0
         latest_ram = self.ram_history[-1] if self.ram_history else 0.0
 
-        combined_key = f"{date_str}|{time_str}|{cache_temp}|{cache_loc}|{latest_cpu:.1f}|{latest_ram:.1f}|{self.net_tx_rate:.0f}|{self.net_rx_rate:.0f}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{cpu_mode_idx}|{net_mode_idx}|{net_unit_idx}|{ram_mode_idx}|{disk_mode_idx}|{disk_mount_idx}|{disk_mount_path}|{custom_bg_path}|{date_font_str}|{date_fill_en}|{date_fill_col_hex}|{date_out_en}|{date_out_col_hex}|{date_out_sz}|{time_font_str}|{time_fill_en}|{time_fill_col_hex}|{time_out_en}|{time_out_col_hex}|{time_out_sz}|{weather_font_str}|{weather_fill_en}|{weather_fill_col_hex}|{weather_out_en}|{weather_out_col_hex}|{weather_out_sz}|{worldclock_city_idx}|{worldclock_custom_label}|{worldclock_custom_tz}|{worldclock_show_offset}|{worldclock_font_str}|{wc_fill_en}|{wc_fill_col_hex}|{wc_out_en}|{wc_out_col_hex}|{wc_out_sz}"
+        combined_key = f"{date_str}|{time_str}|{cache_temp}|{cache_loc}|{latest_cpu:.1f}|{latest_ram:.1f}|{self.net_tx_rate:.0f}|{self.net_rx_rate:.0f}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{cpu_mode_idx}|{net_mode_idx}|{net_unit_idx}|{ram_mode_idx}|{disk_mode_idx}|{disk_mount_idx}|{disk_mount_path}|{custom_bg_path}|{date_font_str}|{date_fill_en}|{date_fill_col_hex}|{date_out_en}|{date_out_col_hex}|{date_out_sz}|{time_font_str}|{time_fill_en}|{time_fill_col_hex}|{time_out_en}|{time_out_col_hex}|{time_out_sz}|{weather_font_str}|{weather_fill_en}|{weather_fill_col_hex}|{weather_out_en}|{weather_out_col_hex}|{weather_out_sz}|{worldclock_city_idx}|{worldclock_view}|{worldclock_custom_label}|{worldclock_custom_tz}|{worldclock_show_seconds}|{worldclock_show_offset}|{worldclock_font_str}|{wc_fill_en}|{wc_fill_col_hex}|{wc_out_en}|{wc_out_col_hex}|{wc_out_sz}"
 
         if combined_key == self.last_rendered_key:
             return
@@ -2716,7 +2718,7 @@ class TouchBarInfoAction(ActionBase):
                 elif full_choice == 8: # Disk Usage
                     self.draw_disk_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
                 elif full_choice == 9: # World Clock
-                    self.draw_world_clock(draw, full_box, font_wc_city_full, font_wc_time_full, font_wc_sub_full, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, show_seconds)
+                    self.draw_world_clock(draw, full_box, font_wc_city_full, font_wc_time_full, font_wc_sub_full, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
             else: # 2 Widgets (Split Top / Bottom)
                 # Top Sub-slot
                 if top_choice == 1: # Date
@@ -2734,7 +2736,7 @@ class TouchBarInfoAction(ActionBase):
                 elif top_choice == 7: # Disk Usage
                     self.draw_disk_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
                 elif top_choice == 8: # World Clock
-                    self.draw_world_clock(draw, top_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, show_seconds)
+                    self.draw_world_clock(draw, top_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
 
                 # Bottom Sub-slot
                 if bot_choice == 1: # Date
@@ -2752,7 +2754,7 @@ class TouchBarInfoAction(ActionBase):
                 elif bot_choice == 7: # Disk Usage
                     self.draw_disk_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
                 elif bot_choice == 8: # World Clock
-                    self.draw_world_clock(draw, bot_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, show_seconds)
+                    self.draw_world_clock(draw, bot_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
 
         render_section(sec_a_mode, sec_a_full, sec_a_top, sec_a_bot, box_a_full, box_a_top, box_a_bot)
         render_section(sec_b_mode, sec_b_full, sec_b_top, sec_b_bot, box_b_full, box_b_top, box_b_bot)
