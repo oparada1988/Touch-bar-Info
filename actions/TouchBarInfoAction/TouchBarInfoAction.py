@@ -2093,6 +2093,29 @@ class TouchBarInfoAction(ActionBase):
         stroke_f = outline_color if outline_enabled else None
         draw.text(pos, text, fill=fill, font=font, stroke_width=stroke_w, stroke_fill=stroke_f, anchor=anchor)
 
+    def fit_font_to_width(self, draw: ImageDraw.ImageDraw, text: str, font_obj, max_width: float, min_size: int = 8):
+        if not text or max_width <= 10 or font_obj is None:
+            return font_obj
+        try:
+            bbox = draw.textbbox((0, 0), text, font=font_obj)
+            tw = bbox[2] - bbox[0]
+            if tw <= max_width:
+                return font_obj
+            font_path = getattr(font_obj, "path", None)
+            curr_size = getattr(font_obj, "size", 16)
+            if not font_path:
+                return font_obj
+            size = curr_size
+            while size > min_size:
+                size -= 1
+                f = ImageFont.truetype(font_path, size)
+                bbox = draw.textbbox((0, 0), text, font=f)
+                if (bbox[2] - bbox[0]) <= max_width:
+                    return f
+            return font_obj
+        except Exception:
+            return font_obj
+
     def draw_history_graph(self, draw: ImageDraw.ImageDraw, graph_box: tuple[int, int, int, int], history: list[float], max_val: float = 100.0, color=(0, 200, 255, 255)):
         gx_min, gy_min, gx_max, gy_max = graph_box
         gw = gx_max - gx_min
@@ -2420,9 +2443,12 @@ class TouchBarInfoAction(ActionBase):
 
         pct, used_gb, free_gb = self.get_disk_usage_host(mount_path)
 
+        max_avail_w = max(20.0, float((x_max - margin_x) - content_x))
+
         if disk_mode == 2: # Mini bar graph with top title header
             top_str = f"{disp_name} — {round(pct)}%"
-            bbox_t = draw.textbbox((0, 0), top_str, font=font_sub)
+            font_sub_fit = self.fit_font_to_width(draw, top_str, font_sub, max_avail_w, min_size=8)
+            bbox_t = draw.textbbox((0, 0), top_str, font=font_sub_fit)
             th = bbox_t[3] - bbox_t[1]
 
             bar_h = max(8, int(box_h * 0.22))
@@ -2439,7 +2465,7 @@ class TouchBarInfoAction(ActionBase):
             gw = gx_max - gx_min
 
             # Render top disk name + percentage header
-            self.render_styled_text(draw, (gx_min + (gw / 2), top_y), top_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            self.render_styled_text(draw, (gx_min + (gw / 2), top_y), top_str, font_sub_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
             # Fill entire bar background with Emerald Green for Available Space
             draw.rectangle([gx_min, bar_y_min, gx_max, bar_y_max], fill=(46, 204, 113, 220))
@@ -2455,38 +2481,42 @@ class TouchBarInfoAction(ActionBase):
             top_str = f"{disp_name}"
             bot_str = f"{used_gb:.0f}G Used / {free_gb:.0f}G Free"
 
-            bbox_t = draw.textbbox((0, 0), top_str, font=font_main)
-            bbox_b = draw.textbbox((0, 0), bot_str, font=font_sub)
+            font_main_fit = self.fit_font_to_width(draw, top_str, font_main, max_avail_w, min_size=9)
+            font_sub_fit = self.fit_font_to_width(draw, bot_str, font_sub, max_avail_w, min_size=8)
+
+            bbox_t = draw.textbbox((0, 0), top_str, font=font_main_fit)
+            bbox_b = draw.textbbox((0, 0), bot_str, font=font_sub_fit)
             th, bh = bbox_t[3] - bbox_t[1], bbox_b[3] - bbox_b[1]
-            tw, bw = bbox_t[2] - bbox_t[0], bbox_b[2] - bbox_b[0]
-            center_x = content_x + ((x_max - margin_x - content_x) / 2)
+            center_x = content_x + (max_avail_w / 2.0)
 
             spacing = max(1, int(box_h * 0.04))
             total_h = th + spacing + bh
-            start_y = y_min + (box_h - total_h) / 2
-            top_y = start_y + (th / 2)
-            bot_y = start_y + th + spacing + (bh / 2)
+            start_y = y_min + (box_h - total_h) / 2.0
+            top_y = start_y + (th / 2.0)
+            bot_y = start_y + th + spacing + (bh / 2.0)
 
-            self.render_styled_text(draw, (center_x, top_y), top_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
-            self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            self.render_styled_text(draw, (center_x, top_y), top_str, font_main_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
         else: # Percentage % (Top: Disk Name, Bottom: Percentage Used)
             top_str = f"{disp_name}"
             bot_str = f"{round(pct)}% Used"
 
-            bbox_t = draw.textbbox((0, 0), top_str, font=font_main)
-            bbox_b = draw.textbbox((0, 0), bot_str, font=font_sub)
+            font_main_fit = self.fit_font_to_width(draw, top_str, font_main, max_avail_w, min_size=9)
+            font_sub_fit = self.fit_font_to_width(draw, bot_str, font_sub, max_avail_w, min_size=8)
+
+            bbox_t = draw.textbbox((0, 0), top_str, font=font_main_fit)
+            bbox_b = draw.textbbox((0, 0), bot_str, font=font_sub_fit)
             th, bh = bbox_t[3] - bbox_t[1], bbox_b[3] - bbox_b[1]
-            tw, bw = bbox_t[2] - bbox_t[0], bbox_b[2] - bbox_b[0]
-            center_x = content_x + ((x_max - margin_x - content_x) / 2)
+            center_x = content_x + (max_avail_w / 2.0)
 
             spacing = max(1, int(box_h * 0.04))
             total_h = th + spacing + bh
-            start_y = y_min + (box_h - total_h) / 2
-            top_y = start_y + (th / 2)
-            bot_y = start_y + th + spacing + (bh / 2)
+            start_y = y_min + (box_h - total_h) / 2.0
+            top_y = start_y + (th / 2.0)
+            bot_y = start_y + th + spacing + (bh / 2.0)
 
-            self.render_styled_text(draw, (center_x, top_y), top_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
-            self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            self.render_styled_text(draw, (center_x, top_y), top_str, font_main_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
     def draw_world_clock(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_city, font_time, font_sub, fill_en, fill_col, out_en, out_col, out_sz, city_idx: int, custom_label: str, custom_tz: str, show_offset: bool, use_24h: bool, show_seconds: bool, clock_view: int = 0):
         x_min, y_min, x_max, y_max = box
