@@ -241,7 +241,7 @@ class TouchBarInfoAction(ActionBase):
         # 1. Host /proc/mounts
         try:
             p = subprocess.run(['flatpak-spawn', '--host', 'cat', '/proc/mounts'], capture_output=True, text=True, timeout=3, env=host_env)
-            log.info(f"TouchBarInfo: Strategy 1 /proc/mounts exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
+            log.info(f"TouchBarInfo: Strategy 1 /proc/mounts exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}, stderr={repr(p.stderr)}")
             if p.stdout:
                 for line in p.stdout.splitlines():
                     parts = line.split()
@@ -293,6 +293,23 @@ class TouchBarInfoAction(ActionBase):
                         add_target(path, "", "dir_scan")
         except Exception as e:
             log.error(f"TouchBarInfo: Strategy 4 directory scan error: {e}")
+
+        # 5. Direct disk / label / path fallback (if host execution restricted)
+        if len(disks) <= 1:
+            try:
+                label_dir = "/dev/disk/by-label"
+                if os.path.exists(label_dir):
+                    for lbl in os.listdir(label_dir):
+                        dev = os.path.realpath(os.path.join(label_dir, lbl))
+                        for candidate in [f"/mnt/{lbl}", f"/media/{lbl}", f"/run/media/{lbl}", f"/media/{os.environ.get('USER', 'oscar')}/{lbl}"]:
+                            add_target(candidate, dev, "by_label_fallback")
+                
+                # Check known host mount paths directly
+                for known_path in ["/mnt/Games", "/mnt/Stuff", "/home"]:
+                    if not known_path in seen:
+                        add_target(known_path, "", "known_fallback")
+            except Exception as e:
+                log.error(f"TouchBarInfo: Strategy 5 fallback error: {e}")
 
         if "/" not in seen:
             add_target("/", "", "default_root")
