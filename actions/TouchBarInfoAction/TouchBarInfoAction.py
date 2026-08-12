@@ -221,6 +221,13 @@ class TouchBarInfoAction(ActionBase):
         ignored_prefixes = ("/boot", "/sys", "/proc", "/dev", "/run/user", "/var/lib/flatpak", "/var/lib/docker")
         ignored_fstypes = ["swap", "squashfs", "iso9660", "tmpfs", "devtmpfs", "overlay", "ramfs"]
 
+        host_env = dict(os.environ)
+        uid = os.getuid() if hasattr(os, "getuid") else 1000
+        if "DBUS_SESSION_BUS_ADDRESS" not in host_env or not host_env["DBUS_SESSION_BUS_ADDRESS"]:
+            host_env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{uid}/bus"
+        if "XDG_RUNTIME_DIR" not in host_env or not host_env["XDG_RUNTIME_DIR"]:
+            host_env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+
         def add_target(m: str, dev: str = "", source: str = ""):
             if not m or m in seen or m.startswith(ignored_prefixes):
                 return
@@ -233,7 +240,7 @@ class TouchBarInfoAction(ActionBase):
 
         # 1. Host /proc/mounts
         try:
-            p = subprocess.run(['flatpak-spawn', '--host', 'cat', '/proc/mounts'], capture_output=True, text=True, timeout=3)
+            p = subprocess.run(['flatpak-spawn', '--host', 'cat', '/proc/mounts'], capture_output=True, text=True, timeout=3, env=host_env)
             log.info(f"TouchBarInfo: Strategy 1 /proc/mounts exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines():
@@ -247,7 +254,7 @@ class TouchBarInfoAction(ActionBase):
 
         # 2. Host df -k
         try:
-            p = subprocess.run(['flatpak-spawn', '--host', 'df', '-k'], capture_output=True, text=True, timeout=3)
+            p = subprocess.run(['flatpak-spawn', '--host', 'df', '-k'], capture_output=True, text=True, timeout=3, env=host_env)
             log.info(f"TouchBarInfo: Strategy 2 df -k exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines()[1:]:
@@ -262,7 +269,7 @@ class TouchBarInfoAction(ActionBase):
 
         # 3. Host lsblk -r
         try:
-            p = subprocess.run(['flatpak-spawn', '--host', 'lsblk', '-r', '-o', 'NAME,MOUNTPOINT,FSTYPE'], capture_output=True, text=True, timeout=3)
+            p = subprocess.run(['flatpak-spawn', '--host', 'lsblk', '-r', '-o', 'NAME,MOUNTPOINT,FSTYPE'], capture_output=True, text=True, timeout=3, env=host_env)
             log.info(f"TouchBarInfo: Strategy 3 lsblk exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines()[1:]:
@@ -277,7 +284,7 @@ class TouchBarInfoAction(ActionBase):
 
         # 4. Host Directory Scan (/mnt, /media, /run/media)
         try:
-            p = subprocess.run(['flatpak-spawn', '--host', 'ls', '-d', '/mnt/*', '/media/*', '/run/media/*/*'], capture_output=True, text=True, timeout=3)
+            p = subprocess.run(['flatpak-spawn', '--host', 'ls', '-d', '/mnt/*', '/media/*', '/run/media/*/*'], capture_output=True, text=True, timeout=3, env=host_env)
             log.info(f"TouchBarInfo: Strategy 4 ls exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines():
