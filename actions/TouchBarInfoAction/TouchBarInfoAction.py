@@ -43,6 +43,7 @@ class TouchBarInfoAction(ActionBase):
         self.net_tx_rate = 0.0
         self.net_rx_rate = 0.0
         self.process_count = 0
+        self._blanked_for_lock = False
         self.init_options()
 
     def init_options(self):
@@ -150,15 +151,28 @@ class TouchBarInfoAction(ActionBase):
                 pass
         return False
 
-    def on_ready(self) -> None:
+    def handle_lock_blanking(self) -> bool:
         if self.is_locked_or_hidden():
+            if not getattr(self, "_blanked_for_lock", False):
+                self._blanked_for_lock = True
+                self.clear_background()
+            return True
+        else:
+            if getattr(self, "_blanked_for_lock", False):
+                self._blanked_for_lock = False
+                self.last_rendered_key = ""
+                self.update_display()
+            return False
+
+    def on_ready(self) -> None:
+        if self.handle_lock_blanking():
             return
         self.collect_system_stats()
         self.fetch_weather_async(force=True)
         self.update_display()
 
     def on_tick(self) -> None:
-        if self.is_locked_or_hidden():
+        if self.handle_lock_blanking():
             return
         self.collect_system_stats()
         self.fetch_weather_async(force=False)
@@ -193,7 +207,7 @@ class TouchBarInfoAction(ActionBase):
                 log.error(f"TouchBarInfo: Error resetting touchscreen display on removal: {e}")
 
     def trigger_redraw(self):
-        if self.is_locked_or_hidden():
+        if self.handle_lock_blanking():
             return
         self.last_rendered_key = ""
         self.update_display()
@@ -361,7 +375,7 @@ class TouchBarInfoAction(ActionBase):
         return "sunny.png" if is_day == 1 else "clear_night.png"
 
     def fetch_weather_async(self, force: bool = False):
-        if self.is_locked_or_hidden():
+        if self.handle_lock_blanking():
             return
         now_ts = datetime.datetime.now().timestamp()
         refresh_intervals = [300, 600, 900, 1800, 3600]
@@ -2271,7 +2285,7 @@ class TouchBarInfoAction(ActionBase):
                 pass
 
     def schedule_update_display(self):
-        if self.is_locked_or_hidden():
+        if self.handle_lock_blanking():
             return
         self.last_rendered_key = ""
         if not getattr(self, "_update_scheduled", False):
@@ -3004,7 +3018,7 @@ class TouchBarInfoAction(ActionBase):
                 self.render_styled_text(draw, (center_x, time_y), full_time_line, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
     def update_display(self) -> None:
-        if self.is_locked_or_hidden():
+        if self.handle_lock_blanking():
             return
         settings = self.get_settings() or {}
         use_24h = settings.get("use_24h", False)
@@ -3225,7 +3239,7 @@ class TouchBarInfoAction(ActionBase):
         self.render_to_input(image)
 
     def render_to_input(self, image: Image.Image) -> None:
-        if self.is_locked_or_hidden():
+        if self.handle_lock_blanking():
             return
         if not hasattr(self, "page") or self.page is None:
             return
