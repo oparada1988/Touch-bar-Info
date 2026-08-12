@@ -240,8 +240,8 @@ class TouchBarInfoAction(ActionBase):
 
         # 1. Host /proc/mounts
         try:
-            p = subprocess.run(['flatpak-spawn', '--host', 'cat', '/proc/mounts'], capture_output=True, text=True, timeout=3, env=host_env)
-            log.info(f"TouchBarInfo: Strategy 1 /proc/mounts exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}, stderr={repr(p.stderr)}")
+            p = subprocess.run(['flatpak-spawn', '--host', '--directory=/', 'cat', '/proc/mounts'], capture_output=True, text=True, timeout=3, env=host_env)
+            log.info(f"TouchBarInfo: Strategy 1 /proc/mounts exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines():
                     parts = line.split()
@@ -254,7 +254,7 @@ class TouchBarInfoAction(ActionBase):
 
         # 2. Host df -k
         try:
-            p = subprocess.run(['flatpak-spawn', '--host', 'df', '-k'], capture_output=True, text=True, timeout=3, env=host_env)
+            p = subprocess.run(['flatpak-spawn', '--host', '--directory=/', 'df', '-k'], capture_output=True, text=True, timeout=3, env=host_env)
             log.info(f"TouchBarInfo: Strategy 2 df -k exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines()[1:]:
@@ -269,7 +269,7 @@ class TouchBarInfoAction(ActionBase):
 
         # 3. Host lsblk -r
         try:
-            p = subprocess.run(['flatpak-spawn', '--host', 'lsblk', '-r', '-o', 'NAME,MOUNTPOINT,FSTYPE'], capture_output=True, text=True, timeout=3, env=host_env)
+            p = subprocess.run(['flatpak-spawn', '--host', '--directory=/', 'lsblk', '-r', '-o', 'NAME,MOUNTPOINT,FSTYPE'], capture_output=True, text=True, timeout=3, env=host_env)
             log.info(f"TouchBarInfo: Strategy 3 lsblk exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines()[1:]:
@@ -284,7 +284,7 @@ class TouchBarInfoAction(ActionBase):
 
         # 4. Host Directory Scan (/mnt, /media, /run/media)
         try:
-            p = subprocess.run(['flatpak-spawn', '--host', 'ls', '-d', '/mnt/*', '/media/*', '/run/media/*/*'], capture_output=True, text=True, timeout=3, env=host_env)
+            p = subprocess.run(['flatpak-spawn', '--host', '--directory=/', 'ls', '-d', '/mnt/*', '/media/*', '/run/media/*/*'], capture_output=True, text=True, timeout=3, env=host_env)
             log.info(f"TouchBarInfo: Strategy 4 ls exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines():
@@ -302,11 +302,12 @@ class TouchBarInfoAction(ActionBase):
                     for lbl in os.listdir(label_dir):
                         dev = os.path.realpath(os.path.join(label_dir, lbl))
                         for candidate in [f"/mnt/{lbl}", f"/media/{lbl}", f"/run/media/{lbl}", f"/media/{os.environ.get('USER', 'oscar')}/{lbl}"]:
-                            add_target(candidate, dev, "by_label_fallback")
+                            if os.path.exists(candidate):
+                                add_target(candidate, dev, "by_label_fallback")
                 
                 # Check known host mount paths directly
                 for known_path in ["/mnt/Games", "/mnt/Stuff", "/home"]:
-                    if not known_path in seen:
+                    if not known_path in seen and os.path.exists(known_path):
                         add_target(known_path, "", "known_fallback")
             except Exception as e:
                 log.error(f"TouchBarInfo: Strategy 5 fallback error: {e}")
