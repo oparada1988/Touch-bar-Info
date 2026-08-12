@@ -1457,35 +1457,45 @@ class TouchBarInfoAction(ActionBase):
                 matched_idx = idx
                 break
 
-        for combo in self.all_disk_mount_combos:
-            new_model = Gtk.StringList.new(display_names)
-            combo.set_model(new_model)
-            if 0 <= matched_idx < len(self.disk_mounts):
-                combo.set_selected(matched_idx)
-            disp_sub = self.disk_mounts[matched_idx][1] if 0 <= matched_idx < len(self.disk_mounts) else "System Disks"
-            combo.set_subtitle(f"Selected: {disp_sub} (Refreshed {len(self.disk_mounts)} disks)")
+        self._updating_combos = True
+        try:
+            for combo in self.all_disk_mount_combos:
+                new_model = Gtk.StringList.new(display_names)
+                combo.set_model(new_model)
+                if 0 <= matched_idx < len(self.disk_mounts):
+                    combo.set_selected(matched_idx)
+                disp_sub = self.disk_mounts[matched_idx][1] if 0 <= matched_idx < len(self.disk_mounts) else "System Disks"
+                combo.set_subtitle(f"Selected: {disp_sub} (Refreshed {len(self.disk_mounts)} disks)")
+        finally:
+            self._updating_combos = False
 
         self.last_rendered_key = ""
         self.update_display()
 
     def on_disk_mount_changed(self, combo, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = combo.get_selected()
-            log.info(f"TouchBarInfo: Disk mount combo selection changed to index {val}")
-            if 0 <= val < len(self.disk_mounts):
-                m_path, m_disp = self.disk_mounts[val]
-                log.info(f"TouchBarInfo: Selected disk mount path: {m_path} ({m_disp})")
-                settings["disk_mount_path"] = m_path
-                settings["disk_mount_idx"] = val
-                for c in self.all_disk_mount_combos:
-                    if c != combo and c.get_selected() != val:
-                        c.set_selected(val)
-                    c.set_subtitle(f"Selected: {m_disp}")
-                self.set_settings(settings)
-                self.update_disk_browse_subtitles(m_path)
-                self.last_rendered_key = ""
-                self.update_display()
+        if getattr(self, "_updating_combos", False):
+            return
+        self._updating_combos = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = combo.get_selected()
+                log.info(f"TouchBarInfo: Disk mount combo selection changed to index {val}")
+                if 0 <= val < len(self.disk_mounts):
+                    m_path, m_disp = self.disk_mounts[val]
+                    log.info(f"TouchBarInfo: Selected disk mount path: {m_path} ({m_disp})")
+                    settings["disk_mount_path"] = m_path
+                    settings["disk_mount_idx"] = val
+                    for c in self.all_disk_mount_combos:
+                        if c != combo and c.get_selected() != val:
+                            c.set_selected(val)
+                        c.set_subtitle(f"Selected: {m_disp}")
+                    self.set_settings(settings)
+                    self.update_disk_browse_subtitles(m_path)
+                    self.last_rendered_key = ""
+                    self.update_display()
+        finally:
+            self._updating_combos = False
 
     def on_browse_disk_mount_clicked(self, button):
         dialog = Gtk.FileChooserNative.new(
