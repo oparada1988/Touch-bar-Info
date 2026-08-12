@@ -12,3 +12,5 @@ A custom StreamController plugin designed to test and showcase full-canvas Touch
   - Option to show or hide seconds.
   - Choice of date formatting styles.
 - **Multi-Input Compatibility**: Supports Touchscreen (`sd-plus`), Dials, and Keys.
+
+<img width="415" height="75" alt="Screenshot From 2026-08-11 20-26-51" src="https://github.com/user-attachments/assets/c923b95c-4cd7-456f-9341-200f89dce235" />
