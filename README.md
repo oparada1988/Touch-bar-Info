@@ -16,6 +16,11 @@ Each section can be individually configured in two ways:
 - **Full Slot (Single Widget)**: Spans the full height of the section for large, detailed displays (such as stacked date and time or full-height performance monitors).
 - **Split Slot (Dual Sub-slots)**: Splits the section vertically into Top and Bottom sub-slots, allowing you to stack two independent widgets (such as Date on top and Weather on bottom).
 
+<img width="415" height="75" alt="Screenshot From 2026-08-11 20-26-51" src="https://github.com/user-attachments/assets/53001dd6-c877-4764-b15c-17b506baae2c" />
+<img width="415" height="75" alt="Screenshot From 2026-08-11 20-38-17" src="https://github.com/user-attachments/assets/860ef11c-8d20-46dc-a2c9-cfc7e51c778b" />
+
+
+
 ---
 
 ## Available Widgets
@@ -66,5 +71,3 @@ Monitors any physical partition or directory path (such as System Root `/`, Home
 This plugin and its documentation were developed with AI assistance (Google DeepMind Antigravity AI) for code architecture, performance optimization, and clear documentation.
 
 ---
-
-<img width="415" height="75" alt="Touch Bar Info Screenshot" src="https://github.com/user-attachments/assets/c923b95c-4cd7-456f-9341-200f89dce235" />
