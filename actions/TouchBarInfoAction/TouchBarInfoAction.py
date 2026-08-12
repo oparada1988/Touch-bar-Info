@@ -6,6 +6,7 @@ from src.backend.DeckManagement.InputIdentifier import Input
 import os
 import subprocess
 import datetime
+from zoneinfo import ZoneInfo
 import requests
 import psutil
 import json
@@ -337,7 +338,8 @@ class TouchBarInfoAction(ActionBase):
             self.get_locale_text("actions.touchbar-info.widget.cpu", "CPU Usage"),
             self.get_locale_text("actions.touchbar-info.widget.net", "Network Activity"),
             self.get_locale_text("actions.touchbar-info.widget.ram", "RAM Usage"),
-            self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage")
+            self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock")
         ]
         self.split_widget_options = [
             self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
@@ -347,7 +349,24 @@ class TouchBarInfoAction(ActionBase):
             self.get_locale_text("actions.touchbar-info.widget.cpu", "CPU Usage"),
             self.get_locale_text("actions.touchbar-info.widget.net", "Network Activity"),
             self.get_locale_text("actions.touchbar-info.widget.ram", "RAM Usage"),
-            self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage")
+            self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock")
+        ]
+
+        # World Clock Preset Cities
+        self.worldclock_cities = [
+            ("London", "Europe/London"),
+            ("New York", "America/New_York"),
+            ("Los Angeles", "America/Los_Angeles"),
+            ("Chicago", "America/Chicago"),
+            ("Paris", "Europe/Paris"),
+            ("Berlin", "Europe/Berlin"),
+            ("Tokyo", "Asia/Tokyo"),
+            ("Hong Kong", "Asia/Hong_Kong"),
+            ("Sydney", "Australia/Sydney"),
+            ("Dubai", "Asia/Dubai"),
+            ("UTC", "UTC"),
+            ("Custom Timezone", "custom")
         ]
 
         # CPU Mode Options
@@ -414,6 +433,18 @@ class TouchBarInfoAction(ActionBase):
         self.all_weather_out_switches = []
         self.all_weather_out_color_btns = []
         self.all_weather_out_size_spins = []
+
+        # World Clock Trackers
+        self.all_worldclock_city_combos = []
+        self.all_worldclock_label_entries = []
+        self.all_worldclock_tz_entries = []
+        self.all_worldclock_offset_switches = []
+        self.all_worldclock_font_btns = []
+        self.all_worldclock_fill_switches = []
+        self.all_worldclock_fill_color_btns = []
+        self.all_worldclock_out_switches = []
+        self.all_worldclock_out_color_btns = []
+        self.all_worldclock_out_size_spins = []
 
         # System Monitor Global Trackers
         self.all_cpu_mode_combos = []
@@ -1040,6 +1071,90 @@ class TouchBarInfoAction(ActionBase):
             self.all_disk_browse_rows.append(browse_row)
             return {"browse_row": browse_row, "mode_combo": mode_combo, "all_rows": [browse_row, mode_combo]}
 
+        # Helper to create World Clock controls
+        def build_worldclock_controls():
+            city_model = Gtk.StringList()
+            for c_name, _ in self.worldclock_cities: city_model.append(c_name)
+            city_combo = Adw.ComboRow(
+                model=city_model,
+                title=self.get_locale_text("actions.touchbar-info.worldclock-city.label", "Target City"),
+                subtitle=self.get_locale_text("actions.touchbar-info.worldclock-city.subtitle", "Select a world city for this clock")
+            )
+
+            label_entry = Adw.EntryRow(
+                title=self.get_locale_text("actions.touchbar-info.worldclock-custom-label.label", "Custom City Label")
+            )
+
+            tz_entry = Adw.EntryRow(
+                title=self.get_locale_text("actions.touchbar-info.worldclock-custom-tz.label", "Custom IANA Timezone")
+            )
+
+            offset_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.worldclock-show-offset.label", "Show Time Offset & Day"),
+                subtitle=self.get_locale_text("actions.touchbar-info.worldclock-show-offset.subtitle", "Display time difference relative to local time (e.g. +5h, Tomorrow)")
+            )
+
+            font_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
+                subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
+            )
+            font_btn = Gtk.FontButton.new()
+            font_btn.set_use_font(False)
+            font_btn.set_use_size(False)
+            font_btn.set_valign(Gtk.Align.CENTER)
+            font_btn.set_hexpand(False)
+            font_row.add_suffix(font_btn)
+
+            fill_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
+            )
+
+            fill_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for text interior fill")
+            )
+            fill_color_btn = Gtk.ColorButton()
+            fill_color_btn.set_valign(Gtk.Align.CENTER)
+            fill_color_row.add_suffix(fill_color_btn)
+
+            out_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
+            )
+
+            out_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for text stroke outline")
+            )
+            out_color_btn = Gtk.ColorButton()
+            out_color_btn.set_valign(Gtk.Align.CENTER)
+            out_color_row.add_suffix(out_color_btn)
+
+            out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
+            out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
+            out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+
+            self.all_worldclock_city_combos.append(city_combo)
+            self.all_worldclock_label_entries.append(label_entry)
+            self.all_worldclock_tz_entries.append(tz_entry)
+            self.all_worldclock_offset_switches.append(offset_sw)
+            self.all_worldclock_font_btns.append(font_btn)
+            self.all_worldclock_fill_switches.append(fill_sw)
+            self.all_worldclock_fill_color_btns.append(fill_color_btn)
+            self.all_worldclock_out_switches.append(out_sw)
+            self.all_worldclock_out_color_btns.append(out_color_btn)
+            self.all_worldclock_out_size_spins.append(out_size_spin)
+
+            return {
+                "city_combo": city_combo, "label_entry": label_entry, "tz_entry": tz_entry,
+                "offset_sw": offset_sw, "font_row": font_row, "font_btn": font_btn,
+                "fill_sw": fill_sw, "fill_color_row": fill_color_row, "fill_color_btn": fill_color_btn,
+                "out_sw": out_sw, "out_color_row": out_color_row, "out_color_btn": out_color_btn,
+                "out_size_spin": out_size_spin,
+                "all_rows": [city_combo, label_entry, tz_entry, offset_sw, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+            }
+
         # Helper to create Section Expander with clean subsection expanders for split mode
         def create_section_expander(title_key, default_title, subtitle_key, default_sub, prefix_key):
             expander = Adw.ExpanderRow(
@@ -1070,6 +1185,7 @@ class TouchBarInfoAction(ActionBase):
             full_net_ctrls = build_net_controls()
             full_ram_ctrls = build_ram_controls()
             full_disk_ctrls = build_disk_controls()
+            full_worldclock_ctrls = build_worldclock_controls()
 
             # --- 2. Top Subsection Expander ---
             top_expander = Adw.ExpanderRow(
@@ -1090,6 +1206,7 @@ class TouchBarInfoAction(ActionBase):
             top_net_ctrls = build_net_controls()
             top_ram_ctrls = build_ram_controls()
             top_disk_ctrls = build_disk_controls()
+            top_worldclock_ctrls = build_worldclock_controls()
 
             top_expander.add_row(top_combo)
             for r in top_date_ctrls["all_rows"]: top_expander.add_row(r)
@@ -1099,6 +1216,7 @@ class TouchBarInfoAction(ActionBase):
             for r in top_net_ctrls["all_rows"]: top_expander.add_row(r)
             for r in top_ram_ctrls["all_rows"]: top_expander.add_row(r)
             for r in top_disk_ctrls["all_rows"]: top_expander.add_row(r)
+            for r in top_worldclock_ctrls["all_rows"]: top_expander.add_row(r)
 
             # --- 3. Bottom Subsection Expander ---
             bot_expander = Adw.ExpanderRow(
@@ -1119,6 +1237,7 @@ class TouchBarInfoAction(ActionBase):
             bot_net_ctrls = build_net_controls()
             bot_ram_ctrls = build_ram_controls()
             bot_disk_ctrls = build_disk_controls()
+            bot_worldclock_ctrls = build_worldclock_controls()
 
             bot_expander.add_row(bot_combo)
             for r in bot_date_ctrls["all_rows"]: bot_expander.add_row(r)
@@ -1128,6 +1247,7 @@ class TouchBarInfoAction(ActionBase):
             for r in bot_net_ctrls["all_rows"]: bot_expander.add_row(r)
             for r in bot_ram_ctrls["all_rows"]: bot_expander.add_row(r)
             for r in bot_disk_ctrls["all_rows"]: bot_expander.add_row(r)
+            for r in bot_worldclock_ctrls["all_rows"]: bot_expander.add_row(r)
 
             # Add rows to parent section expander
             expander.add_row(mode_combo)
@@ -1140,12 +1260,13 @@ class TouchBarInfoAction(ActionBase):
             for r in full_net_ctrls["all_rows"]: expander.add_row(r)
             for r in full_ram_ctrls["all_rows"]: expander.add_row(r)
             for r in full_disk_ctrls["all_rows"]: expander.add_row(r)
+            for r in full_worldclock_ctrls["all_rows"]: expander.add_row(r)
 
             expander.add_row(top_expander)
             expander.add_row(bot_expander)
 
             # --- Unified Group Visibility Helper ---
-            def update_group_vis(widget_choice, is_active, date_ctrls, time_ctrls, weather_ctrls, cpu_ctrls, net_ctrls, ram_ctrls, disk_ctrls, is_full_mode=True):
+            def update_group_vis(widget_choice, is_active, date_ctrls, time_ctrls, weather_ctrls, cpu_ctrls, net_ctrls, ram_ctrls, disk_ctrls, worldclock_ctrls, is_full_mode=True):
                 # Hide all if group is not active
                 if not is_active:
                     for r in date_ctrls["all_rows"]: r.set_visible(False)
@@ -1155,6 +1276,7 @@ class TouchBarInfoAction(ActionBase):
                     for r in net_ctrls["all_rows"]: r.set_visible(False)
                     for r in ram_ctrls["all_rows"]: r.set_visible(False)
                     for r in disk_ctrls["all_rows"]: r.set_visible(False)
+                    for r in worldclock_ctrls["all_rows"]: r.set_visible(False)
                     return
 
                 # Date Visibility (Full: 1, 2 | Split: 1)
@@ -1207,6 +1329,20 @@ class TouchBarInfoAction(ActionBase):
                 show_disk = (widget_choice == 8) if is_full_mode else (widget_choice == 7)
                 for r in disk_ctrls["all_rows"]: r.set_visible(show_disk)
 
+                # World Clock Visibility (Full: 9 | Split: 8)
+                show_wc = (widget_choice == 9) if is_full_mode else (widget_choice == 8)
+                worldclock_ctrls["city_combo"].set_visible(show_wc)
+                is_custom_city = (worldclock_ctrls["city_combo"].get_selected() == len(self.worldclock_cities) - 1)
+                worldclock_ctrls["label_entry"].set_visible(show_wc)
+                worldclock_ctrls["tz_entry"].set_visible(show_wc and is_custom_city)
+                worldclock_ctrls["offset_sw"].set_visible(show_wc)
+                worldclock_ctrls["font_row"].set_visible(show_wc)
+                worldclock_ctrls["fill_sw"].set_visible(show_wc)
+                worldclock_ctrls["fill_color_row"].set_visible(show_wc and worldclock_ctrls["fill_sw"].get_active())
+                worldclock_ctrls["out_sw"].set_visible(show_wc)
+                worldclock_ctrls["out_color_row"].set_visible(show_wc and worldclock_ctrls["out_sw"].get_active())
+                worldclock_ctrls["out_size_spin"].set_visible(show_wc and worldclock_ctrls["out_sw"].get_active())
+
             # Main Section Visibility Controller
             def update_visibility():
                 is_full = (mode_combo.get_selected() == 0)
@@ -1225,6 +1361,7 @@ class TouchBarInfoAction(ActionBase):
                     net_ctrls=full_net_ctrls,
                     ram_ctrls=full_ram_ctrls,
                     disk_ctrls=full_disk_ctrls,
+                    worldclock_ctrls=full_worldclock_ctrls,
                     is_full_mode=True
                 )
 
@@ -1239,6 +1376,7 @@ class TouchBarInfoAction(ActionBase):
                     net_ctrls=top_net_ctrls,
                     ram_ctrls=top_ram_ctrls,
                     disk_ctrls=top_disk_ctrls,
+                    worldclock_ctrls=top_worldclock_ctrls,
                     is_full_mode=False
                 )
 
@@ -1253,6 +1391,7 @@ class TouchBarInfoAction(ActionBase):
                     net_ctrls=bot_net_ctrls,
                     ram_ctrls=bot_ram_ctrls,
                     disk_ctrls=bot_disk_ctrls,
+                    worldclock_ctrls=bot_worldclock_ctrls,
                     is_full_mode=False
                 )
 
@@ -1263,7 +1402,8 @@ class TouchBarInfoAction(ActionBase):
             bot_combo.connect("notify::selected", lambda *a: update_visibility())
 
             # Connect Sub-switch Signals to update_visibility
-            for ctrls in [full_date_ctrls, full_time_ctrls, full_weather_ctrls, top_date_ctrls, top_time_ctrls, top_weather_ctrls, bot_date_ctrls, bot_time_ctrls, bot_weather_ctrls]:
+            for ctrls in [full_date_ctrls, full_time_ctrls, full_weather_ctrls, full_worldclock_ctrls, top_date_ctrls, top_time_ctrls, top_weather_ctrls, top_worldclock_ctrls, bot_date_ctrls, bot_time_ctrls, bot_weather_ctrls, bot_worldclock_ctrls]:
+                ctrls["city_combo"].connect("notify::selected", lambda *a: update_visibility())
                 ctrls["fill_sw"].connect("notify::active", lambda *a: update_visibility())
                 ctrls["out_sw"].connect("notify::active", lambda *a: update_visibility())
 
@@ -1356,6 +1496,19 @@ class TouchBarInfoAction(ActionBase):
         for combo in self.all_disk_mode_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("disk_mode_idx", c.get_selected()))
         for combo in self.all_disk_mount_combos: combo.connect("notify::selected", self.on_disk_mount_changed)
 
+        # World Clock Signals
+        for combo in self.all_worldclock_city_combos: combo.connect("notify::selected", self.on_worldclock_city_changed)
+        for entry in self.all_worldclock_label_entries: entry.connect("changed", self.on_worldclock_label_changed)
+        for entry in self.all_worldclock_tz_entries: entry.connect("changed", self.on_worldclock_tz_changed)
+        for sw in self.all_worldclock_offset_switches: sw.connect("notify::active", self.on_worldclock_offset_toggled)
+
+        for fb in self.all_worldclock_font_btns: fb.connect("font-set", self.on_worldclock_font_set)
+        for sw in self.all_worldclock_fill_switches: sw.connect("notify::active", self.on_worldclock_fill_toggled)
+        for btn in self.all_worldclock_fill_color_btns: btn.connect("color-set", self.on_worldclock_fill_color_set)
+        for sw in self.all_worldclock_out_switches: sw.connect("notify::active", self.on_worldclock_out_toggled)
+        for btn in self.all_worldclock_out_color_btns: btn.connect("color-set", self.on_worldclock_out_color_set)
+        for spin in self.all_worldclock_out_size_spins: spin.connect("notify::value", self.on_worldclock_out_size_changed)
+
         # Custom Touch Bar Background Row
         self.bg_image_row = Adw.ActionRow(
             title=self.get_locale_text("actions.touchbar-info.bg-image.label", "Custom Touch Bar Background Wallpaper"),
@@ -1440,6 +1593,18 @@ class TouchBarInfoAction(ActionBase):
         weather_outline_color = settings.setdefault("weather_outline_color", "#000000FF")
         weather_outline_size = settings.setdefault("weather_outline_size", 2)
 
+        # World Clock Defaults
+        worldclock_city_idx = settings.setdefault("worldclock_city_idx", 0)
+        worldclock_custom_label = settings.setdefault("worldclock_custom_label", "")
+        worldclock_custom_tz = settings.setdefault("worldclock_custom_tz", "America/New_York")
+        worldclock_show_offset = settings.setdefault("worldclock_show_offset", True)
+        worldclock_font_str = settings.setdefault("worldclock_font_str", "DejaVu Sans Bold 25")
+        worldclock_fill_enabled = settings.setdefault("worldclock_fill_enabled", True)
+        worldclock_font_color = settings.setdefault("worldclock_font_color", "#FFFFFFFF")
+        worldclock_outline_enabled = settings.setdefault("worldclock_outline_enabled", False)
+        worldclock_outline_color = settings.setdefault("worldclock_outline_color", "#000000FF")
+        worldclock_outline_size = settings.setdefault("worldclock_outline_size", 2)
+
         # Sync Date/Time basic controls
         for sw in self.all_time_24h_switches: sw.set_active(use_24h)
         for sw in self.all_time_sec_switches: sw.set_active(show_seconds)
@@ -1515,6 +1680,19 @@ class TouchBarInfoAction(ActionBase):
         for sw in self.all_weather_out_switches: sw.set_active(weather_outline_enabled)
         for btn in self.all_weather_out_color_btns: self.set_color_button_rgba(btn, weather_outline_color)
         for spin in self.all_weather_out_size_spins: spin.set_value(weather_outline_size)
+
+        # Sync World Clock Controls
+        for combo in self.all_worldclock_city_combos:
+            if 0 <= worldclock_city_idx < len(self.worldclock_cities): combo.set_selected(worldclock_city_idx)
+        for entry in self.all_worldclock_label_entries: entry.set_text(worldclock_custom_label)
+        for entry in self.all_worldclock_tz_entries: entry.set_text(worldclock_custom_tz)
+        for sw in self.all_worldclock_offset_switches: sw.set_active(worldclock_show_offset)
+        for fb in self.all_worldclock_font_btns: fb.set_font(worldclock_font_str)
+        for sw in self.all_worldclock_fill_switches: sw.set_active(worldclock_fill_enabled)
+        for btn in self.all_worldclock_fill_color_btns: self.set_color_button_rgba(btn, worldclock_font_color)
+        for sw in self.all_worldclock_out_switches: sw.set_active(worldclock_outline_enabled)
+        for btn in self.all_worldclock_out_color_btns: self.set_color_button_rgba(btn, worldclock_outline_color)
+        for spin in self.all_worldclock_out_size_spins: spin.set_value(worldclock_outline_size)
 
     def set_color_button_rgba(self, button: Gtk.ColorButton, hex_str: str):
         try:
@@ -1956,6 +2134,121 @@ class TouchBarInfoAction(ActionBase):
                 if s != spin and int(s.get_value()) != val: s.set_value(val)
             self.set_settings(settings)
             self.trigger_redraw()
+
+    # --- World Clock Callbacks ---
+    def on_worldclock_city_changed(self, combo, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = combo.get_selected()
+            settings["worldclock_city_idx"] = val
+            for c in self.all_worldclock_city_combos:
+                if c != combo and c.get_selected() != val: c.set_selected(val)
+            self.set_settings(settings)
+            if hasattr(self, "update_vis_callbacks"):
+                for cb in self.update_vis_callbacks: cb()
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_worldclock_label_changed(self, entry):
+        settings = self.get_settings()
+        if settings is not None:
+            val = entry.get_text()
+            settings["worldclock_custom_label"] = val
+            for e in self.all_worldclock_label_entries:
+                if e != entry and e.get_text() != val: e.set_text(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_worldclock_tz_changed(self, entry):
+        settings = self.get_settings()
+        if settings is not None:
+            val = entry.get_text()
+            settings["worldclock_custom_tz"] = val
+            for e in self.all_worldclock_tz_entries:
+                if e != entry and e.get_text() != val: e.set_text(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_worldclock_offset_toggled(self, switch, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = switch.get_active()
+            settings["worldclock_show_offset"] = val
+            for sw in self.all_worldclock_offset_switches:
+                if sw != switch and sw.get_active() != val: sw.set_active(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_worldclock_font_set(self, font_btn):
+        settings = self.get_settings()
+        if settings is not None:
+            val = font_btn.get_font()
+            settings["worldclock_font_str"] = val
+            for fb in self.all_worldclock_font_btns:
+                if fb != font_btn: fb.set_font(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_worldclock_fill_toggled(self, switch, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = switch.get_active()
+            settings["worldclock_fill_enabled"] = val
+            for sw in self.all_worldclock_fill_switches:
+                if sw != switch and sw.get_active() != val: sw.set_active(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_worldclock_fill_color_set(self, button):
+        settings = self.get_settings()
+        if settings is not None:
+            rgba = button.get_rgba()
+            hex_val = self.gdk_to_hex(rgba)
+            settings["worldclock_font_color"] = hex_val
+            for btn in self.all_worldclock_fill_color_btns:
+                if btn != button: self.set_color_button_rgba(btn, hex_val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_worldclock_out_toggled(self, switch, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = switch.get_active()
+            settings["worldclock_outline_enabled"] = val
+            for sw in self.all_worldclock_out_switches:
+                if sw != switch and sw.get_active() != val: sw.set_active(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_worldclock_out_color_set(self, button):
+        settings = self.get_settings()
+        if settings is not None:
+            rgba = button.get_rgba()
+            hex_val = self.gdk_to_hex(rgba)
+            settings["worldclock_outline_color"] = hex_val
+            for btn in self.all_worldclock_out_color_btns:
+                if btn != button: self.set_color_button_rgba(btn, hex_val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def on_worldclock_out_size_changed(self, spin, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = int(spin.get_value())
+            settings["worldclock_outline_size"] = val
+            for s in self.all_worldclock_out_size_spins:
+                if s != spin and int(s.get_value()) != val: s.set_value(val)
+            self.set_settings(settings)
+            self.last_rendered_key = ""
+            self.update_display()
 
     def on_use_24h_toggled(self, switch, *args):
         settings = self.get_settings()
@@ -2417,6 +2710,112 @@ class TouchBarInfoAction(ActionBase):
             self.render_styled_text(draw, (center_x, top_y), top_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
             self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
+    def draw_world_clock(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_city, font_time, font_sub, fill_en, fill_col, out_en, out_col, out_sz, city_idx: int, custom_label: str, custom_tz: str, show_offset: bool, use_24h: bool, show_seconds: bool):
+        x_min, y_min, x_max, y_max = box
+        box_w = x_max - x_min
+        box_h = y_max - y_min
+
+        # 1. Resolve Timezone & City Label
+        if 0 <= city_idx < len(self.worldclock_cities):
+            city_name, tz_str = self.worldclock_cities[city_idx]
+            if tz_str == "custom":
+                tz_str = custom_tz.strip() or "UTC"
+                default_label = custom_tz.split("/")[-1].replace("_", " ") if custom_tz else "Custom"
+            else:
+                default_label = city_name
+        else:
+            default_label = "London"
+            tz_str = "Europe/London"
+
+        disp_city = custom_label.strip() if custom_label.strip() else default_label
+
+        try:
+            tz = ZoneInfo(tz_str)
+            city_now = datetime.datetime.now(tz)
+        except Exception as e:
+            log.error(f"TouchBarInfo: Invalid timezone '{tz_str}': {e}")
+            tz = ZoneInfo("UTC")
+            city_now = datetime.datetime.now(tz)
+
+        # 2. Format Time String
+        if use_24h:
+            time_fmt = "%H:%M:%S" if show_seconds else "%H:%M"
+            time_str = city_now.strftime(time_fmt)
+        else:
+            time_fmt = "%I:%M:%S %p" if show_seconds else "%I:%M %p"
+            time_str = city_now.strftime(time_fmt).lstrip("0")
+
+        # 3. Format Offset / Day Diff String
+        offset_str = ""
+        if show_offset:
+            try:
+                local_now = datetime.datetime.now().astimezone()
+                city_offset_sec = city_now.utcoffset().total_seconds() if city_now.utcoffset() else 0
+                local_offset_sec = local_now.utcoffset().total_seconds() if local_now.utcoffset() else 0
+                diff_hours = (city_offset_sec - local_offset_sec) / 3600.0
+
+                if diff_hours == 0:
+                    diff_fmt = "Same time"
+                elif diff_hours.is_integer():
+                    diff_fmt = f"{int(diff_hours):+d}h"
+                else:
+                    diff_fmt = f"{diff_hours:+.1f}h"
+
+                # Date comparison
+                c_date = city_now.date()
+                l_date = local_now.date()
+                if c_date > l_date:
+                    offset_str = f"Tomorrow ({diff_fmt})"
+                elif c_date < l_date:
+                    offset_str = f"Yesterday ({diff_fmt})"
+                else:
+                    offset_str = diff_fmt
+            except Exception:
+                offset_str = ""
+
+        # 4. Render Layout (Full 100px vs Split 50px)
+        center_x = x_min + (box_w / 2)
+        if box_h >= 80:
+            # Full section layout (3 lines: City, Time, Offset/Date)
+            bbox_city = draw.textbbox((0, 0), disp_city, font=font_city)
+            bbox_time = draw.textbbox((0, 0), time_str, font=font_time)
+            bbox_off = draw.textbbox((0, 0), offset_str, font=font_sub) if offset_str else (0, 0, 0, 0)
+
+            ch = bbox_city[3] - bbox_city[1]
+            th = bbox_time[3] - bbox_time[1]
+            oh = (bbox_off[3] - bbox_off[1]) if offset_str else 0
+
+            spacing = max(1, int(box_h * 0.03))
+            total_h = ch + spacing + th + (spacing + oh if offset_str else 0)
+            start_y = y_min + (box_h - total_h) / 2
+
+            city_y = start_y + (ch / 2)
+            time_y = start_y + ch + spacing + (th / 2)
+            off_y = start_y + ch + spacing + th + spacing + (oh / 2)
+
+            self.render_styled_text(draw, (center_x, city_y), disp_city, font_city, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            self.render_styled_text(draw, (center_x, time_y), time_str, font_time, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            if offset_str:
+                self.render_styled_text(draw, (center_x, off_y), offset_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+        else:
+            # Split section layout (2 lines: City top, Time + Offset bottom)
+            full_time_line = f"{time_str} ({offset_str})" if offset_str else time_str
+            bbox_city = draw.textbbox((0, 0), disp_city, font=font_city)
+            bbox_time = draw.textbbox((0, 0), full_time_line, font=font_sub)
+
+            ch = bbox_city[3] - bbox_city[1]
+            th = bbox_time[3] - bbox_time[1]
+
+            spacing = max(1, int(box_h * 0.04))
+            total_h = ch + spacing + th
+            start_y = y_min + (box_h - total_h) / 2
+
+            city_y = start_y + (ch / 2)
+            time_y = start_y + ch + spacing + (th / 2)
+
+            self.render_styled_text(draw, (center_x, city_y), disp_city, font_city, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            self.render_styled_text(draw, (center_x, time_y), full_time_line, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+
     def update_display(self) -> None:
         settings = self.get_settings() or {}
         use_24h = settings.get("use_24h", False)
@@ -2473,6 +2872,18 @@ class TouchBarInfoAction(ActionBase):
         weather_out_col_hex = settings.get("weather_outline_color", "#000000FF")
         weather_out_sz = settings.get("weather_outline_size", 2)
 
+        # World Clock Settings
+        worldclock_city_idx = settings.get("worldclock_city_idx", 0)
+        worldclock_custom_label = settings.get("worldclock_custom_label", "")
+        worldclock_custom_tz = settings.get("worldclock_custom_tz", "America/New_York")
+        worldclock_show_offset = settings.get("worldclock_show_offset", True)
+        worldclock_font_str = settings.get("worldclock_font_str", "DejaVu Sans Bold 25")
+        wc_fill_en = settings.get("worldclock_fill_enabled", True)
+        wc_fill_col_hex = settings.get("worldclock_font_color", "#FFFFFFFF")
+        wc_out_en = settings.get("worldclock_outline_enabled", False)
+        wc_out_col_hex = settings.get("worldclock_outline_color", "#000000FF")
+        wc_out_sz = settings.get("worldclock_outline_size", 2)
+
         date_options = [
             ("%b. %d, %Y", "Mon. Day, Year"),
             ("%a. %d, %Y", "DayOfWeek. Day, Year"),
@@ -2496,7 +2907,7 @@ class TouchBarInfoAction(ActionBase):
         latest_cpu = self.cpu_history[-1] if self.cpu_history else 0.0
         latest_ram = self.ram_history[-1] if self.ram_history else 0.0
 
-        combined_key = f"{date_str}|{time_str}|{cache_temp}|{cache_loc}|{latest_cpu:.1f}|{latest_ram:.1f}|{self.net_tx_rate:.0f}|{self.net_rx_rate:.0f}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{cpu_mode_idx}|{net_mode_idx}|{net_unit_idx}|{ram_mode_idx}|{disk_mode_idx}|{disk_mount_idx}|{disk_mount_path}|{custom_bg_path}|{date_font_str}|{date_fill_en}|{date_fill_col_hex}|{date_out_en}|{date_out_col_hex}|{date_out_sz}|{time_font_str}|{time_fill_en}|{time_fill_col_hex}|{time_out_en}|{time_out_col_hex}|{time_out_sz}|{weather_font_str}|{weather_fill_en}|{weather_fill_col_hex}|{weather_out_en}|{weather_out_col_hex}|{weather_out_sz}"
+        combined_key = f"{date_str}|{time_str}|{cache_temp}|{cache_loc}|{latest_cpu:.1f}|{latest_ram:.1f}|{self.net_tx_rate:.0f}|{self.net_rx_rate:.0f}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{cpu_mode_idx}|{net_mode_idx}|{net_unit_idx}|{ram_mode_idx}|{disk_mode_idx}|{disk_mount_idx}|{disk_mount_path}|{custom_bg_path}|{date_font_str}|{date_fill_en}|{date_fill_col_hex}|{date_out_en}|{date_out_col_hex}|{date_out_sz}|{time_font_str}|{time_fill_en}|{time_fill_col_hex}|{time_out_en}|{time_out_col_hex}|{time_out_sz}|{weather_font_str}|{weather_fill_en}|{weather_fill_col_hex}|{weather_out_en}|{weather_out_col_hex}|{weather_out_sz}|{worldclock_city_idx}|{worldclock_custom_label}|{worldclock_custom_tz}|{worldclock_show_offset}|{worldclock_font_str}|{wc_fill_en}|{wc_fill_col_hex}|{wc_out_en}|{wc_out_col_hex}|{wc_out_sz}"
 
         if combined_key == self.last_rendered_key:
             return
@@ -2517,6 +2928,14 @@ class TouchBarInfoAction(ActionBase):
         font_weather_sub = self.get_font_from_desc(weather_font_str, default_size=22, scale_factor=1.0)
         font_loc_sub = self.get_font_from_desc(weather_font_str, default_size=22, scale_factor=0.75)
 
+        # World Clock Fonts
+        font_wc_city_full = self.get_font_from_desc(worldclock_font_str, default_size=20, scale_factor=0.8)
+        font_wc_time_full = self.get_font_from_desc(worldclock_font_str, default_size=32, scale_factor=1.2)
+        font_wc_sub_full = self.get_font_from_desc(worldclock_font_str, default_size=15, scale_factor=0.6)
+
+        font_wc_city_sub = self.get_font_from_desc(worldclock_font_str, default_size=16, scale_factor=0.7)
+        font_wc_time_sub = self.get_font_from_desc(worldclock_font_str, default_size=14, scale_factor=0.6)
+
         # Monitor Fonts
         font_mon_main_full = self.get_font_from_desc("DejaVu Sans Bold 22", default_size=22, scale_factor=1.3)
         font_mon_sub_full = self.get_font_from_desc("DejaVu Sans Bold 16", default_size=16, scale_factor=1.0)
@@ -2532,6 +2951,9 @@ class TouchBarInfoAction(ActionBase):
 
         weather_fill_col = self.hex_to_rgba_tuple(weather_fill_col_hex, default=(255, 255, 255, 255))
         weather_out_col = self.hex_to_rgba_tuple(weather_out_col_hex, default=(0, 0, 0, 255))
+
+        wc_fill_col = self.hex_to_rgba_tuple(wc_fill_col_hex, default=(255, 255, 255, 255))
+        wc_out_col = self.hex_to_rgba_tuple(wc_out_col_hex, default=(0, 0, 0, 255))
 
         white_col = (255, 255, 255, 255)
 
@@ -2566,6 +2988,8 @@ class TouchBarInfoAction(ActionBase):
                     self.draw_ram_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, ram_mode_idx)
                 elif full_choice == 8: # Disk Usage
                     self.draw_disk_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
+                elif full_choice == 9: # World Clock
+                    self.draw_world_clock(draw, full_box, font_wc_city_full, font_wc_time_full, font_wc_sub_full, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, show_seconds)
             else: # 2 Widgets (Split Top / Bottom)
                 # Top Sub-slot
                 if top_choice == 1: # Date
@@ -2582,6 +3006,8 @@ class TouchBarInfoAction(ActionBase):
                     self.draw_ram_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, ram_mode_idx)
                 elif top_choice == 7: # Disk Usage
                     self.draw_disk_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
+                elif top_choice == 8: # World Clock
+                    self.draw_world_clock(draw, top_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, show_seconds)
 
                 # Bottom Sub-slot
                 if bot_choice == 1: # Date
@@ -2598,6 +3024,8 @@ class TouchBarInfoAction(ActionBase):
                     self.draw_ram_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, ram_mode_idx)
                 elif bot_choice == 7: # Disk Usage
                     self.draw_disk_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
+                elif bot_choice == 8: # World Clock
+                    self.draw_world_clock(draw, bot_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, show_seconds)
 
         render_section(sec_a_mode, sec_a_full, sec_a_top, sec_a_bot, box_a_full, box_a_top, box_a_bot)
         render_section(sec_b_mode, sec_b_full, sec_b_top, sec_b_bot, box_b_full, box_b_top, box_b_bot)
