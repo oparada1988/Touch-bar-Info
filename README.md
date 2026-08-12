@@ -18,6 +18,8 @@ Each section can be individually configured in two ways:
 
 <img width="415" height="75" alt="Screenshot From 2026-08-11 20-26-51" src="https://github.com/user-attachments/assets/53001dd6-c877-4764-b15c-17b506baae2c" />
 <img width="415" height="75" alt="Screenshot From 2026-08-11 20-38-17" src="https://github.com/user-attachments/assets/860ef11c-8d20-46dc-a2c9-cfc7e51c778b" />
+<img width="414" height="82" alt="Screenshot From 2026-08-12 18-20-20" src="https://github.com/user-attachments/assets/ec44ed2d-4510-4ca5-9e4d-7908a511d236" />
+
 
 
 
