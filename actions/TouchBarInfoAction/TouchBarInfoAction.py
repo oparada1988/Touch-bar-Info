@@ -389,6 +389,24 @@ class TouchBarInfoAction(ActionBase):
         self.update_vis_callbacks = []
         self.init_options()
 
+        try:
+            css_provider = Gtk.CssProvider()
+            css_provider.load_from_data(b"""
+                .touchbar-subhdr-row {
+                    background-color: rgba(255, 255, 255, 0.05);
+                    border-radius: 6px;
+                    margin-top: 4px;
+                    margin-bottom: 2px;
+                }
+            """)
+            Gtk.StyleContext.add_provider_for_display(
+                Gdk.Display.get_default(),
+                css_provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            )
+        except Exception:
+            pass
+
         # Control Widget trackers for global syncing
         self.all_date_fmt_combos = []
         self.all_date_font_btns = []
@@ -448,9 +466,10 @@ class TouchBarInfoAction(ActionBase):
         # Helper to create Date controls
         def build_date_controls():
             date_hdr = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.hdr-date.label", "📅 Date Settings"),
+                title=self.get_locale_text("actions.touchbar-info.hdr-date.label", "Date Settings"),
                 subtitle=self.get_locale_text("actions.touchbar-info.hdr-date.subtitle", "Format and typography configuration for date display")
             )
+            date_hdr.add_css_class("touchbar-subhdr-row")
 
             fmt_model = Gtk.StringList()
             for _, label in self.date_format_options: fmt_model.append(label)
@@ -519,9 +538,10 @@ class TouchBarInfoAction(ActionBase):
         # Helper to create Time controls
         def build_time_controls():
             time_hdr = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.hdr-time.label", "⏰ Time Settings"),
+                title=self.get_locale_text("actions.touchbar-info.hdr-time.label", "Time Settings"),
                 subtitle=self.get_locale_text("actions.touchbar-info.hdr-time.subtitle", "Format and typography configuration for clock display")
             )
+            time_hdr.add_css_class("touchbar-subhdr-row")
 
             sw_24h = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.use-24h.label", "Use 24-Hour Clock"),
