@@ -1160,17 +1160,17 @@ class TouchBarInfoAction(ActionBase):
 
         # Create Section Expanders
         self.sec_a_expander, self.sec_a_mode_combo, self.sec_a_full_combo, self.sec_a_top_combo, self.sec_a_bot_combo = create_section_expander(
-            "actions.touchbar-info.section-a.label", "Left (200px)",
+            "actions.touchbar-info.section-a.label", "Left",
             "actions.touchbar-info.section-a.subtitle", "Configure widgets for the left Touch Bar section", "sec_a"
         )
 
         self.sec_b_expander, self.sec_b_mode_combo, self.sec_b_full_combo, self.sec_b_top_combo, self.sec_b_bot_combo = create_section_expander(
-            "actions.touchbar-info.section-b.label", "Center (400px)",
+            "actions.touchbar-info.section-b.label", "Center",
             "actions.touchbar-info.section-b.subtitle", "Configure widgets for the center Touch Bar section", "sec_b"
         )
 
         self.sec_c_expander, self.sec_c_mode_combo, self.sec_c_full_combo, self.sec_c_top_combo, self.sec_c_bot_combo = create_section_expander(
-            "actions.touchbar-info.section-c.label", "Right (200px)",
+            "actions.touchbar-info.section-c.label", "Right",
             "actions.touchbar-info.section-c.subtitle", "Configure widgets for the right Touch Bar section", "sec_c"
         )
 
@@ -2267,6 +2267,13 @@ class TouchBarInfoAction(ActionBase):
 
     # --- Pango Font Resolver for PIL ---
     def get_font_from_desc(self, font_str: str, default_size: int = 25, scale_factor: float = 1.0):
+        if not hasattr(self, "_font_cache"):
+            self._font_cache = {}
+        cache_key = (font_str, default_size, scale_factor)
+        if cache_key in self._font_cache:
+            return self._font_cache[cache_key]
+
+        font_obj = None
         try:
             desc = Pango.FontDescription.from_string(font_str)
             family = desc.get_family() or "DejaVu Sans"
@@ -2287,11 +2294,15 @@ class TouchBarInfoAction(ActionBase):
             cmd = ["fc-match", "-f", "%{file}", f"{family}:style={style_str}"]
             res = subprocess.check_output(cmd, text=True).strip()
             if res and os.path.isfile(res):
-                return ImageFont.truetype(res, size)
+                font_obj = ImageFont.truetype(res, size)
         except Exception as e:
             log.error(f"TouchBarInfo: Error loading font '{font_str}': {e}")
 
-        return ImageFont.load_default()
+        if font_obj is None:
+            font_obj = ImageFont.load_default()
+
+        self._font_cache[cache_key] = font_obj
+        return font_obj
 
     def get_canvas_size(self) -> tuple[int, int]:
         if hasattr(self, "deck_controller") and self.deck_controller is not None:
@@ -2569,6 +2580,15 @@ class TouchBarInfoAction(ActionBase):
     def get_disk_usage_host(self, mount_path: str) -> tuple[float, float, float]:
         if not mount_path:
             mount_path = "/"
+
+        if not hasattr(self, "_disk_usage_cache"):
+            self._disk_usage_cache = {}
+        now = datetime.datetime.now().timestamp()
+        if mount_path in self._disk_usage_cache:
+            cached_time, cached_res = self._disk_usage_cache[mount_path]
+            if now - cached_time < 5.0:
+                return cached_res
+
         import shutil
 
         host_env = dict(os.environ)
@@ -2595,7 +2615,9 @@ class TouchBarInfoAction(ActionBase):
                             pct = float(pct_str) if pct_str.replace(".", "", 1).isdigit() else (used_k / max(1.0, total_k)) * 100.0
                             used_gb = used_k / (1024.0 * 1024.0)
                             free_gb = free_k / (1024.0 * 1024.0)
-                            return pct, used_gb, free_gb
+                            res = (pct, used_gb, free_gb)
+                            self._disk_usage_cache[mount_path] = (now, res)
+                            return res
             except Exception as e:
                 log.error(f"TouchBarInfo: get_disk_usage_host flatpak-spawn error for {mount_path}: {e}")
 
