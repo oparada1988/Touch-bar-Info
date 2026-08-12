@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import requests
 import psutil
 import json
+import math
 from threading import Thread, Timer
 from PIL import Image, ImageDraw, ImageFont
 
@@ -116,6 +117,9 @@ class TouchBarInfoAction(ActionBase):
         self.disk_mounts = self.get_system_disk_mounts()
         self.weather_units = ["Fahrenheit (°F)", "Celsius (°C)"]
         self.weather_intervals = ["5 Minutes", "10 Minutes", "15 Minutes", "30 Minutes", "60 Minutes"]
+        self.worldclock_view_options = ["Digital Clock", "Analog Clock"]
+        self.all_worldclock_view_combos = []
+        self.all_worldclock_sec_switches = []
         self.search_results_data = []
 
     def get_locale_text(self, key: str, default: str) -> str:
@@ -423,8 +427,10 @@ class TouchBarInfoAction(ActionBase):
 
         # World Clock Trackers
         self.all_worldclock_city_combos = []
+        self.all_worldclock_view_combos = []
         self.all_worldclock_label_entries = []
         self.all_worldclock_tz_entries = []
+        self.all_worldclock_sec_switches = []
         self.all_worldclock_offset_switches = []
         self.all_worldclock_font_btns = []
         self.all_worldclock_fill_switches = []
@@ -750,12 +756,25 @@ class TouchBarInfoAction(ActionBase):
                 subtitle=self.get_locale_text("actions.touchbar-info.worldclock-city.subtitle", "Select a world city for this clock")
             )
 
+            view_model = Gtk.StringList()
+            for opt in self.worldclock_view_options: view_model.append(opt)
+            view_combo = Adw.ComboRow(
+                model=view_model,
+                title=self.get_locale_text("actions.touchbar-info.worldclock-view.label", "Clock View Mode"),
+                subtitle=self.get_locale_text("actions.touchbar-info.worldclock-view.subtitle", "Choose Digital text or Analog round clock face")
+            )
+
             label_entry = Adw.EntryRow(
                 title=self.get_locale_text("actions.touchbar-info.worldclock-custom-label.label", "Custom City Label")
             )
 
             tz_entry = Adw.EntryRow(
                 title=self.get_locale_text("actions.touchbar-info.worldclock-custom-tz.label", "Custom IANA Timezone")
+            )
+
+            sec_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.worldclock-show-seconds.label", "Show Seconds"),
+                subtitle=self.get_locale_text("actions.touchbar-info.worldclock-show-seconds.subtitle", "Include seconds in the world clock display")
             )
 
             offset_sw = Adw.SwitchRow(
@@ -805,8 +824,10 @@ class TouchBarInfoAction(ActionBase):
             out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
 
             self.all_worldclock_city_combos.append(city_combo)
+            self.all_worldclock_view_combos.append(view_combo)
             self.all_worldclock_label_entries.append(label_entry)
             self.all_worldclock_tz_entries.append(tz_entry)
+            self.all_worldclock_sec_switches.append(sec_sw)
             self.all_worldclock_offset_switches.append(offset_sw)
             self.all_worldclock_font_btns.append(font_btn)
             self.all_worldclock_fill_switches.append(fill_sw)
@@ -816,12 +837,12 @@ class TouchBarInfoAction(ActionBase):
             self.all_worldclock_out_size_spins.append(out_size_spin)
 
             return {
-                "city_combo": city_combo, "label_entry": label_entry, "tz_entry": tz_entry,
-                "offset_sw": offset_sw, "font_row": font_row, "font_btn": font_btn,
+                "city_combo": city_combo, "view_combo": view_combo, "label_entry": label_entry, "tz_entry": tz_entry,
+                "sec_sw": sec_sw, "offset_sw": offset_sw, "font_row": font_row, "font_btn": font_btn,
                 "fill_sw": fill_sw, "fill_color_row": fill_color_row, "fill_color_btn": fill_color_btn,
                 "out_sw": out_sw, "out_color_row": out_color_row, "out_color_btn": out_color_btn,
                 "out_size_spin": out_size_spin,
-                "all_rows": [city_combo, label_entry, tz_entry, offset_sw, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+                "all_rows": [city_combo, view_combo, label_entry, tz_entry, sec_sw, offset_sw, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
             }
 
         # Helper to create Section Expander with clean subsection expanders for split mode
@@ -1002,8 +1023,10 @@ class TouchBarInfoAction(ActionBase):
                 show_wc = (widget_choice == 9) if is_full_mode else (widget_choice == 8)
                 worldclock_ctrls["city_combo"].set_visible(show_wc)
                 is_custom_city = (worldclock_ctrls["city_combo"].get_selected() == len(self.worldclock_cities) - 1)
+                worldclock_ctrls["view_combo"].set_visible(show_wc)
                 worldclock_ctrls["label_entry"].set_visible(show_wc)
                 worldclock_ctrls["tz_entry"].set_visible(show_wc and is_custom_city)
+                worldclock_ctrls["sec_sw"].set_visible(show_wc)
                 worldclock_ctrls["offset_sw"].set_visible(show_wc)
                 worldclock_ctrls["font_row"].set_visible(show_wc)
                 worldclock_ctrls["fill_sw"].set_visible(show_wc)
@@ -1074,6 +1097,10 @@ class TouchBarInfoAction(ActionBase):
             for ctrls in [full_date_ctrls, full_time_ctrls, full_weather_ctrls, full_worldclock_ctrls, top_date_ctrls, top_time_ctrls, top_weather_ctrls, top_worldclock_ctrls, bot_date_ctrls, bot_time_ctrls, bot_weather_ctrls, bot_worldclock_ctrls]:
                 if "city_combo" in ctrls:
                     ctrls["city_combo"].connect("notify::selected", lambda *a: update_visibility())
+                if "view_combo" in ctrls:
+                    ctrls["view_combo"].connect("notify::selected", lambda *a: update_visibility())
+                if "sec_sw" in ctrls:
+                    ctrls["sec_sw"].connect("notify::active", lambda *a: update_visibility())
                 if "fill_sw" in ctrls:
                     ctrls["fill_sw"].connect("notify::active", lambda *a: update_visibility())
                 if "out_sw" in ctrls:
@@ -1170,8 +1197,10 @@ class TouchBarInfoAction(ActionBase):
 
         # World Clock Signals
         for combo in self.all_worldclock_city_combos: combo.connect("notify::selected", self.on_worldclock_city_changed)
+        for combo in self.all_worldclock_view_combos: combo.connect("notify::selected", self.on_worldclock_view_changed)
         for entry in self.all_worldclock_label_entries: entry.connect("changed", self.on_worldclock_label_changed)
         for entry in self.all_worldclock_tz_entries: entry.connect("changed", self.on_worldclock_tz_changed)
+        for sw in self.all_worldclock_sec_switches: sw.connect("notify::active", self.on_worldclock_show_seconds_toggled)
         for sw in self.all_worldclock_offset_switches: sw.connect("notify::active", self.on_worldclock_offset_toggled)
 
         for fb in self.all_worldclock_font_btns: fb.connect("font-set", self.on_worldclock_font_set)
@@ -1267,8 +1296,10 @@ class TouchBarInfoAction(ActionBase):
 
         # World Clock Defaults
         worldclock_city_idx = settings.setdefault("worldclock_city_idx", 0)
+        worldclock_view = settings.setdefault("worldclock_view", 0)
         worldclock_custom_label = settings.setdefault("worldclock_custom_label", "")
         worldclock_custom_tz = settings.setdefault("worldclock_custom_tz", "America/New_York")
+        worldclock_show_seconds = settings.setdefault("worldclock_show_seconds", False)
         worldclock_show_offset = settings.setdefault("worldclock_show_offset", True)
         worldclock_font_str = settings.setdefault("worldclock_font_str", "DejaVu Sans Bold 25")
         worldclock_fill_enabled = settings.setdefault("worldclock_fill_enabled", True)
@@ -1356,8 +1387,11 @@ class TouchBarInfoAction(ActionBase):
         # Sync World Clock Controls
         for combo in self.all_worldclock_city_combos:
             if 0 <= worldclock_city_idx < len(self.worldclock_cities): combo.set_selected(worldclock_city_idx)
+        for combo in self.all_worldclock_view_combos:
+            if 0 <= worldclock_view < len(self.worldclock_view_options): combo.set_selected(worldclock_view)
         for entry in self.all_worldclock_label_entries: entry.set_text(worldclock_custom_label)
         for entry in self.all_worldclock_tz_entries: entry.set_text(worldclock_custom_tz)
+        for sw in self.all_worldclock_sec_switches: sw.set_active(worldclock_show_seconds)
         for sw in self.all_worldclock_offset_switches: sw.set_active(worldclock_show_offset)
         for fb in self.all_worldclock_font_btns: fb.set_font(worldclock_font_str)
         for sw in self.all_worldclock_fill_switches: sw.set_active(worldclock_fill_enabled)
@@ -1818,8 +1852,29 @@ class TouchBarInfoAction(ActionBase):
             self.set_settings(settings)
             if hasattr(self, "update_vis_callbacks"):
                 for cb in self.update_vis_callbacks: cb()
-            self.last_rendered_key = ""
-            self.update_display()
+            self.trigger_redraw()
+
+    def on_worldclock_view_changed(self, combo, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = combo.get_selected()
+            settings["worldclock_view"] = val
+            for c in self.all_worldclock_view_combos:
+                if c != combo and c.get_selected() != val: c.set_selected(val)
+            self.set_settings(settings)
+            if hasattr(self, "update_vis_callbacks"):
+                for cb in self.update_vis_callbacks: cb()
+            self.trigger_redraw()
+
+    def on_worldclock_show_seconds_toggled(self, switch, *args):
+        settings = self.get_settings()
+        if settings is not None:
+            val = switch.get_active()
+            settings["worldclock_show_seconds"] = val
+            for sw in self.all_worldclock_sec_switches:
+                if sw != switch and sw.get_active() != val: sw.set_active(val)
+            self.set_settings(settings)
+            self.trigger_redraw()
 
     def on_worldclock_label_changed(self, entry):
         settings = self.get_settings()
@@ -2382,7 +2437,7 @@ class TouchBarInfoAction(ActionBase):
             self.render_styled_text(draw, (center_x, top_y), top_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
             self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
-    def draw_world_clock(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_city, font_time, font_sub, fill_en, fill_col, out_en, out_col, out_sz, city_idx: int, custom_label: str, custom_tz: str, show_offset: bool, use_24h: bool, show_seconds: bool):
+    def draw_world_clock(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_city, font_time, font_sub, fill_en, fill_col, out_en, out_col, out_sz, city_idx: int, custom_label: str, custom_tz: str, show_offset: bool, use_24h: bool, show_seconds: bool, clock_view: int = 0):
         x_min, y_min, x_max, y_max = box
         box_w = x_max - x_min
         box_h = y_max - y_min

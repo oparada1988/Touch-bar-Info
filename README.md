@@ -38,7 +38,9 @@ A high-visibility digital clock display with customizable typography, colors, an
 Provides live temperature, weather conditions, and location info retrieved automatically via Open-Meteo.
 
 ### World Clock
-Displays a real-time digital clock for any global location with automatic time difference calculations:
+Displays a real-time clock for any global location with automatic time difference calculations:
+- **Digital & Analog Clock Views**: Choose between a clean Digital text view or a round Analog clock face featuring animated hour, minute, and second hands.
+- **Independent Seconds Toggle**: Easily toggle seconds on or off for the World Clock independently from the standalone Time widget.
 - **Preset Cities**: Quick selection for major cities (London, New York, Los Angeles, Chicago, Paris, Berlin, Tokyo, Hong Kong, Sydney, Dubai, UTC).
 - **Custom IANA Timezones**: Full support for any custom IANA timezone string (e.g. `America/New_York`, `Asia/Tokyo`, `Europe/Paris`) with custom city labels.
 - **Time Offset & Day Indicator**: Displays time difference relative to local time along with day indicators (e.g., `+5h, Tomorrow` or `-3h`).
