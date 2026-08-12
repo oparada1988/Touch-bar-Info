@@ -218,86 +218,71 @@ class TouchBarInfoAction(ActionBase):
         disks = []
         seen = set()
 
-        def add_mount(mount_path: str, default_label: str = ""):
-            if not mount_path or mount_path in seen:
-                return
-            dev_node = ""
-            label_name = default_label
-            try:
-                p = subprocess.run(['flatpak-spawn', '--host', 'df', '-k', mount_path], capture_output=True, text=True, timeout=2)
-                if p.returncode == 0 and p.stdout:
-                    lines = p.stdout.strip().splitlines()
-                    if len(lines) >= 2:
-                        parts = lines[-1].split()
-                        if parts:
-                            dev = parts[0]
-                            if dev.startswith('/dev/'):
-                                dev_node = os.path.basename(dev)
-            except Exception:
-                pass
+        ignored_prefixes = ("/boot", "/run", "/sys", "/proc", "/dev", "/etc", "/usr", "/var/lib", "/app")
+        ignored_fstypes = ["swap", "squashfs", "iso9660", "tmpfs", "devtmpfs", "overlay", "ramfs"]
 
-            seen.add(mount_path)
-            if not label_name:
-                if mount_path == "/":
-                    label_name = "System Root"
-                elif mount_path == "/home":
-                    label_name = "Home"
-                else:
-                    base = os.path.basename(mount_path.rstrip("/"))
-                    label_name = base.capitalize() if base else mount_path
+        def is_valid_target(m: str) -> bool:
+            if not m:
+                return False
+            if m.startswith(ignored_prefixes):
+                return False
+            if m in ["/", "/home"]:
+                return True
+            if m.startswith(("/mnt/", "/media/", "/run/media/")):
+                return True
+            return False
 
-            disp_name = f"{label_name} — {mount_path} ({dev_node})" if dev_node else f"{label_name} — {mount_path}"
-            disks.append((mount_path, disp_name))
-
-        # 1. Primary System Targets
-        add_mount("/", "System Root")
-
-        # 2. Common Mount Directory Scans (/mnt, /media, /run/media)
-        common_search_dirs = ["/mnt"]
+        # Strategy 1: Ultra-fast host /proc/mounts single sub-process query (Instant 0.01s)
         try:
-            cmd = ['flatpak-spawn', '--host', 'ls', '-d', '/media', '/media/*', '/run/media', '/run/media/*/*']
+            cmd = ['flatpak-spawn', '--host', 'cat', '/proc/mounts']
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
             if p.stdout:
                 for line in p.stdout.splitlines():
-                    path = line.strip()
-                    if path and not path.startswith(("/proc", "/sys", "/dev")):
-                        common_search_dirs.append(path)
-        except Exception:
-            pass
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        dev, mount_path, fstype = parts[0], parts[1], parts[2]
+                        if fstype not in ignored_fstypes and is_valid_target(mount_path):
+                            if mount_path not in seen and (dev.startswith('/dev/') or mount_path in ['/', '/home']):
+                                seen.add(mount_path)
+                                dev_node = os.path.basename(dev)
+                                clean_name = "System Root" if mount_path == "/" else mount_path.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
+                                disp_name = f"{clean_name} — {mount_path} ({dev_node})"
+                                disks.append((mount_path, disp_name))
+        except Exception as e:
+            log.error(f"TouchBarInfo: Error querying host /proc/mounts: {e}")
 
-        for search_dir in common_search_dirs:
+        # Strategy 2: Host lsblk JSON query fallback
+        if len(disks) <= 1:
             try:
-                cmd = ['flatpak-spawn', '--host', 'find', search_dir, '-mindepth', '1', '-maxdepth', '1', '-type', 'd']
+                cmd = ['flatpak-spawn', '--host', 'lsblk', '-J', '-o', 'NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS']
                 p = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
-                if p.stdout:
-                    for line in p.stdout.splitlines():
-                        m_dir = line.strip()
-                        if m_dir and m_dir not in seen:
-                            add_mount(m_dir)
-            except Exception:
-                pass
+                if p.stdout and p.stdout.strip().startswith('{'):
+                    data = json.loads(p.stdout)
+                    def parse_devs(dev_list):
+                        for item in dev_list:
+                            dev_name = item.get("name", "")
+                            label = item.get("label", "")
+                            fstype = item.get("fstype", "")
+                            raw_mounts = list(item.get("mountpoints") or [])
+                            if item.get("mountpoint"):
+                                raw_mounts.append(item.get("mountpoint"))
+                            for m in raw_mounts:
+                                if is_valid_target(m) and m not in seen and fstype not in ignored_fstypes:
+                                    seen.add(m)
+                                    clean_name = label if label else ("System Root" if m == "/" else m.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize())
+                                    disp_name = f"{clean_name} — {m} ({dev_name})" if dev_name else f"{clean_name} — {m}"
+                                    disks.append((m, disp_name))
+                            if "children" in item:
+                                parse_devs(item["children"])
+                    parse_devs(data.get("blockdevices", []))
+            except Exception as e:
+                log.error(f"TouchBarInfo: Error querying host lsblk: {e}")
 
-        # 3. Host lsblk JSON query fallback (Discovers any remaining physical partitions)
-        try:
-            cmd = ['flatpak-spawn', '--host', 'lsblk', '-J', '-o', 'NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS']
-            p = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
-            if p.stdout and p.stdout.strip().startswith('{'):
-                data = json.loads(p.stdout)
-                def parse_devs(dev_list):
-                    for item in dev_list:
-                        label = item.get("label", "")
-                        raw_mounts = list(item.get("mountpoints") or [])
-                        if item.get("mountpoint"):
-                            raw_mounts.append(item.get("mountpoint"))
-                        for m in raw_mounts:
-                            if m and m not in seen and not m.startswith(("/boot", "/run", "/sys", "/proc", "/dev", "/var", "/etc", "/usr")):
-                                add_mount(m, label)
-                        if "children" in item:
-                            parse_devs(item["children"])
-                parse_devs(data.get("blockdevices", []))
-        except Exception:
-            pass
+        if "/" not in seen:
+            disks.insert(0, ("/", "System Root — /"))
+            seen.add("/")
 
+        log.info(f"TouchBarInfo: get_system_disk_mounts discovered {len(disks)} mounts: {disks}")
         return disks
 
     # --- Weather Fetcher & WMO Mapping ---
