@@ -699,7 +699,7 @@ class TouchBarInfoAction(ActionBase):
             self.all_ram_mode_combos.append(mode_combo)
             return {"mode_combo": mode_combo, "all_rows": [mode_combo]}
 
-        # Helper to create Disk controls (Mount Dropdown + Refresh Button + Custom Folder Chooser)
+        # Helper to create Disk controls (Mount Dropdown + Refresh Button)
         def build_disk_controls():
             mount_model = Gtk.StringList()
             for _, d_name in self.disk_mounts: mount_model.append(d_name)
@@ -715,15 +715,6 @@ class TouchBarInfoAction(ActionBase):
             refresh_btn.connect("clicked", self.on_refresh_disks_clicked)
             mount_combo.add_suffix(refresh_btn)
 
-            browse_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.disk-browse.label", "Custom Mount Directory"),
-                subtitle=self.get_locale_text("actions.touchbar-info.disk-browse.subtitle", "Optional: Visually choose any partition or subfolder path")
-            )
-            browse_btn = Gtk.Button(label=self.get_locale_text("actions.touchbar-info.disk-browse.choose", "Browse..."))
-            browse_btn.set_valign(Gtk.Align.CENTER)
-            browse_btn.connect("clicked", self.on_browse_disk_mount_clicked)
-            browse_row.add_suffix(browse_btn)
-
             mode_model = Gtk.StringList()
             for opt in self.disk_mode_options: mode_model.append(opt)
             mode_combo = Adw.ComboRow(
@@ -734,12 +725,10 @@ class TouchBarInfoAction(ActionBase):
 
             self.all_disk_mount_combos.append(mount_combo)
             self.all_disk_mode_combos.append(mode_combo)
-            self.all_disk_browse_rows.append(browse_row)
             return {
                 "mount_combo": mount_combo,
-                "browse_row": browse_row,
                 "mode_combo": mode_combo,
-                "all_rows": [mount_combo, browse_row, mode_combo]
+                "all_rows": [mount_combo, mode_combo]
             }
 
         # Helper to create World Clock controls
@@ -1431,11 +1420,13 @@ class TouchBarInfoAction(ActionBase):
             self.update_display()
 
     def on_refresh_disks_clicked(self, button, *args):
+        log.info("TouchBarInfo: 🔄 Refresh Disks button clicked")
         self.disk_mounts = self.get_system_disk_mounts()
         settings = self.get_settings() or {}
         curr_path = settings.get("disk_mount_path", "/")
 
         display_names = [d_name for _, d_name in self.disk_mounts]
+        log.info(f"TouchBarInfo: Updating {len(self.all_disk_mount_combos)} mount combos with display names: {display_names}")
 
         matched_idx = 0
         for idx, (m_path, _) in enumerate(self.disk_mounts):
@@ -1458,8 +1449,10 @@ class TouchBarInfoAction(ActionBase):
         settings = self.get_settings()
         if settings is not None:
             val = combo.get_selected()
+            log.info(f"TouchBarInfo: Disk mount combo selection changed to index {val}")
             if 0 <= val < len(self.disk_mounts):
                 m_path, m_disp = self.disk_mounts[val]
+                log.info(f"TouchBarInfo: Selected disk mount path: {m_path} ({m_disp})")
                 settings["disk_mount_path"] = m_path
                 settings["disk_mount_idx"] = val
                 for c in self.all_disk_mount_combos:
