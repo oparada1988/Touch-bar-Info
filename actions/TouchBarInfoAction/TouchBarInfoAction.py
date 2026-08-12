@@ -32,6 +32,8 @@ class TouchBarInfoAction(ActionBase):
         self.weather_cache = {}
         self.city_search_timer = None
         self.update_vis_callbacks = []
+        self._syncing_controls = False
+        self._update_scheduled = False
 
         # System Monitor Stats Buffers
         self.cpu_history = [0.0] * 20
@@ -1006,10 +1008,13 @@ class TouchBarInfoAction(ActionBase):
                 date_ctrls["fmt_combo"].set_visible(show_date)
                 date_ctrls["font_row"].set_visible(show_date)
                 date_ctrls["fill_sw"].set_visible(show_date)
-                date_ctrls["fill_color_row"].set_visible(show_date and date_ctrls["fill_sw"].get_active())
+                date_ctrls["fill_color_row"].set_visible(show_date)
+                date_ctrls["fill_color_row"].set_sensitive(show_date and date_ctrls["fill_sw"].get_active())
                 date_ctrls["out_sw"].set_visible(show_date)
-                date_ctrls["out_color_row"].set_visible(show_date and date_ctrls["out_sw"].get_active())
-                date_ctrls["out_size_spin"].set_visible(show_date and date_ctrls["out_sw"].get_active())
+                date_ctrls["out_color_row"].set_visible(show_date)
+                date_ctrls["out_color_row"].set_sensitive(show_date and date_ctrls["out_sw"].get_active())
+                date_ctrls["out_size_spin"].set_visible(show_date)
+                date_ctrls["out_size_spin"].set_sensitive(show_date and date_ctrls["out_sw"].get_active())
 
                 # Time Visibility (Full: 6 [Stacked], 7 [Time] | Split: 6 [Time])
                 show_time = (widget_choice in [6, 7]) if is_full_mode else (widget_choice == 6)
@@ -1018,10 +1023,13 @@ class TouchBarInfoAction(ActionBase):
                 time_ctrls["sw_sec"].set_visible(show_time)
                 time_ctrls["font_row"].set_visible(show_time)
                 time_ctrls["fill_sw"].set_visible(show_time)
-                time_ctrls["fill_color_row"].set_visible(show_time and time_ctrls["fill_sw"].get_active())
+                time_ctrls["fill_color_row"].set_visible(show_time)
+                time_ctrls["fill_color_row"].set_sensitive(show_time and time_ctrls["fill_sw"].get_active())
                 time_ctrls["out_sw"].set_visible(show_time)
-                time_ctrls["out_color_row"].set_visible(show_time and time_ctrls["out_sw"].get_active())
-                time_ctrls["out_size_spin"].set_visible(show_time and time_ctrls["out_sw"].get_active())
+                time_ctrls["out_color_row"].set_visible(show_time)
+                time_ctrls["out_color_row"].set_sensitive(show_time and time_ctrls["out_sw"].get_active())
+                time_ctrls["out_size_spin"].set_visible(show_time)
+                time_ctrls["out_size_spin"].set_sensitive(show_time and time_ctrls["out_sw"].get_active())
 
                 # Weather Visibility (Full: 8 | Split: 7)
                 show_weather = (widget_choice == 8) if is_full_mode else (widget_choice == 7)
@@ -1031,10 +1039,13 @@ class TouchBarInfoAction(ActionBase):
                 weather_ctrls["ref_combo"].set_visible(show_weather)
                 weather_ctrls["font_row"].set_visible(show_weather)
                 weather_ctrls["fill_sw"].set_visible(show_weather)
-                weather_ctrls["fill_color_row"].set_visible(show_weather and weather_ctrls["fill_sw"].get_active())
+                weather_ctrls["fill_color_row"].set_visible(show_weather)
+                weather_ctrls["fill_color_row"].set_sensitive(show_weather and weather_ctrls["fill_sw"].get_active())
                 weather_ctrls["out_sw"].set_visible(show_weather)
-                weather_ctrls["out_color_row"].set_visible(show_weather and weather_ctrls["out_sw"].get_active())
-                weather_ctrls["out_size_spin"].set_visible(show_weather and weather_ctrls["out_sw"].get_active())
+                weather_ctrls["out_color_row"].set_visible(show_weather)
+                weather_ctrls["out_color_row"].set_sensitive(show_weather and weather_ctrls["out_sw"].get_active())
+                weather_ctrls["out_size_spin"].set_visible(show_weather)
+                weather_ctrls["out_size_spin"].set_sensitive(show_weather and weather_ctrls["out_sw"].get_active())
 
                 # CPU Visibility (Full: 1 | Split: 1)
                 show_cpu = (widget_choice == 1) if is_full_mode else (widget_choice == 1)
@@ -1063,10 +1074,13 @@ class TouchBarInfoAction(ActionBase):
                 worldclock_ctrls["offset_sw"].set_visible(show_wc)
                 worldclock_ctrls["font_row"].set_visible(show_wc)
                 worldclock_ctrls["fill_sw"].set_visible(show_wc)
-                worldclock_ctrls["fill_color_row"].set_visible(show_wc and worldclock_ctrls["fill_sw"].get_active())
+                worldclock_ctrls["fill_color_row"].set_visible(show_wc)
+                worldclock_ctrls["fill_color_row"].set_sensitive(show_wc and worldclock_ctrls["fill_sw"].get_active())
                 worldclock_ctrls["out_sw"].set_visible(show_wc)
-                worldclock_ctrls["out_color_row"].set_visible(show_wc and worldclock_ctrls["out_sw"].get_active())
-                worldclock_ctrls["out_size_spin"].set_visible(show_wc and worldclock_ctrls["out_sw"].get_active())
+                worldclock_ctrls["out_color_row"].set_visible(show_wc)
+                worldclock_ctrls["out_color_row"].set_sensitive(show_wc and worldclock_ctrls["out_sw"].get_active())
+                worldclock_ctrls["out_size_spin"].set_visible(show_wc)
+                worldclock_ctrls["out_size_spin"].set_sensitive(show_wc and worldclock_ctrls["out_sw"].get_active())
 
             # Main Section Visibility Controller
             def update_visibility():
@@ -1629,141 +1643,193 @@ class TouchBarInfoAction(ActionBase):
 
     # --- Date Font / Fill / Outline Callbacks ---
     def on_date_font_set(self, font_btn):
-        settings = self.get_settings()
-        if settings is not None:
-            val = font_btn.get_font()
-            settings["date_font_str"] = val
-            for fb in self.all_date_font_btns:
-                if fb != font_btn: fb.set_font(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = font_btn.get_font()
+                settings["date_font_str"] = val
+                for fb in self.all_date_font_btns:
+                    if fb != font_btn: fb.set_font(val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_date_fill_toggled(self, switch, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = switch.get_active()
-            settings["date_fill_enabled"] = val
-            for sw in self.all_date_fill_switches:
-                if sw != switch and sw.get_active() != val: sw.set_active(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = switch.get_active()
+                settings["date_fill_enabled"] = val
+                for sw in self.all_date_fill_switches:
+                    if sw != switch and sw.get_active() != val: sw.set_active(val)
+                self.set_settings(settings)
+                self.notify_visibility_change()
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_date_fill_color_set(self, button):
-        settings = self.get_settings()
-        if settings is not None:
-            rgba = button.get_rgba()
-            hex_val = self.gdk_to_hex(rgba)
-            settings["date_font_color"] = hex_val
-            for btn in self.all_date_fill_color_btns:
-                if btn != button: self.set_color_button_rgba(btn, hex_val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["date_font_color"] = hex_val
+                for btn in self.all_date_fill_color_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_date_out_toggled(self, switch, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = switch.get_active()
-            settings["date_outline_enabled"] = val
-            for sw in self.all_date_out_switches:
-                if sw != switch and sw.get_active() != val: sw.set_active(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = switch.get_active()
+                settings["date_outline_enabled"] = val
+                for sw in self.all_date_out_switches:
+                    if sw != switch and sw.get_active() != val: sw.set_active(val)
+                self.set_settings(settings)
+                self.notify_visibility_change()
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_date_out_color_set(self, button):
-        settings = self.get_settings()
-        if settings is not None:
-            rgba = button.get_rgba()
-            hex_val = self.gdk_to_hex(rgba)
-            settings["date_outline_color"] = hex_val
-            for btn in self.all_date_out_color_btns:
-                if btn != button: self.set_color_button_rgba(btn, hex_val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["date_outline_color"] = hex_val
+                for btn in self.all_date_out_color_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_date_out_size_changed(self, spin, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = int(spin.get_value())
-            settings["date_outline_size"] = val
-            for s in self.all_date_out_size_spins:
-                if s != spin and int(s.get_value()) != val: s.set_value(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = int(spin.get_value())
+                settings["date_outline_size"] = val
+                for s in self.all_date_out_size_spins:
+                    if s != spin and int(s.get_value()) != val: s.set_value(val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     # --- Time Font / Fill / Outline Callbacks ---
     def on_time_font_set(self, font_btn):
-        settings = self.get_settings()
-        if settings is not None:
-            val = font_btn.get_font()
-            settings["time_font_str"] = val
-            for fb in self.all_time_font_btns:
-                if fb != font_btn: fb.set_font(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = font_btn.get_font()
+                settings["time_font_str"] = val
+                for fb in self.all_time_font_btns:
+                    if fb != font_btn: fb.set_font(val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_time_fill_toggled(self, switch, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = switch.get_active()
-            settings["time_fill_enabled"] = val
-            for sw in self.all_time_fill_switches:
-                if sw != switch and sw.get_active() != val: sw.set_active(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = switch.get_active()
+                settings["time_fill_enabled"] = val
+                for sw in self.all_time_fill_switches:
+                    if sw != switch and sw.get_active() != val: sw.set_active(val)
+                self.set_settings(settings)
+                self.notify_visibility_change()
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_time_fill_color_set(self, button):
-        settings = self.get_settings()
-        if settings is not None:
-            rgba = button.get_rgba()
-            hex_val = self.gdk_to_hex(rgba)
-            settings["time_font_color"] = hex_val
-            for btn in self.all_time_fill_color_btns:
-                if btn != button: self.set_color_button_rgba(btn, hex_val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["time_font_color"] = hex_val
+                for btn in self.all_time_fill_color_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_time_out_toggled(self, switch, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = switch.get_active()
-            settings["time_outline_enabled"] = val
-            for sw in self.all_time_out_switches:
-                if sw != switch and sw.get_active() != val: sw.set_active(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = switch.get_active()
+                settings["time_outline_enabled"] = val
+                for sw in self.all_time_out_switches:
+                    if sw != switch and sw.get_active() != val: sw.set_active(val)
+                self.set_settings(settings)
+                self.notify_visibility_change()
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_time_out_color_set(self, button):
-        settings = self.get_settings()
-        if settings is not None:
-            rgba = button.get_rgba()
-            hex_val = self.gdk_to_hex(rgba)
-            settings["time_outline_color"] = hex_val
-            for btn in self.all_time_out_color_btns:
-                if btn != button: self.set_color_button_rgba(btn, hex_val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["time_outline_color"] = hex_val
+                for btn in self.all_time_out_color_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_time_out_size_changed(self, spin, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = int(spin.get_value())
-            settings["time_outline_size"] = val
-            for s in self.all_time_out_size_spins:
-                if s != spin and int(s.get_value()) != val: s.set_value(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = int(spin.get_value())
+                settings["time_outline_size"] = val
+                for s in self.all_time_out_size_spins:
+                    if s != spin and int(s.get_value()) != val: s.set_value(val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     # --- Weather Callbacks & Font Signals ---
     def on_weather_location_entry_changed(self, entry, *args):
@@ -1806,248 +1872,345 @@ class TouchBarInfoAction(ActionBase):
                     for combo in self.all_weather_res_combos:
                         combo.set_model(string_list)
 
-                    for cb in self.update_vis_callbacks:
-                        cb()
+                    self.notify_visibility_change()
 
                 GLib.idle_add(update_ui)
         except Exception as e:
             log.error(f"TouchBarInfo: City search failed: {e}")
 
     def on_weather_result_selected(self, combo, *args):
-        sel = combo.get_selected()
-        if 0 <= sel < len(self.search_results_data):
-            disp_str, lat_str, lon_str, city_name = self.search_results_data[sel]
-            settings = self.get_settings()
-            if settings is not None:
-                settings["weather_lat"] = lat_str
-                settings["weather_lon"] = lon_str
-                settings["weather_location_name"] = city_name
-                self.set_settings(settings)
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            sel = combo.get_selected()
+            if 0 <= sel < len(self.search_results_data):
+                disp_str, lat_str, lon_str, city_name = self.search_results_data[sel]
+                settings = self.get_settings()
+                if settings is not None:
+                    settings["weather_lat"] = lat_str
+                    settings["weather_lon"] = lon_str
+                    settings["weather_location_name"] = city_name
+                    self.set_settings(settings)
 
-                for entry in self.all_weather_loc_entries:
-                    if entry.get_text() != city_name:
-                        entry.set_text(city_name)
+                    for entry in self.all_weather_loc_entries:
+                        if entry.get_text() != city_name:
+                            entry.set_text(city_name)
 
-                self.fetch_weather_async(force=True)
+                    self.fetch_weather_async(force=True)
+        finally:
+            self._syncing_controls = False
 
     def on_weather_unit_changed(self, combo, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = combo.get_selected()
-            settings["weather_unit_idx"] = val
-            for c in self.all_weather_unit_combos:
-                if c != combo and c.get_selected() != val:
-                    c.set_selected(val)
-            self.set_settings(settings)
-            self.fetch_weather_async(force=True)
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = combo.get_selected()
+                settings["weather_unit_idx"] = val
+                for c in self.all_weather_unit_combos:
+                    if c != combo and c.get_selected() != val:
+                        c.set_selected(val)
+                self.set_settings(settings)
+                self.fetch_weather_async(force=True)
+        finally:
+            self._syncing_controls = False
 
     def on_weather_refresh_changed(self, combo, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = combo.get_selected()
-            settings["weather_refresh_idx"] = val
-            for c in self.all_weather_ref_combos:
-                if c != combo and c.get_selected() != val:
-                    c.set_selected(val)
-            self.set_settings(settings)
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = combo.get_selected()
+                settings["weather_refresh_idx"] = val
+                for c in self.all_weather_ref_combos:
+                    if c != combo and c.get_selected() != val:
+                        c.set_selected(val)
+                self.set_settings(settings)
+        finally:
+            self._syncing_controls = False
 
     def on_weather_font_set(self, font_btn):
-        settings = self.get_settings()
-        if settings is not None:
-            val = font_btn.get_font()
-            settings["weather_font_str"] = val
-            for fb in self.all_weather_font_btns:
-                if fb != font_btn: fb.set_font(val)
-            self.set_settings(settings)
-            self.trigger_redraw()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = font_btn.get_font()
+                settings["weather_font_str"] = val
+                for fb in self.all_weather_font_btns:
+                    if fb != font_btn: fb.set_font(val)
+                self.set_settings(settings)
+                self.trigger_redraw()
+        finally:
+            self._syncing_controls = False
 
     def on_weather_fill_toggled(self, switch, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = switch.get_active()
-            settings["weather_fill_enabled"] = val
-            for sw in self.all_weather_fill_switches:
-                if sw != switch and sw.get_active() != val: sw.set_active(val)
-            self.set_settings(settings)
-            self.trigger_redraw()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = switch.get_active()
+                settings["weather_fill_enabled"] = val
+                for sw in self.all_weather_fill_switches:
+                    if sw != switch and sw.get_active() != val: sw.set_active(val)
+                self.set_settings(settings)
+                self.notify_visibility_change()
+                self.trigger_redraw()
+        finally:
+            self._syncing_controls = False
 
     def on_weather_fill_color_set(self, button):
-        settings = self.get_settings()
-        if settings is not None:
-            rgba = button.get_rgba()
-            hex_val = self.gdk_to_hex(rgba)
-            settings["weather_font_color"] = hex_val
-            for btn in self.all_weather_fill_color_btns:
-                if btn != button: self.set_color_button_rgba(btn, hex_val)
-            self.set_settings(settings)
-            self.trigger_redraw()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["weather_font_color"] = hex_val
+                for btn in self.all_weather_fill_color_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.trigger_redraw()
+        finally:
+            self._syncing_controls = False
 
     def on_weather_out_toggled(self, switch, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = switch.get_active()
-            settings["weather_outline_enabled"] = val
-            for sw in self.all_weather_out_switches:
-                if sw != switch and sw.get_active() != val: sw.set_active(val)
-            self.set_settings(settings)
-            self.trigger_redraw()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = switch.get_active()
+                settings["weather_outline_enabled"] = val
+                for sw in self.all_weather_out_switches:
+                    if sw != switch and sw.get_active() != val: sw.set_active(val)
+                self.set_settings(settings)
+                self.notify_visibility_change()
+                self.trigger_redraw()
+        finally:
+            self._syncing_controls = False
 
     def on_weather_out_color_set(self, button):
-        settings = self.get_settings()
-        if settings is not None:
-            rgba = button.get_rgba()
-            hex_val = self.gdk_to_hex(rgba)
-            settings["weather_outline_color"] = hex_val
-            for btn in self.all_weather_out_color_btns:
-                if btn != button: self.set_color_button_rgba(btn, hex_val)
-            self.set_settings(settings)
-            self.trigger_redraw()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["weather_outline_color"] = hex_val
+                for btn in self.all_weather_out_color_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.trigger_redraw()
+        finally:
+            self._syncing_controls = False
 
     def on_weather_out_size_changed(self, spin, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = int(spin.get_value())
-            settings["weather_outline_size"] = val
-            for s in self.all_weather_out_size_spins:
-                if s != spin and int(s.get_value()) != val: s.set_value(val)
-            self.set_settings(settings)
-            self.trigger_redraw()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = int(spin.get_value())
+                settings["weather_outline_size"] = val
+                for s in self.all_weather_out_size_spins:
+                    if s != spin and int(s.get_value()) != val: s.set_value(val)
+                self.set_settings(settings)
+                self.trigger_redraw()
+        finally:
+            self._syncing_controls = False
 
     # --- World Clock Callbacks ---
     def on_worldclock_city_changed(self, combo, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = combo.get_selected()
-            settings["worldclock_city_idx"] = val
-            for c in self.all_worldclock_city_combos:
-                if c != combo and c.get_selected() != val: c.set_selected(val)
-            self.set_settings(settings)
-            if hasattr(self, "update_vis_callbacks"):
-                for cb in self.update_vis_callbacks: cb()
-            self.trigger_redraw()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = combo.get_selected()
+                settings["worldclock_city_idx"] = val
+                for c in self.all_worldclock_city_combos:
+                    if c != combo and c.get_selected() != val: c.set_selected(val)
+                self.set_settings(settings)
+                self.notify_visibility_change()
+                self.trigger_redraw()
+        finally:
+            self._syncing_controls = False
 
     def on_worldclock_view_changed(self, combo, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = combo.get_selected()
-            settings["worldclock_view"] = val
-            for c in self.all_worldclock_view_combos:
-                if c != combo and c.get_selected() != val: c.set_selected(val)
-            self.set_settings(settings)
-            if hasattr(self, "update_vis_callbacks"):
-                for cb in self.update_vis_callbacks: cb()
-            self.trigger_redraw()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = combo.get_selected()
+                settings["worldclock_view"] = val
+                for c in self.all_worldclock_view_combos:
+                    if c != combo and c.get_selected() != val: c.set_selected(val)
+                self.set_settings(settings)
+                self.notify_visibility_change()
+                self.trigger_redraw()
+        finally:
+            self._syncing_controls = False
 
     def on_worldclock_show_seconds_toggled(self, switch, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = switch.get_active()
-            settings["worldclock_show_seconds"] = val
-            for sw in self.all_worldclock_sec_switches:
-                if sw != switch and sw.get_active() != val: sw.set_active(val)
-            self.set_settings(settings)
-            self.trigger_redraw()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = switch.get_active()
+                settings["worldclock_show_seconds"] = val
+                for sw in self.all_worldclock_sec_switches:
+                    if sw != switch and sw.get_active() != val: sw.set_active(val)
+                self.set_settings(settings)
+                self.trigger_redraw()
+        finally:
+            self._syncing_controls = False
 
     def on_worldclock_label_changed(self, entry):
-        settings = self.get_settings()
-        if settings is not None:
-            val = entry.get_text()
-            settings["worldclock_custom_label"] = val
-            for e in self.all_worldclock_label_entries:
-                if e != entry and e.get_text() != val: e.set_text(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = entry.get_text()
+                settings["worldclock_custom_label"] = val
+                for e in self.all_worldclock_label_entries:
+                    if e != entry and e.get_text() != val: e.set_text(val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_worldclock_tz_changed(self, entry):
-        settings = self.get_settings()
-        if settings is not None:
-            val = entry.get_text()
-            settings["worldclock_custom_tz"] = val
-            for e in self.all_worldclock_tz_entries:
-                if e != entry and e.get_text() != val: e.set_text(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = entry.get_text()
+                settings["worldclock_custom_tz"] = val
+                for e in self.all_worldclock_tz_entries:
+                    if e != entry and e.get_text() != val: e.set_text(val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_worldclock_offset_toggled(self, switch, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = switch.get_active()
-            settings["worldclock_show_offset"] = val
-            for sw in self.all_worldclock_offset_switches:
-                if sw != switch and sw.get_active() != val: sw.set_active(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = switch.get_active()
+                settings["worldclock_show_offset"] = val
+                for sw in self.all_worldclock_offset_switches:
+                    if sw != switch and sw.get_active() != val: sw.set_active(val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_worldclock_font_set(self, font_btn):
-        settings = self.get_settings()
-        if settings is not None:
-            val = font_btn.get_font()
-            settings["worldclock_font_str"] = val
-            for fb in self.all_worldclock_font_btns:
-                if fb != font_btn: fb.set_font(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = font_btn.get_font()
+                settings["worldclock_font_str"] = val
+                for fb in self.all_worldclock_font_btns:
+                    if fb != font_btn: fb.set_font(val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_worldclock_fill_toggled(self, switch, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = switch.get_active()
-            settings["worldclock_fill_enabled"] = val
-            for sw in self.all_worldclock_fill_switches:
-                if sw != switch and sw.get_active() != val: sw.set_active(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = switch.get_active()
+                settings["worldclock_fill_enabled"] = val
+                for sw in self.all_worldclock_fill_switches:
+                    if sw != switch and sw.get_active() != val: sw.set_active(val)
+                self.set_settings(settings)
+                self.notify_visibility_change()
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_worldclock_fill_color_set(self, button):
-        settings = self.get_settings()
-        if settings is not None:
-            rgba = button.get_rgba()
-            hex_val = self.gdk_to_hex(rgba)
-            settings["worldclock_font_color"] = hex_val
-            for btn in self.all_worldclock_fill_color_btns:
-                if btn != button: self.set_color_button_rgba(btn, hex_val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["worldclock_font_color"] = hex_val
+                for btn in self.all_worldclock_fill_color_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_worldclock_out_toggled(self, switch, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = switch.get_active()
-            settings["worldclock_outline_enabled"] = val
-            for sw in self.all_worldclock_out_switches:
-                if sw != switch and sw.get_active() != val: sw.set_active(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = switch.get_active()
+                settings["worldclock_outline_enabled"] = val
+                for sw in self.all_worldclock_out_switches:
+                    if sw != switch and sw.get_active() != val: sw.set_active(val)
+                self.set_settings(settings)
+                self.notify_visibility_change()
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_worldclock_out_color_set(self, button):
-        settings = self.get_settings()
-        if settings is not None:
-            rgba = button.get_rgba()
-            hex_val = self.gdk_to_hex(rgba)
-            settings["worldclock_outline_color"] = hex_val
-            for btn in self.all_worldclock_out_color_btns:
-                if btn != button: self.set_color_button_rgba(btn, hex_val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["worldclock_outline_color"] = hex_val
+                for btn in self.all_worldclock_out_color_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_worldclock_out_size_changed(self, spin, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = int(spin.get_value())
-            settings["worldclock_outline_size"] = val
-            for s in self.all_worldclock_out_size_spins:
-                if s != spin and int(s.get_value()) != val: s.set_value(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = int(spin.get_value())
+                settings["worldclock_outline_size"] = val
+                for s in self.all_worldclock_out_size_spins:
+                    if s != spin and int(s.get_value()) != val: s.set_value(val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
 
     def on_use_24h_toggled(self, switch, *args):
         settings = self.get_settings()
@@ -2079,8 +2242,28 @@ class TouchBarInfoAction(ActionBase):
             for c in self.all_date_fmt_combos:
                 if c != combo and c.get_selected() != val: c.set_selected(val)
             self.set_settings(settings)
-            self.last_rendered_key = ""
+            self.schedule_update_display()
+
+    def notify_visibility_change(self):
+        for cb in list(self.update_vis_callbacks):
+            try:
+                cb()
+            except Exception:
+                pass
+
+    def schedule_update_display(self):
+        self.last_rendered_key = ""
+        if not getattr(self, "_update_scheduled", False):
+            self._update_scheduled = True
+            GLib.idle_add(self._do_scheduled_update)
+
+    def _do_scheduled_update(self):
+        self._update_scheduled = False
+        try:
             self.update_display()
+        except Exception as e:
+            log.warning(f"TouchBarInfo: Scheduled update_display failed: {e}")
+        return GLib.SOURCE_REMOVE
 
     # --- Pango Font Resolver for PIL ---
     def get_font_from_desc(self, font_str: str, default_size: int = 25, scale_factor: float = 1.0):
