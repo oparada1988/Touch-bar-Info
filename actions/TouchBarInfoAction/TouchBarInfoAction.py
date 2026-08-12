@@ -221,32 +221,34 @@ class TouchBarInfoAction(ActionBase):
         ignored_prefixes = ("/boot", "/sys", "/proc", "/dev", "/run/user", "/var/lib/flatpak", "/var/lib/docker")
         ignored_fstypes = ["swap", "squashfs", "iso9660", "tmpfs", "devtmpfs", "overlay", "ramfs"]
 
-        def add_target(m: str, dev: str = ""):
+        def add_target(m: str, dev: str = "", source: str = ""):
             if not m or m in seen or m.startswith(ignored_prefixes):
                 return
-            if m in ["/", "/home"] or m.startswith(("/mnt", "/media", "/run/media")):
-                seen.add(m)
-                dev_node = os.path.basename(dev) if dev else ""
-                name = "System Root" if m == "/" else m.rstrip("/").split("/")[-1].capitalize()
-                disp = f"{name} — {m} ({dev_node})" if dev_node else f"{name} — {m}"
-                disks.append((m, disp))
+            seen.add(m)
+            dev_node = os.path.basename(dev) if dev else ""
+            name = "System Root" if m == "/" else (m.rstrip("/").split("/")[-1].capitalize() or m)
+            disp = f"{name} — {m} ({dev_node})" if dev_node else f"{name} — {m}"
+            disks.append((m, disp))
+            log.info(f"TouchBarInfo: Added disk mount [{source}]: {m} -> {disp}")
 
-        # Strategy 1: Host /proc/mounts
+        # 1. Host /proc/mounts
         try:
-            p = subprocess.run(['flatpak-spawn', '--host', 'cat', '/proc/mounts'], capture_output=True, text=True, timeout=2)
+            p = subprocess.run(['flatpak-spawn', '--host', 'cat', '/proc/mounts'], capture_output=True, text=True, timeout=3)
+            log.info(f"TouchBarInfo: Strategy 1 /proc/mounts exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines():
                     parts = line.split()
                     if len(parts) >= 3:
                         dev, m, fs = parts[0], parts[1], parts[2]
                         if dev.startswith('/dev/') and fs not in ignored_fstypes:
-                            add_target(m, dev)
+                            add_target(m, dev, "proc_mounts")
         except Exception as e:
             log.error(f"TouchBarInfo: Strategy 1 cat /proc/mounts error: {e}")
 
-        # Strategy 2: Host df -k
+        # 2. Host df -k
         try:
-            p = subprocess.run(['flatpak-spawn', '--host', 'df', '-k'], capture_output=True, text=True, timeout=2)
+            p = subprocess.run(['flatpak-spawn', '--host', 'df', '-k'], capture_output=True, text=True, timeout=3)
+            log.info(f"TouchBarInfo: Strategy 2 df -k exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines()[1:]:
                     parts = line.split()
@@ -254,13 +256,14 @@ class TouchBarInfoAction(ActionBase):
                         dev = parts[0]
                         m = parts[-1]
                         if dev.startswith('/dev/'):
-                            add_target(m, dev)
+                            add_target(m, dev, "df")
         except Exception as e:
             log.error(f"TouchBarInfo: Strategy 2 df error: {e}")
 
-        # Strategy 3: Host lsblk -r
+        # 3. Host lsblk -r
         try:
-            p = subprocess.run(['flatpak-spawn', '--host', 'lsblk', '-r', '-o', 'NAME,MOUNTPOINT,FSTYPE'], capture_output=True, text=True, timeout=2)
+            p = subprocess.run(['flatpak-spawn', '--host', 'lsblk', '-r', '-o', 'NAME,MOUNTPOINT,FSTYPE'], capture_output=True, text=True, timeout=3)
+            log.info(f"TouchBarInfo: Strategy 3 lsblk exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines()[1:]:
                     parts = line.split()
@@ -268,25 +271,26 @@ class TouchBarInfoAction(ActionBase):
                         dev_name, m = parts[0], parts[1]
                         fs = parts[2] if len(parts) >= 3 else 'ext4'
                         if fs not in ignored_fstypes:
-                            add_target(m, f'/dev/{dev_name}')
+                            add_target(m, f'/dev/{dev_name}', "lsblk")
         except Exception as e:
             log.error(f"TouchBarInfo: Strategy 3 lsblk error: {e}")
 
-        # Strategy 4: Host Directory Scan (/mnt, /media, /run/media)
+        # 4. Host Directory Scan (/mnt, /media, /run/media)
         try:
-            p = subprocess.run(['flatpak-spawn', '--host', 'ls', '-d', '/mnt/*', '/media/*', '/run/media/*/*'], capture_output=True, text=True, timeout=2)
+            p = subprocess.run(['flatpak-spawn', '--host', 'ls', '-d', '/mnt/*', '/media/*', '/run/media/*/*'], capture_output=True, text=True, timeout=3)
+            log.info(f"TouchBarInfo: Strategy 4 ls exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines():
                     path = line.strip()
                     if path and not path.startswith(('/proc', '/sys', '/dev')) and '*' not in path:
-                        add_target(path)
+                        add_target(path, "", "dir_scan")
         except Exception as e:
             log.error(f"TouchBarInfo: Strategy 4 directory scan error: {e}")
 
         if "/" not in seen:
-            add_target("/")
+            add_target("/", "", "default_root")
 
-        log.info(f"TouchBarInfo: get_system_disk_mounts discovered {len(disks)} mounts: {disks}")
+        log.info(f"TouchBarInfo: get_system_disk_mounts final discovered {len(disks)} mounts: {disks}")
         return disks
 
     # --- Weather Fetcher & WMO Mapping ---
