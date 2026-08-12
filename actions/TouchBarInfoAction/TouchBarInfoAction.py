@@ -218,8 +218,19 @@ class TouchBarInfoAction(ActionBase):
         disks = []
         seen = set()
 
-        ignored_mount_prefixes = ("/boot", "/run", "/sys", "/proc", "/dev", "/var/lib/flatpak", "/var/lib/docker")
-        ignored_fstypes = ["swap", "squashfs", "iso9660", "tmpfs", "devtmpfs", "overlay"]
+        ignored_prefixes = ("/boot", "/run", "/sys", "/proc", "/dev", "/etc", "/usr", "/var/lib/flatpak", "/var/lib/docker")
+        ignored_fstypes = ["swap", "squashfs", "iso9660", "tmpfs", "devtmpfs", "overlay", "ramfs"]
+
+        def is_valid_mount(mount: str) -> bool:
+            if not mount:
+                return False
+            if mount.startswith(ignored_prefixes):
+                return False
+            if mount.startswith("/home/") and mount != "/home":
+                return False
+            if mount.startswith("/var/") and mount != "/var":
+                return False
+            return True
 
         # Strategy 1: Host lsblk JSON query (Discovers physical partitions, LVM, USB, SD cards)
         lsblk_cmds = [
@@ -244,7 +255,7 @@ class TouchBarInfoAction(ActionBase):
                             if item.get("mountpoint"):
                                 raw_mounts.append(item.get("mountpoint"))
 
-                            valid_mounts = [m for m in raw_mounts if m and not m.startswith(ignored_mount_prefixes)]
+                            valid_mounts = [m for m in raw_mounts if is_valid_mount(m)]
 
                             for mount in valid_mounts:
                                 if mount not in seen and fstype not in ignored_fstypes:
@@ -273,13 +284,12 @@ class TouchBarInfoAction(ActionBase):
                         parts = line.split()
                         if len(parts) >= 6:
                             dev, mount = parts[0], parts[5]
-                            if not mount.startswith(ignored_mount_prefixes):
-                                if mount not in seen and not dev.startswith(('tmpfs', 'overlay', 'shm')):
-                                    seen.add(mount)
-                                    dev_node = os.path.basename(dev)
-                                    clean_name = "System Root" if mount == "/" else mount.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
-                                    disp_name = f"{clean_name} — {mount} ({dev_node})"
-                                    disks.append((mount, disp_name))
+                            if is_valid_mount(mount) and mount not in seen and not dev.startswith(('tmpfs', 'overlay', 'shm')):
+                                seen.add(mount)
+                                dev_node = os.path.basename(dev)
+                                clean_name = "System Root" if mount == "/" else mount.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
+                                disp_name = f"{clean_name} — {mount} ({dev_node})"
+                                disks.append((mount, disp_name))
             except Exception:
                 pass
 
@@ -292,27 +302,25 @@ class TouchBarInfoAction(ActionBase):
                     parts = line.split()
                     if len(parts) >= 3:
                         dev, mount, fstype = parts[0], parts[1], parts[2]
-                        if fstype not in ignored_fstypes:
-                            if not mount.startswith(ignored_mount_prefixes):
-                                if mount not in seen and (dev.startswith('/dev/') or mount in ['/', '/home']):
-                                    seen.add(mount)
-                                    dev_node = os.path.basename(dev)
-                                    clean_name = "System Root" if mount == "/" else mount.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
-                                    disp_name = f"{clean_name} — {mount} ({dev_node})"
-                                    disks.append((mount, disp_name))
+                        if fstype not in ignored_fstypes and is_valid_mount(mount):
+                            if mount not in seen and (dev.startswith('/dev/') or mount in ['/', '/home']):
+                                seen.add(mount)
+                                dev_node = os.path.basename(dev)
+                                clean_name = "System Root" if mount == "/" else mount.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
+                                disp_name = f"{clean_name} — {mount} ({dev_node})"
+                                disks.append((mount, disp_name))
         except Exception:
             pass
 
         # Strategy 4: psutil fallback
         try:
             for p in psutil.disk_partitions(all=False):
-                if not p.mountpoint.startswith(("/usr", "/app", "/var", "/etc", "/run", "/dev", "/sys", "/proc")):
-                    if p.mountpoint not in seen:
-                        seen.add(p.mountpoint)
-                        dev_node = os.path.basename(p.device)
-                        clean_name = "System Root" if p.mountpoint == "/" else p.mountpoint.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
-                        disp_name = f"{clean_name} — {p.mountpoint} ({dev_node})"
-                        disks.append((p.mountpoint, disp_name))
+                if is_valid_mount(p.mountpoint) and p.mountpoint not in seen:
+                    seen.add(p.mountpoint)
+                    dev_node = os.path.basename(p.device)
+                    clean_name = "System Root" if p.mountpoint == "/" else p.mountpoint.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
+                    disp_name = f"{clean_name} — {p.mountpoint} ({dev_node})"
+                    disks.append((p.mountpoint, disp_name))
         except Exception:
             pass
 
