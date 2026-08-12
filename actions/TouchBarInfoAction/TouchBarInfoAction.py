@@ -2349,36 +2349,46 @@ class TouchBarInfoAction(ActionBase):
 
         pct, used_gb, free_gb = self.get_disk_usage_host(mount_path)
 
-        if disk_mode == 2: # Mini bar graph
-            graph_box = (content_x, y_min + int(box_h * 0.25), x_max - margin_x, y_max - int(box_h * 0.25))
-            gx_min, gy_min, gx_max, gy_max = graph_box
+        if disk_mode == 2: # Mini bar graph with top title header
+            top_str = f"{disp_name} — {round(pct)}%"
+            bbox_t = draw.textbbox((0, 0), top_str, font=font_sub)
+            th = bbox_t[3] - bbox_t[1]
+
+            bar_h = max(8, int(box_h * 0.22))
+            spacing = max(2, int(box_h * 0.06))
+            total_h = th + spacing + bar_h
+
+            start_y = y_min + (box_h - total_h) / 2
+            top_y = start_y + (th / 2)
+            bar_y_min = int(start_y + th + spacing)
+            bar_y_max = bar_y_min + bar_h
+
+            gx_min = content_x
+            gx_max = x_max - margin_x
             gw = gx_max - gx_min
-            gh = gy_max - gy_min
+
+            # Render top disk name + percentage header
+            self.render_styled_text(draw, (gx_min + (gw / 2), top_y), top_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
             # Fill entire bar background with Emerald Green for Available Space
-            draw.rectangle([gx_min, gy_min, gx_max, gy_max], fill=(46, 204, 113, 220))
+            draw.rectangle([gx_min, bar_y_min, gx_max, bar_y_max], fill=(46, 204, 113, 220))
 
             # Fill left portion with Coral Red for Used Space
             fill_w = int(gw * (pct / 100.0))
             if fill_w > 0:
-                draw.rectangle([gx_min, gy_min, gx_min + fill_w, gy_max], fill=(231, 76, 60, 220))
+                draw.rectangle([gx_min, bar_y_min, gx_min + fill_w, bar_y_max], fill=(231, 76, 60, 220))
 
             # Clean silver border outline
-            draw.rectangle([gx_min, gy_min, gx_max, gy_max], outline=(200, 200, 200, 255), width=1)
+            draw.rectangle([gx_min, bar_y_min, gx_max, bar_y_max], outline=(200, 200, 200, 255), width=1)
+        elif disk_mode == 1: # Used / Free GB (Top: Disk Name, Bottom: Used/Free)
+            top_str = f"{disp_name}"
+            bot_str = f"{used_gb:.0f}G Used / {free_gb:.0f}G Free"
 
-            # Render disk name and percentage text centered over graph
-            graph_str = f"{disp_name} {round(pct)}%"
-            center_x = gx_min + (gw / 2)
-            center_y = gy_min + (gh / 2)
-            self.render_styled_text(draw, (center_x, center_y), graph_str, font_sub, True, fill_col, True, "#000000FF", 2, anchor="mm")
-        elif disk_mode == 1: # Used / Free GB
-            top_str = f"{disp_name} — {used_gb:.0f}G Used"
-            bot_str = f"{free_gb:.0f}G Free"
             bbox_t = draw.textbbox((0, 0), top_str, font=font_main)
             bbox_b = draw.textbbox((0, 0), bot_str, font=font_sub)
             th, bh = bbox_t[3] - bbox_t[1], bbox_b[3] - bbox_b[1]
             tw, bw = bbox_t[2] - bbox_t[0], bbox_b[2] - bbox_b[0]
-            center_x = content_x + (max(tw, bw) / 2)
+            center_x = content_x + ((x_max - margin_x - content_x) / 2)
 
             spacing = max(1, int(box_h * 0.04))
             total_h = th + spacing + bh
@@ -2388,11 +2398,24 @@ class TouchBarInfoAction(ActionBase):
 
             self.render_styled_text(draw, (center_x, top_y), top_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
             self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
-        else: # Percentage % with Clean Display Name
-            main_str = f"{disp_name} {round(pct)}%"
+        else: # Percentage % (Top: Disk Name, Bottom: Percentage Used)
+            top_str = f"{disp_name}"
+            bot_str = f"{round(pct)}% Used"
+
+            bbox_t = draw.textbbox((0, 0), top_str, font=font_main)
+            bbox_b = draw.textbbox((0, 0), bot_str, font=font_sub)
+            th, bh = bbox_t[3] - bbox_t[1], bbox_b[3] - bbox_b[1]
+            tw, bw = bbox_t[2] - bbox_t[0], bbox_b[2] - bbox_b[0]
             center_x = content_x + ((x_max - margin_x - content_x) / 2)
-            center_y = y_min + (box_h / 2)
-            self.render_styled_text(draw, (center_x, center_y), main_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+
+            spacing = max(1, int(box_h * 0.04))
+            total_h = th + spacing + bh
+            start_y = y_min + (box_h - total_h) / 2
+            top_y = start_y + (th / 2)
+            bot_y = start_y + th + spacing + (bh / 2)
+
+            self.render_styled_text(draw, (center_x, top_y), top_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
     def update_display(self) -> None:
         settings = self.get_settings() or {}
