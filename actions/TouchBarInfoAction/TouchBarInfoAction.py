@@ -2338,8 +2338,14 @@ class TouchBarInfoAction(ActionBase):
 
             # Clean silver border outline
             draw.rectangle([gx_min, gy_min, gx_max, gy_max], outline=(200, 200, 200, 255), width=1)
+
+            # Render disk name and percentage text centered over graph
+            graph_str = f"{disp_name} {round(pct)}%"
+            center_x = gx_min + (gw / 2)
+            center_y = gy_min + (gh / 2)
+            self.render_styled_text(draw, (center_x, center_y), graph_str, font_sub, True, fill_col, True, "#000000FF", 2, anchor="mm")
         elif disk_mode == 1: # Used / Free GB
-            top_str = f"{used_gb:.0f}G Used"
+            top_str = f"{disp_name} — {used_gb:.0f}G Used"
             bot_str = f"{free_gb:.0f}G Free"
             bbox_t = draw.textbbox((0, 0), top_str, font=font_main)
             bbox_b = draw.textbbox((0, 0), bot_str, font=font_sub)
