@@ -1458,18 +1458,30 @@ class TouchBarInfoAction(ActionBase):
         settings = self.get_settings() or {}
         curr_path = settings.get("disk_mount_path", "/")
 
+        if curr_path and not any(m[0] == curr_path for m in self.disk_mounts):
+            base = os.path.basename(curr_path.rstrip("/"))
+            clean_name = base.capitalize() if base else curr_path
+            self.disk_mounts.append((curr_path, f"Custom: {clean_name} — {curr_path}"))
+
+        display_names = [d_name for _, d_name in self.disk_mounts]
+
         matched_idx = 0
+        for idx, (m_path, _) in enumerate(self.disk_mounts):
+            if m_path == curr_path:
+                matched_idx = idx
+                break
+
         for combo in self.all_disk_mount_combos:
-            new_model = Gtk.StringList()
-            for idx, (m_path, d_name) in enumerate(self.disk_mounts):
-                new_model.append(d_name)
-                if m_path == curr_path:
-                    matched_idx = idx
-            combo.set_model(new_model)
+            model = combo.get_model()
+            if isinstance(model, Gtk.StringList):
+                model.splice(0, model.get_n_items(), display_names)
             if 0 <= matched_idx < len(self.disk_mounts):
                 combo.set_selected(matched_idx)
+            disp_sub = self.disk_mounts[matched_idx][1] if 0 <= matched_idx < len(self.disk_mounts) else "System Disks"
+            combo.set_subtitle(f"Selected: {disp_sub} (Refreshed {len(self.disk_mounts)} disks)")
 
-        self.trigger_redraw()
+        self.last_rendered_key = ""
+        self.update_display()
 
     def on_disk_mount_changed(self, combo, *args):
         settings = self.get_settings()
@@ -1482,6 +1494,7 @@ class TouchBarInfoAction(ActionBase):
                 for c in self.all_disk_mount_combos:
                     if c != combo and c.get_selected() != val:
                         c.set_selected(val)
+                    c.set_subtitle(f"Selected: {m_disp}")
                 self.set_settings(settings)
                 self.update_disk_browse_subtitles(m_path)
                 self.last_rendered_key = ""
