@@ -2,6 +2,20 @@
 
 Touch Bar Info is a feature-rich, full-canvas information display plugin built for StreamController on the Elgato Stream Deck +. It turns the 800x100 touch strip into a clean, customizable desktop dashboard for monitoring system performance, weather, time, and disk usage in real time.
 
+> **Development Notice**: This plugin is currently under active, heavy development. Features, user controls, and rendering options are subject to ongoing updates and refinements.
+
+---
+
+## Touch Bar Layout & Sections
+
+The 800x100 Touch Bar canvas is divided into three customizable modular sections: **Section A** (Left), **Section B** (Center), and **Section C** (Right).
+
+![Touch Bar Sections Breakdown](assets/touchbar-sections.png)
+
+Each section can be individually configured in two ways:
+- **Full Slot (Single Widget)**: Spans the full height of the section for large, detailed displays (such as stacked date and time or full-height performance monitors).
+- **Split Slot (Dual Sub-slots)**: Splits the section vertically into Top and Bottom sub-slots, allowing you to stack two independent widgets (such as Date on top and Weather on bottom).
+
 ---
 
 ## Available Widgets
@@ -40,7 +54,7 @@ Monitors any physical partition or directory path (such as System Root `/`, Home
 
 ## Key Features & Customization
 
-- **Modular 3-Section Grid**: Divide the Touch Bar canvas into three sections (A, B, and C). Each section can host either a full-height single widget or split into dual top and bottom sub-slots.
+- **Modular 3-Section Grid**: Flexible layout control across Sections A, B, and C with full-height or split sub-slot options.
 - **Custom Background Wallpapers**: Render custom PNG or JPG wallpaper images behind all Touch Bar widgets.
 - **Typography & Styling Controls**: Customize fonts, text fill colors, and outline strokes for Date, Time, and Weather widgets.
 - **Multi-Input Support**: Works across Touchscreen (`sd-plus`), Dials, and Keys.
