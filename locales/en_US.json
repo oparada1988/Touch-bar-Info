@@ -49,7 +49,7 @@
     "actions.touchbar-info.worldclock-custom-tz.subtitle": "Enter IANA timezone (e.g. Europe/Paris, Asia/Tokyo)",
     "actions.touchbar-info.worldclock-show-seconds.label": "Show Seconds",
     "actions.touchbar-info.worldclock-show-seconds.subtitle": "Include seconds in the world clock display",
-    "actions.touchbar-info.worldclock-show-offset.label": "Show Time Offset & Day",
+    "actions.touchbar-info.worldclock-show-offset.label": "Show Time Offset &amp; Day",
     "actions.touchbar-info.worldclock-show-offset.subtitle": "Display time difference relative to local time (e.g. +5h, Tomorrow)",
     "actions.touchbar-info.font-chooser.label": "Font and Size Picker",
     "actions.touchbar-info.font-chooser.subtitle": "Choose font family, style, and size using GTK font picker",

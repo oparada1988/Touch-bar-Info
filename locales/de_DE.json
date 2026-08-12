@@ -49,7 +49,7 @@
     "actions.touchbar-info.worldclock-custom-tz.subtitle": "IANA-Zeitzone eingeben (z. B. Europe/Paris, Asia/Tokyo)",
     "actions.touchbar-info.worldclock-show-seconds.label": "Sekunden anzeigen",
     "actions.touchbar-info.worldclock-show-seconds.subtitle": "Sekunden in der Weltuhr-Anzeige einschließen",
-    "actions.touchbar-info.worldclock-show-offset.label": "Zeitverschiebung & Tag anzeigen",
+    "actions.touchbar-info.worldclock-show-offset.label": "Zeitverschiebung &amp; Tag anzeigen",
     "actions.touchbar-info.worldclock-show-offset.subtitle": "Zeitunterschied im Vergleich zur Ortszeit anzeigen (z. B. +5h, Morgen)",
     "actions.touchbar-info.font-chooser.label": "Schriftart und Schriftgröße",
     "actions.touchbar-info.font-chooser.subtitle": "Schriftfamilie, Stil und Größe über die GTK-Schriftauswahl wählen",
