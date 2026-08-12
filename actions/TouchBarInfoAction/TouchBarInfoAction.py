@@ -40,6 +40,83 @@ class TouchBarInfoAction(ActionBase):
         self.net_tx_rate = 0.0
         self.net_rx_rate = 0.0
         self.process_count = 0
+        self.init_options()
+
+    def init_options(self):
+        self.date_format_options = [
+            ("%b. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.mon-day-year", "Mon. Day, Year (Aug. 11, 2026)")),
+            ("%a. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.dow-day-year", "DayOfWeek. Day, Year (Tue. 11, 2026)")),
+            ("%a. %b. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.dow-mon-day-year", "DayOfWeek. Mon. Day, Year (Tue. Aug. 11, 2026)")),
+            ("%Y-%b-%d", self.get_locale_text("actions.touchbar-info.date-format.year-mon-day", "Year-Mon-Day (2026-Aug-11)"))
+        ]
+        self.mode_options = [
+            self.get_locale_text("actions.touchbar-info.mode.full", "1 Widget (Full Section — 100px)"),
+            self.get_locale_text("actions.touchbar-info.mode.split", "2 Widgets (Split Top/Bottom — 50px each)")
+        ]
+        self.full_widget_options = [
+            self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
+            self.get_locale_text("actions.touchbar-info.widget.stacked", "Stacked Date and Time"),
+            self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
+            self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
+            self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
+            self.get_locale_text("actions.touchbar-info.widget.cpu", "CPU Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.net", "Network Activity"),
+            self.get_locale_text("actions.touchbar-info.widget.ram", "RAM Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock")
+        ]
+        self.split_widget_options = [
+            self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
+            self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
+            self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
+            self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
+            self.get_locale_text("actions.touchbar-info.widget.cpu", "CPU Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.net", "Network Activity"),
+            self.get_locale_text("actions.touchbar-info.widget.ram", "RAM Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock")
+        ]
+        self.worldclock_cities = [
+            ("London", "Europe/London"),
+            ("New York", "America/New_York"),
+            ("Los Angeles", "America/Los_Angeles"),
+            ("Chicago", "America/Chicago"),
+            ("Paris", "Europe/Paris"),
+            ("Berlin", "Europe/Berlin"),
+            ("Tokyo", "Asia/Tokyo"),
+            ("Hong Kong", "Asia/Hong_Kong"),
+            ("Sydney", "Australia/Sydney"),
+            ("Dubai", "Asia/Dubai"),
+            ("UTC", "UTC"),
+            ("Custom Timezone", "custom")
+        ]
+        self.cpu_mode_options = [
+            self.get_locale_text("actions.touchbar-info.cpu-mode.pct", "Percentage (%)"),
+            self.get_locale_text("actions.touchbar-info.cpu-mode.pct-procs", "Percentage and Process Count"),
+            self.get_locale_text("actions.touchbar-info.cpu-mode.graph", "Live CPU Graph")
+        ]
+        self.net_mode_options = [
+            self.get_locale_text("actions.touchbar-info.net-mode.rates", "Download / Upload Rates"),
+            self.get_locale_text("actions.touchbar-info.net-mode.graph", "Live Network Graph")
+        ]
+        self.net_unit_options = [
+            "Bytes (KB/s, MB/s)",
+            "Bits (Kbit/s, Mbit/s)"
+        ]
+        self.ram_mode_options = [
+            self.get_locale_text("actions.touchbar-info.ram-mode.pct", "Percentage (%)"),
+            self.get_locale_text("actions.touchbar-info.ram-mode.used-total", "Used / Total Memory (GB)"),
+            self.get_locale_text("actions.touchbar-info.ram-mode.graph", "Live RAM Graph")
+        ]
+        self.disk_mode_options = [
+            self.get_locale_text("actions.touchbar-info.disk-mode.pct", "Percentage (%)"),
+            self.get_locale_text("actions.touchbar-info.disk-mode.used-free", "Used / Free Space (GB)"),
+            self.get_locale_text("actions.touchbar-info.disk-mode.graph", "Disk Usage Graph")
+        ]
+        self.disk_mounts = self.get_system_disk_mounts()
+        self.weather_units = ["Fahrenheit (°F)", "Celsius (°C)"]
+        self.weather_intervals = ["5 Minutes", "10 Minutes", "15 Minutes", "30 Minutes", "60 Minutes"]
+        self.search_results_data = []
 
     def get_locale_text(self, key: str, default: str) -> str:
         if hasattr(self.plugin_base, "lm") and self.plugin_base.lm is not None:
@@ -313,97 +390,7 @@ class TouchBarInfoAction(ActionBase):
 
     def get_config_rows(self) -> "list[Adw.PreferencesRow]":
         self.update_vis_callbacks = []
-
-        # Date Format Options
-        self.date_format_options = [
-            ("%b. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.mon-day-year", "Mon. Day, Year (Aug. 11, 2026)")),
-            ("%a. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.dow-day-year", "DayOfWeek. Day, Year (Tue. 11, 2026)")),
-            ("%a. %b. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.dow-mon-day-year", "DayOfWeek. Mon. Day, Year (Tue. Aug. 11, 2026)")),
-            ("%Y-%b-%d", self.get_locale_text("actions.touchbar-info.date-format.year-mon-day", "Year-Mon-Day (2026-Aug-11)"))
-        ]
-
-        # Mode Options
-        self.mode_options = [
-            self.get_locale_text("actions.touchbar-info.mode.full", "1 Widget (Full Section — 100px)"),
-            self.get_locale_text("actions.touchbar-info.mode.split", "2 Widgets (Split Top/Bottom — 50px each)")
-        ]
-
-        # Widget choices
-        self.full_widget_options = [
-            self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
-            self.get_locale_text("actions.touchbar-info.widget.stacked", "Stacked Date and Time"),
-            self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
-            self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
-            self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
-            self.get_locale_text("actions.touchbar-info.widget.cpu", "CPU Usage"),
-            self.get_locale_text("actions.touchbar-info.widget.net", "Network Activity"),
-            self.get_locale_text("actions.touchbar-info.widget.ram", "RAM Usage"),
-            self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage"),
-            self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock")
-        ]
-        self.split_widget_options = [
-            self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
-            self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
-            self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
-            self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
-            self.get_locale_text("actions.touchbar-info.widget.cpu", "CPU Usage"),
-            self.get_locale_text("actions.touchbar-info.widget.net", "Network Activity"),
-            self.get_locale_text("actions.touchbar-info.widget.ram", "RAM Usage"),
-            self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage"),
-            self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock")
-        ]
-
-        # World Clock Preset Cities
-        self.worldclock_cities = [
-            ("London", "Europe/London"),
-            ("New York", "America/New_York"),
-            ("Los Angeles", "America/Los_Angeles"),
-            ("Chicago", "America/Chicago"),
-            ("Paris", "Europe/Paris"),
-            ("Berlin", "Europe/Berlin"),
-            ("Tokyo", "Asia/Tokyo"),
-            ("Hong Kong", "Asia/Hong_Kong"),
-            ("Sydney", "Australia/Sydney"),
-            ("Dubai", "Asia/Dubai"),
-            ("UTC", "UTC"),
-            ("Custom Timezone", "custom")
-        ]
-
-        # CPU Mode Options
-        self.cpu_mode_options = [
-            self.get_locale_text("actions.touchbar-info.cpu-mode.pct", "Percentage (%)"),
-            self.get_locale_text("actions.touchbar-info.cpu-mode.pct-procs", "Percentage and Process Count"),
-            self.get_locale_text("actions.touchbar-info.cpu-mode.graph", "Live CPU Graph")
-        ]
-
-        # Network Mode & Unit Options
-        self.net_mode_options = [
-            self.get_locale_text("actions.touchbar-info.net-mode.rates", "Download / Upload Rates"),
-            self.get_locale_text("actions.touchbar-info.net-mode.graph", "Live Network Graph")
-        ]
-        self.net_unit_options = [
-            "Bytes (KB/s, MB/s)",
-            "Bits (Kbit/s, Mbit/s)"
-        ]
-
-        # RAM Mode Options
-        self.ram_mode_options = [
-            self.get_locale_text("actions.touchbar-info.ram-mode.pct", "Percentage (%)"),
-            self.get_locale_text("actions.touchbar-info.ram-mode.used-total", "Used / Total Memory (GB)"),
-            self.get_locale_text("actions.touchbar-info.ram-mode.graph", "Live RAM Graph")
-        ]
-
-        # Disk Mode & Mount Options
-        self.disk_mode_options = [
-            self.get_locale_text("actions.touchbar-info.disk-mode.pct", "Percentage (%)"),
-            self.get_locale_text("actions.touchbar-info.disk-mode.used-free", "Used / Free Space (GB)"),
-            self.get_locale_text("actions.touchbar-info.disk-mode.graph", "Disk Usage Graph")
-        ]
-        self.disk_mounts = self.get_system_disk_mounts()
-
-        # Weather Options
-        self.weather_units = ["Fahrenheit (°F)", "Celsius (°C)"]
-        self.weather_intervals = ["5 Minutes", "10 Minutes", "15 Minutes", "30 Minutes", "60 Minutes"]
+        self.init_options()
 
         # Control Widget trackers for global syncing
         self.all_date_fmt_combos = []
@@ -457,325 +444,7 @@ class TouchBarInfoAction(ActionBase):
 
         self.search_results_data = []
 
-        # Helper to create Date controls
-        def build_date_controls():
-            fmt_model = Gtk.StringList()
-            for _, label in self.date_format_options: fmt_model.append(label)
-            fmt_combo = Adw.ComboRow(
-                model=fmt_model,
-                title=self.get_locale_text("actions.touchbar-info.date-format.label", "Date Format"),
-                subtitle=self.get_locale_text("actions.touchbar-info.date-format.subtitle", "Format style for date text")
-            )
 
-            font_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
-                subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
-            )
-            font_btn = Gtk.FontButton.new()
-            font_btn.set_use_font(False)
-            font_btn.set_use_size(False)
-            font_btn.set_valign(Gtk.Align.CENTER)
-            font_btn.set_hexpand(False)
-            font_row.add_suffix(font_btn)
-
-            fill_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
-                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
-            )
-
-            fill_color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for text interior fill")
-            )
-            fill_color_btn = Gtk.ColorButton()
-            fill_color_btn.set_valign(Gtk.Align.CENTER)
-            fill_color_row.add_suffix(fill_color_btn)
-
-            out_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
-                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
-            )
-
-            out_color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for text stroke outline")
-            )
-            out_color_btn = Gtk.ColorButton()
-            out_color_btn.set_valign(Gtk.Align.CENTER)
-            out_color_row.add_suffix(out_color_btn)
-
-            out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
-            out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
-            out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
-
-            self.all_date_fmt_combos.append(fmt_combo)
-            self.all_date_font_btns.append(font_btn)
-            self.all_date_fill_switches.append(fill_sw)
-            self.all_date_fill_color_btns.append(fill_color_btn)
-            self.all_date_out_switches.append(out_sw)
-            self.all_date_out_color_btns.append(out_color_btn)
-            self.all_date_out_size_spins.append(out_size_spin)
-
-            return {
-                "fmt_combo": fmt_combo,
-                "font_btn": font_btn,
-                "fill_sw": fill_sw,
-                "fill_color_btn": fill_color_btn,
-                "out_sw": out_sw,
-                "out_color_btn": out_color_btn,
-                "out_size_spin": out_size_spin,
-                "all_rows": [fmt_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
-            }
-
-        # Helper to create Time controls
-        def build_time_controls():
-            use_24h_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.use-24h.label", "Use 24-Hour Clock"),
-                subtitle=self.get_locale_text("actions.touchbar-info.use-24h.subtitle", "Switch between 12-hour (AM/PM) and 24-hour time format")
-            )
-            sec_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.show-seconds.label", "Show Seconds"),
-                subtitle=self.get_locale_text("actions.touchbar-info.show-seconds.subtitle", "Include seconds in the displayed time")
-            )
-
-            font_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
-                subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
-            )
-            font_btn = Gtk.FontButton.new()
-            font_btn.set_use_font(False)
-            font_btn.set_use_size(False)
-            font_btn.set_valign(Gtk.Align.CENTER)
-            font_btn.set_hexpand(False)
-            font_row.add_suffix(font_btn)
-
-            fill_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
-                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
-            )
-
-            fill_color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for text interior fill")
-            )
-            fill_color_btn = Gtk.ColorButton()
-            fill_color_btn.set_valign(Gtk.Align.CENTER)
-            fill_color_row.add_suffix(fill_color_btn)
-
-            out_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
-                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
-            )
-
-            out_color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for text stroke outline")
-            )
-            out_color_btn = Gtk.ColorButton()
-            out_color_btn.set_valign(Gtk.Align.CENTER)
-            out_color_row.add_suffix(out_color_btn)
-
-            out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
-            out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
-            out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
-
-            self.all_time_24h_switches.append(use_24h_sw)
-            self.all_time_sec_switches.append(sec_sw)
-            self.all_time_font_btns.append(font_btn)
-            self.all_time_fill_switches.append(fill_sw)
-            self.all_time_fill_color_btns.append(fill_color_btn)
-            self.all_time_out_switches.append(out_sw)
-            self.all_time_out_color_btns.append(out_color_btn)
-            self.all_time_out_size_spins.append(out_size_spin)
-
-            return {
-                "use_24h_sw": use_24h_sw,
-                "sec_sw": sec_sw,
-                "font_btn": font_btn,
-                "fill_sw": fill_sw,
-                "fill_color_btn": fill_color_btn,
-                "out_sw": out_sw,
-                "out_color_btn": out_color_btn,
-                "out_size_spin": out_size_spin,
-                "all_rows": [use_24h_sw, sec_sw, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
-            }
-
-        # Helper to create Weather controls
-        def build_weather_controls():
-            loc_entry = Adw.EntryRow(
-                title=self.get_locale_text("actions.touchbar-info.weather-location.label", "City / Location Search")
-            )
-
-            res_combo = Adw.ComboRow(
-                title=self.get_locale_text("actions.touchbar-info.weather-results.label", "Select Matching Location"),
-                subtitle=self.get_locale_text("actions.touchbar-info.weather-results.subtitle", "Choose city from Open-Meteo search results")
-            )
-            res_combo.set_visible(False)
-
-            unit_model = Gtk.StringList()
-            for u in self.weather_units: unit_model.append(u)
-            unit_combo = Adw.ComboRow(
-                model=unit_model,
-                title=self.get_locale_text("actions.touchbar-info.weather-unit.label", "Temperature Unit"),
-                subtitle=self.get_locale_text("actions.touchbar-info.weather-unit.subtitle", "Select Fahrenheit (°F) or Celsius (°C)")
-            )
-
-            ref_model = Gtk.StringList()
-            for r in self.weather_intervals: ref_model.append(r)
-            ref_combo = Adw.ComboRow(
-                model=ref_model,
-                title=self.get_locale_text("actions.touchbar-info.weather-refresh.label", "Refresh Interval"),
-                subtitle=self.get_locale_text("actions.touchbar-info.weather-refresh.subtitle", "Automatic weather update frequency")
-            )
-
-            font_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
-                subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
-            )
-            font_btn = Gtk.FontButton.new()
-            font_btn.set_use_font(False)
-            font_btn.set_use_size(False)
-            font_btn.set_valign(Gtk.Align.CENTER)
-            font_btn.set_hexpand(False)
-            font_row.add_suffix(font_btn)
-
-            fill_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
-                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
-            )
-
-            fill_color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for text interior fill")
-            )
-            fill_color_btn = Gtk.ColorButton()
-            fill_color_btn.set_valign(Gtk.Align.CENTER)
-            fill_color_row.add_suffix(fill_color_btn)
-
-            out_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
-                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
-            )
-
-            out_color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for text stroke outline")
-            )
-            out_color_btn = Gtk.ColorButton()
-            out_color_btn.set_valign(Gtk.Align.CENTER)
-            out_color_row.add_suffix(out_color_btn)
-
-            out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
-            out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
-            out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
-
-            self.all_weather_loc_entries.append(loc_entry)
-            self.all_weather_res_combos.append(res_combo)
-            self.all_weather_unit_combos.append(unit_combo)
-            self.all_weather_ref_combos.append(ref_combo)
-            self.all_weather_font_btns.append(font_btn)
-            self.all_weather_fill_switches.append(fill_sw)
-            self.all_weather_fill_color_btns.append(fill_color_btn)
-            self.all_weather_out_switches.append(out_sw)
-            self.all_weather_out_color_btns.append(out_color_btn)
-            self.all_weather_out_size_spins.append(out_size_spin)
-
-            return {
-                "loc_entry": loc_entry,
-                "res_combo": res_combo,
-                "unit_combo": unit_combo,
-                "ref_combo": ref_combo,
-                "font_btn": font_btn,
-                "fill_sw": fill_sw,
-                "fill_color_btn": fill_color_btn,
-                "out_sw": out_sw,
-                "out_color_btn": out_color_btn,
-                "out_size_spin": out_size_spin,
-                "all_rows": [loc_entry, res_combo, unit_combo, ref_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
-            }
-
-        # Helper to create CPU controls
-        def build_cpu_controls():
-            mode_model = Gtk.StringList()
-            for opt in self.cpu_mode_options: mode_model.append(opt)
-            mode_combo = Adw.ComboRow(
-                model=mode_model,
-                title=self.get_locale_text("actions.touchbar-info.cpu-mode.label", "CPU Display Mode"),
-                subtitle=self.get_locale_text("actions.touchbar-info.cpu-mode.subtitle", "Choose percentage, processes, or live graph")
-            )
-            self.all_cpu_mode_combos.append(mode_combo)
-            return {"mode_combo": mode_combo, "all_rows": [mode_combo]}
-
-        # Helper to create Network controls
-        def build_net_controls():
-            mode_model = Gtk.StringList()
-            for opt in self.net_mode_options: mode_model.append(opt)
-            mode_combo = Adw.ComboRow(
-                model=mode_model,
-                title=self.get_locale_text("actions.touchbar-info.net-mode.label", "Network Display Mode"),
-                subtitle=self.get_locale_text("actions.touchbar-info.net-mode.subtitle", "Choose download/upload rates or live graph")
-            )
-
-            unit_model = Gtk.StringList()
-            for opt in self.net_unit_options: unit_model.append(opt)
-            unit_combo = Adw.ComboRow(
-                model=unit_model,
-                title=self.get_locale_text("actions.touchbar-info.net-unit.label", "Network Speed Unit"),
-                subtitle=self.get_locale_text("actions.touchbar-info.net-unit.subtitle", "Choose Bytes (KB/s, MB/s) or Bits (Kbit/s, Mbit/s)")
-            )
-
-            self.all_net_mode_combos.append(mode_combo)
-            self.all_net_unit_combos.append(unit_combo)
-            return {"mode_combo": mode_combo, "unit_combo": unit_combo, "all_rows": [mode_combo, unit_combo]}
-
-        # Helper to create RAM controls
-        def build_ram_controls():
-            mode_model = Gtk.StringList()
-            for opt in self.ram_mode_options: mode_model.append(opt)
-            mode_combo = Adw.ComboRow(
-                model=mode_model,
-                title=self.get_locale_text("actions.touchbar-info.ram-mode.label", "RAM Display Mode"),
-                subtitle=self.get_locale_text("actions.touchbar-info.ram-mode.subtitle", "Choose percentage, GB used/total, or live graph")
-            )
-            self.all_ram_mode_combos.append(mode_combo)
-            return {"mode_combo": mode_combo, "all_rows": [mode_combo]}
-
-        # Helper to create Disk controls
-        def build_disk_controls():
-            if not hasattr(self, "disk_mounts") or not self.disk_mounts or len(self.disk_mounts) <= 1 or self.disk_mounts[0][0].startswith("/home"):
-                fresh = self.get_system_disk_mounts()
-                if fresh:
-                    self.disk_mounts = fresh
-
-            mount_model = Gtk.StringList()
-            for m_path, m_disp in self.disk_mounts: mount_model.append(m_disp)
-            mount_combo = Adw.ComboRow(
-                model=mount_model,
-                title=self.get_locale_text("actions.touchbar-info.disk-select.label", "System Disk Mount"),
-                subtitle=self.get_locale_text("actions.touchbar-info.disk-select.subtitle", "Select system disk partition to monitor")
-            )
-
-            browse_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.disk-browse.label", "Browse Custom Mount Directory"),
-                subtitle=self.get_locale_text("actions.touchbar-info.disk-browse.subtitle", "Visually choose any partition or folder path")
-            )
-            browse_btn = Gtk.Button(label=self.get_locale_text("actions.touchbar-info.disk-browse.choose", "Browse..."))
-            browse_btn.set_valign(Gtk.Align.CENTER)
-            browse_btn.connect("clicked", self.on_browse_disk_mount_clicked)
-            browse_row.add_suffix(browse_btn)
-
-            mode_model = Gtk.StringList()
-            for opt in self.disk_mode_options: mode_model.append(opt)
-            mode_combo = Adw.ComboRow(
-                model=mode_model,
-                title=self.get_locale_text("actions.touchbar-info.disk-mode.label", "Disk Display Mode"),
-                subtitle=self.get_locale_text("actions.touchbar-info.disk-mode.subtitle", "Choose percentage, GB used/free, or mini graph")
-            )
-
-            self.all_disk_mount_combos.append(mount_combo)
-            self.all_disk_mode_combos.append(mode_combo)
-            self.all_disk_browse_rows.append(browse_row)
-            return {"mount_combo": mount_combo, "mode_combo": mode_combo, "browse_row": browse_row, "all_rows": [mount_combo, browse_row, mode_combo]}
 
         # Helper to create Date controls
         def build_date_controls():
@@ -1090,7 +759,7 @@ class TouchBarInfoAction(ActionBase):
             )
 
             offset_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.worldclock-show-offset.label", "Show Time Offset & Day"),
+                title=self.get_locale_text("actions.touchbar-info.worldclock-show-offset.label", "Show Time Offset and Day"),
                 subtitle=self.get_locale_text("actions.touchbar-info.worldclock-show-offset.subtitle", "Display time difference relative to local time (e.g. +5h, Tomorrow)")
             )
 
@@ -1403,9 +1072,12 @@ class TouchBarInfoAction(ActionBase):
 
             # Connect Sub-switch Signals to update_visibility
             for ctrls in [full_date_ctrls, full_time_ctrls, full_weather_ctrls, full_worldclock_ctrls, top_date_ctrls, top_time_ctrls, top_weather_ctrls, top_worldclock_ctrls, bot_date_ctrls, bot_time_ctrls, bot_weather_ctrls, bot_worldclock_ctrls]:
-                ctrls["city_combo"].connect("notify::selected", lambda *a: update_visibility())
-                ctrls["fill_sw"].connect("notify::active", lambda *a: update_visibility())
-                ctrls["out_sw"].connect("notify::active", lambda *a: update_visibility())
+                if "city_combo" in ctrls:
+                    ctrls["city_combo"].connect("notify::selected", lambda *a: update_visibility())
+                if "fill_sw" in ctrls:
+                    ctrls["fill_sw"].connect("notify::active", lambda *a: update_visibility())
+                if "out_sw" in ctrls:
+                    ctrls["out_sw"].connect("notify::active", lambda *a: update_visibility())
 
             self.update_vis_callbacks.append(update_visibility)
             update_visibility()

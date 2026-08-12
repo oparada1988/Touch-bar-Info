@@ -37,6 +37,13 @@ A high-visibility digital clock display with customizable typography, colors, an
 ### Real-Time Weather
 Provides live temperature, weather conditions, and location info retrieved automatically via Open-Meteo.
 
+### World Clock
+Displays a real-time digital clock for any global location with automatic time difference calculations:
+- **Preset Cities**: Quick selection for major cities (London, New York, Los Angeles, Chicago, Paris, Berlin, Tokyo, Hong Kong, Sydney, Dubai, UTC).
+- **Custom IANA Timezones**: Full support for any custom IANA timezone string (e.g. `America/New_York`, `Asia/Tokyo`, `Europe/Paris`) with custom city labels.
+- **Time Offset & Day Indicator**: Displays time difference relative to local time along with day indicators (e.g., `+5h, Tomorrow` or `-3h`).
+- **Full Typography & Styling**: Custom GTK font selector, font colors, and stroke outlines.
+
 ### CPU Monitor
 Tracks live processor load percentage alongside an optional real-time utilization graph.
 
@@ -60,8 +67,9 @@ Monitors any physical partition or directory path (such as System Root `/`, Home
 ## Key Features & Customization
 
 - **Modular 3-Section Grid**: Flexible layout control across Sections A, B, and C with full-height or split sub-slot options.
+- **World Clock Integration**: Monitor multiple global timezones with custom labels and relative time offsets (`+5h`, `Tomorrow`).
 - **Custom Background Wallpapers**: Render custom PNG or JPG wallpaper images behind all Touch Bar widgets.
-- **Typography & Styling Controls**: Customize fonts, text fill colors, and outline strokes for Date, Time, and Weather widgets.
+- **Typography & Styling Controls**: Customize fonts, text fill colors, and outline strokes for Date, Time, Weather, and World Clock widgets.
 - **Multi-Input Support**: Works across Touchscreen (`sd-plus`), Dials, and Keys.
 
 ---
