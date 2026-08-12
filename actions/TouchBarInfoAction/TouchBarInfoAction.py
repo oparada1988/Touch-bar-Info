@@ -2269,11 +2269,14 @@ class TouchBarInfoAction(ActionBase):
             self.render_styled_text(draw, (center_x, center_y), main_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
     def get_disk_usage_host(self, mount_path: str) -> tuple[float, float, float]:
-        for df_bin in ['/usr/bin/df', 'df']:
+        if not mount_path:
+            mount_path = "/"
+        import shutil
+        # 1. Native df query first
+        for df_bin in ["df", "/usr/bin/df"]:
             try:
-                cmd = ['flatpak-spawn', '--host', df_bin, '-B1', mount_path]
-                p = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
-                if p.stdout:
+                p = subprocess.run([df_bin, "-B1", mount_path], capture_output=True, text=True, timeout=2)
+                if p.returncode == 0 and p.stdout:
                     lines = p.stdout.strip().splitlines()
                     if len(lines) >= 2:
                         parts = lines[-1].split()
@@ -2281,12 +2284,33 @@ class TouchBarInfoAction(ActionBase):
                             total_b = float(parts[1])
                             used_b = float(parts[2])
                             free_b = float(parts[3])
-                            pct_str = parts[4].rstrip('%')
-                            pct = float(pct_str) if pct_str.replace('.', '', 1).isdigit() else (used_b / max(1.0, total_b)) * 100.0
+                            pct_str = parts[4].rstrip("%")
+                            pct = float(pct_str) if pct_str.replace(".", "", 1).isdigit() else (used_b / max(1.0, total_b)) * 100.0
                             return pct, used_b / (1024**3), free_b / (1024**3)
             except Exception:
                 pass
 
+        # 2. Host flatpak-spawn fallback if running inside Flatpak
+        if shutil.which("flatpak-spawn"):
+            for df_bin in ["df", "/usr/bin/df"]:
+                try:
+                    cmd = ["flatpak-spawn", "--host", df_bin, "-B1", mount_path]
+                    p = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+                    if p.returncode == 0 and p.stdout:
+                        lines = p.stdout.strip().splitlines()
+                        if len(lines) >= 2:
+                            parts = lines[-1].split()
+                            if len(parts) >= 5:
+                                total_b = float(parts[1])
+                                used_b = float(parts[2])
+                                free_b = float(parts[3])
+                                pct_str = parts[4].rstrip("%")
+                                pct = float(pct_str) if pct_str.replace(".", "", 1).isdigit() else (used_b / max(1.0, total_b)) * 100.0
+                                return pct, used_b / (1024**3), free_b / (1024**3)
+                except Exception:
+                    pass
+
+        # 3. psutil fallback
         try:
             du = psutil.disk_usage(mount_path)
             return du.percent, du.used / (1024**3), du.free / (1024**3)
@@ -2316,6 +2340,9 @@ class TouchBarInfoAction(ActionBase):
 
         if not mount_path or mount_path == "/":
             disp_name = "System Root"
+        elif mount_path.startswith("/home"):
+            base = os.path.basename(mount_path.rstrip("/"))
+            disp_name = f"Home ({base})" if base and base != "home" else "Home"
         else:
             base = os.path.basename(mount_path.rstrip("/"))
             disp_name = base.capitalize() if base else mount_path
