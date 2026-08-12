@@ -1434,11 +1434,6 @@ class TouchBarInfoAction(ActionBase):
         settings = self.get_settings() or {}
         curr_path = settings.get("disk_mount_path", "/")
 
-        if curr_path and not any(m[0] == curr_path for m in self.disk_mounts):
-            base = os.path.basename(curr_path.rstrip("/"))
-            clean_name = base.capitalize() if base else curr_path
-            self.disk_mounts.append((curr_path, f"Custom: {clean_name} — {curr_path}"))
-
         display_names = [d_name for _, d_name in self.disk_mounts]
 
         matched_idx = 0
