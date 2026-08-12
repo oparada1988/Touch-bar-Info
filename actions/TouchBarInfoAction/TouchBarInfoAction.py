@@ -111,7 +111,7 @@ class TouchBarInfoAction(ActionBase):
         ]
         self.disk_mode_options = [
             self.get_locale_text("actions.touchbar-info.disk-mode.pct", "Percentage (%)"),
-            self.get_locale_text("actions.touchbar-info.disk-mode.used-free", "Used / Free Space (GB)"),
+            self.get_locale_text("actions.touchbar-info.disk-mode.used-total", "Used / Total Space (GB)"),
             self.get_locale_text("actions.touchbar-info.disk-mode.graph", "Disk Usage Graph")
         ]
         self.disk_mounts = self.get_system_disk_mounts()
@@ -2477,9 +2477,10 @@ class TouchBarInfoAction(ActionBase):
 
             # Clean silver border outline
             draw.rectangle([gx_min, bar_y_min, gx_max, bar_y_max], outline=(200, 200, 200, 255), width=1)
-        elif disk_mode == 1: # Used / Free GB (Top: Disk Name, Bottom: Used/Free)
+        elif disk_mode == 1: # Used / Total GB (Top: Disk Name, Bottom: Used/Total)
             top_str = f"{disp_name}"
-            bot_str = f"{used_gb:.0f}G Used / {free_gb:.0f}G Free"
+            total_gb = used_gb + free_gb
+            bot_str = f"{used_gb:.0f}GB/{total_gb:.0f}GB"
 
             font_main_fit = self.fit_font_to_width(draw, top_str, font_main, max_avail_w, min_size=9)
             font_sub_fit = self.fit_font_to_width(draw, bot_str, font_sub, max_avail_w, min_size=8)
