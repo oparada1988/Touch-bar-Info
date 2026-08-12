@@ -86,6 +86,7 @@
     "actions.touchbar-info.disk-mode.graph": "Disk Usage Graph",
     "actions.touchbar-info.disk-select.label": "System Disk Mount",
     "actions.touchbar-info.disk-select.subtitle": "Select system disk partition to monitor",
+    "actions.touchbar-info.disk-refresh.choose": "Refresh Disks",
     "actions.touchbar-info.date-settings.label": "Date Options and Font Customization",
     "actions.touchbar-info.date-settings.subtitle": "Date format, font chooser, fill, and outline settings",
     "actions.touchbar-info.time-settings.label": "Time Options and Font Customization",

@@ -723,11 +723,24 @@ class TouchBarInfoAction(ActionBase):
             self.all_ram_mode_combos.append(mode_combo)
             return {"mode_combo": mode_combo, "all_rows": [mode_combo]}
 
-        # Helper to create Disk controls (Option 1: Native Mount Directory Chooser)
+        # Helper to create Disk controls (Mount Dropdown + Refresh Button + Custom Folder Chooser)
         def build_disk_controls():
+            mount_model = Gtk.StringList()
+            for _, d_name in self.disk_mounts: mount_model.append(d_name)
+            mount_combo = Adw.ComboRow(
+                model=mount_model,
+                title=self.get_locale_text("actions.touchbar-info.disk-select.label", "System Disk Mount"),
+                subtitle=self.get_locale_text("actions.touchbar-info.disk-select.subtitle", "Select system disk partition to monitor")
+            )
+
+            refresh_btn = Gtk.Button(label="🔄 " + self.get_locale_text("actions.touchbar-info.disk-refresh.choose", "Refresh Disks"))
+            refresh_btn.set_valign(Gtk.Align.CENTER)
+            refresh_btn.connect("clicked", self.on_refresh_disks_clicked)
+            mount_combo.add_suffix(refresh_btn)
+
             browse_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.disk-browse.label", "System Disk Mount Directory"),
-                subtitle=self.get_locale_text("actions.touchbar-info.disk-browse.subtitle", "Visually choose any partition or folder path to monitor")
+                title=self.get_locale_text("actions.touchbar-info.disk-browse.label", "Custom Mount Directory"),
+                subtitle=self.get_locale_text("actions.touchbar-info.disk-browse.subtitle", "Optional: Visually choose any partition or subfolder path")
             )
             browse_btn = Gtk.Button(label=self.get_locale_text("actions.touchbar-info.disk-browse.choose", "Browse..."))
             browse_btn.set_valign(Gtk.Align.CENTER)
@@ -742,9 +755,15 @@ class TouchBarInfoAction(ActionBase):
                 subtitle=self.get_locale_text("actions.touchbar-info.disk-mode.subtitle", "Choose percentage, GB used/free, or mini graph")
             )
 
+            self.all_disk_mount_combos.append(mount_combo)
             self.all_disk_mode_combos.append(mode_combo)
             self.all_disk_browse_rows.append(browse_row)
-            return {"browse_row": browse_row, "mode_combo": mode_combo, "all_rows": [browse_row, mode_combo]}
+            return {
+                "mount_combo": mount_combo,
+                "browse_row": browse_row,
+                "mode_combo": mode_combo,
+                "all_rows": [mount_combo, browse_row, mode_combo]
+            }
 
         # Helper to create World Clock controls
         def build_worldclock_controls():
@@ -1433,6 +1452,24 @@ class TouchBarInfoAction(ActionBase):
             self.set_settings(settings)
             self.last_rendered_key = ""
             self.update_display()
+
+    def on_refresh_disks_clicked(self, button, *args):
+        self.disk_mounts = self.get_system_disk_mounts()
+        settings = self.get_settings() or {}
+        curr_path = settings.get("disk_mount_path", "/")
+
+        matched_idx = 0
+        for combo in self.all_disk_mount_combos:
+            new_model = Gtk.StringList()
+            for idx, (m_path, d_name) in enumerate(self.disk_mounts):
+                new_model.append(d_name)
+                if m_path == curr_path:
+                    matched_idx = idx
+            combo.set_model(new_model)
+            if 0 <= matched_idx < len(self.disk_mounts):
+                combo.set_selected(matched_idx)
+
+        self.trigger_redraw()
 
     def on_disk_mount_changed(self, combo, *args):
         settings = self.get_settings()

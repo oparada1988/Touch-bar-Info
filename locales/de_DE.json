@@ -86,6 +86,7 @@
     "actions.touchbar-info.disk-mode.graph": "Festplatten-Auslastungsgraph",
     "actions.touchbar-info.disk-select.label": "System-Festplatten-Partition",
     "actions.touchbar-info.disk-select.subtitle": "Zu überwachende Festplatte auswählen",
+    "actions.touchbar-info.disk-refresh.choose": "Disks aktualisieren",
     "actions.touchbar-info.date-settings.label": "Datumsoptionen und Schriftanpassung",
     "actions.touchbar-info.date-settings.subtitle": "Datumsformat, Schriftauswahl, Füllung und Kontur",
     "actions.touchbar-info.time-settings.label": "Uhrzeitoptionen und Schriftanpassung",
