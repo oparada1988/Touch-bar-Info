@@ -218,69 +218,73 @@ class TouchBarInfoAction(ActionBase):
         disks = []
         seen = set()
 
-        ignored_prefixes = ("/boot", "/run", "/sys", "/proc", "/dev", "/etc", "/usr", "/var/lib", "/app")
+        ignored_prefixes = ("/boot", "/sys", "/proc", "/dev", "/run/user", "/var/lib/flatpak", "/var/lib/docker")
         ignored_fstypes = ["swap", "squashfs", "iso9660", "tmpfs", "devtmpfs", "overlay", "ramfs"]
 
-        def is_valid_target(m: str) -> bool:
-            if not m:
-                return False
-            if m.startswith(ignored_prefixes):
-                return False
-            if m in ["/", "/home"]:
-                return True
-            if m.startswith(("/mnt/", "/media/", "/run/media/")):
-                return True
-            return False
+        def add_target(m: str, dev: str = ""):
+            if not m or m in seen or m.startswith(ignored_prefixes):
+                return
+            if m in ["/", "/home"] or m.startswith(("/mnt", "/media", "/run/media")):
+                seen.add(m)
+                dev_node = os.path.basename(dev) if dev else ""
+                name = "System Root" if m == "/" else m.rstrip("/").split("/")[-1].capitalize()
+                disp = f"{name} — {m} ({dev_node})" if dev_node else f"{name} — {m}"
+                disks.append((m, disp))
 
-        # Strategy 1: Ultra-fast host /proc/mounts single sub-process query (Instant 0.01s)
+        # Strategy 1: Host /proc/mounts
         try:
-            cmd = ['flatpak-spawn', '--host', 'cat', '/proc/mounts']
-            p = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+            p = subprocess.run(['flatpak-spawn', '--host', 'cat', '/proc/mounts'], capture_output=True, text=True, timeout=2)
             if p.stdout:
                 for line in p.stdout.splitlines():
                     parts = line.split()
                     if len(parts) >= 3:
-                        dev, mount_path, fstype = parts[0], parts[1], parts[2]
-                        if fstype not in ignored_fstypes and is_valid_target(mount_path):
-                            if mount_path not in seen and (dev.startswith('/dev/') or mount_path in ['/', '/home']):
-                                seen.add(mount_path)
-                                dev_node = os.path.basename(dev)
-                                clean_name = "System Root" if mount_path == "/" else mount_path.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize()
-                                disp_name = f"{clean_name} — {mount_path} ({dev_node})"
-                                disks.append((mount_path, disp_name))
+                        dev, m, fs = parts[0], parts[1], parts[2]
+                        if dev.startswith('/dev/') and fs not in ignored_fstypes:
+                            add_target(m, dev)
         except Exception as e:
-            log.error(f"TouchBarInfo: Error querying host /proc/mounts: {e}")
+            log.error(f"TouchBarInfo: Strategy 1 cat /proc/mounts error: {e}")
 
-        # Strategy 2: Host lsblk JSON query fallback
-        if len(disks) <= 1:
-            try:
-                cmd = ['flatpak-spawn', '--host', 'lsblk', '-J', '-o', 'NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS']
-                p = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
-                if p.stdout and p.stdout.strip().startswith('{'):
-                    data = json.loads(p.stdout)
-                    def parse_devs(dev_list):
-                        for item in dev_list:
-                            dev_name = item.get("name", "")
-                            label = item.get("label", "")
-                            fstype = item.get("fstype", "")
-                            raw_mounts = list(item.get("mountpoints") or [])
-                            if item.get("mountpoint"):
-                                raw_mounts.append(item.get("mountpoint"))
-                            for m in raw_mounts:
-                                if is_valid_target(m) and m not in seen and fstype not in ignored_fstypes:
-                                    seen.add(m)
-                                    clean_name = label if label else ("System Root" if m == "/" else m.lstrip("/").replace("mnt/", "").replace("media/", "").capitalize())
-                                    disp_name = f"{clean_name} — {m} ({dev_name})" if dev_name else f"{clean_name} — {m}"
-                                    disks.append((m, disp_name))
-                            if "children" in item:
-                                parse_devs(item["children"])
-                    parse_devs(data.get("blockdevices", []))
-            except Exception as e:
-                log.error(f"TouchBarInfo: Error querying host lsblk: {e}")
+        # Strategy 2: Host df -k
+        try:
+            p = subprocess.run(['flatpak-spawn', '--host', 'df', '-k'], capture_output=True, text=True, timeout=2)
+            if p.stdout:
+                for line in p.stdout.splitlines()[1:]:
+                    parts = line.split()
+                    if parts:
+                        dev = parts[0]
+                        m = parts[-1]
+                        if dev.startswith('/dev/'):
+                            add_target(m, dev)
+        except Exception as e:
+            log.error(f"TouchBarInfo: Strategy 2 df error: {e}")
+
+        # Strategy 3: Host lsblk -r
+        try:
+            p = subprocess.run(['flatpak-spawn', '--host', 'lsblk', '-r', '-o', 'NAME,MOUNTPOINT,FSTYPE'], capture_output=True, text=True, timeout=2)
+            if p.stdout:
+                for line in p.stdout.splitlines()[1:]:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        dev_name, m = parts[0], parts[1]
+                        fs = parts[2] if len(parts) >= 3 else 'ext4'
+                        if fs not in ignored_fstypes:
+                            add_target(m, f'/dev/{dev_name}')
+        except Exception as e:
+            log.error(f"TouchBarInfo: Strategy 3 lsblk error: {e}")
+
+        # Strategy 4: Host Directory Scan (/mnt, /media, /run/media)
+        try:
+            p = subprocess.run(['flatpak-spawn', '--host', 'ls', '-d', '/mnt/*', '/media/*', '/run/media/*/*'], capture_output=True, text=True, timeout=2)
+            if p.stdout:
+                for line in p.stdout.splitlines():
+                    path = line.strip()
+                    if path and not path.startswith(('/proc', '/sys', '/dev')) and '*' not in path:
+                        add_target(path)
+        except Exception as e:
+            log.error(f"TouchBarInfo: Strategy 4 directory scan error: {e}")
 
         if "/" not in seen:
-            disks.insert(0, ("/", "System Root — /"))
-            seen.add("/")
+            add_target("/")
 
         log.info(f"TouchBarInfo: get_system_disk_mounts discovered {len(disks)} mounts: {disks}")
         return disks
