@@ -56,25 +56,25 @@ class TouchBarInfoAction(ActionBase):
         ]
         self.full_widget_options = [
             self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
-            self.get_locale_text("actions.touchbar-info.widget.stacked", "Stacked Date and Time"),
-            self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
-            self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
-            self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
             self.get_locale_text("actions.touchbar-info.widget.cpu", "CPU Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
+            self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage"),
             self.get_locale_text("actions.touchbar-info.widget.net", "Network Activity"),
             self.get_locale_text("actions.touchbar-info.widget.ram", "RAM Usage"),
-            self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.stacked", "Stacked Date and Time"),
+            self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
+            self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
             self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock")
         ]
         self.split_widget_options = [
             self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
-            self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
-            self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
-            self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
             self.get_locale_text("actions.touchbar-info.widget.cpu", "CPU Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
+            self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage"),
             self.get_locale_text("actions.touchbar-info.widget.net", "Network Activity"),
             self.get_locale_text("actions.touchbar-info.widget.ram", "RAM Usage"),
-            self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
+            self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
             self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock")
         ]
         self.worldclock_cities = [
@@ -447,6 +447,11 @@ class TouchBarInfoAction(ActionBase):
 
         # Helper to create Date controls
         def build_date_controls():
+            date_hdr = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.hdr-date.label", "📅 Date Settings"),
+                subtitle=self.get_locale_text("actions.touchbar-info.hdr-date.subtitle", "Format and typography configuration for date display")
+            )
+
             fmt_model = Gtk.StringList()
             for _, label in self.date_format_options: fmt_model.append(label)
             fmt_combo = Adw.ComboRow(
@@ -505,14 +510,19 @@ class TouchBarInfoAction(ActionBase):
             self.all_date_out_size_spins.append(out_size_spin)
 
             return {
-                "fmt_combo": fmt_combo, "font_row": font_row, "fill_sw": fill_sw,
+                "date_hdr": date_hdr, "fmt_combo": fmt_combo, "font_row": font_row, "fill_sw": fill_sw,
                 "fill_color_row": fill_color_row, "out_sw": out_sw,
                 "out_color_row": out_color_row, "out_size_spin": out_size_spin,
-                "all_rows": [fmt_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+                "all_rows": [date_hdr, fmt_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
             }
 
         # Helper to create Time controls
         def build_time_controls():
+            time_hdr = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.hdr-time.label", "⏰ Time Settings"),
+                subtitle=self.get_locale_text("actions.touchbar-info.hdr-time.subtitle", "Format and typography configuration for clock display")
+            )
+
             sw_24h = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.use-24h.label", "Use 24-Hour Clock"),
                 subtitle=self.get_locale_text("actions.touchbar-info.use-24h.subtitle", "Switch between 12-hour (AM/PM) and 24-hour time format")
@@ -574,10 +584,10 @@ class TouchBarInfoAction(ActionBase):
             self.all_time_out_size_spins.append(out_size_spin)
 
             return {
-                "sw_24h": sw_24h, "sw_sec": sw_sec, "font_row": font_row, "fill_sw": fill_sw,
+                "time_hdr": time_hdr, "sw_24h": sw_24h, "sw_sec": sw_sec, "font_row": font_row, "fill_sw": fill_sw,
                 "fill_color_row": fill_color_row, "out_sw": out_sw,
                 "out_color_row": out_color_row, "out_size_spin": out_size_spin,
-                "all_rows": [sw_24h, sw_sec, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+                "all_rows": [time_hdr, sw_24h, sw_sec, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
             }
 
         # Helper to create Weather controls
@@ -970,8 +980,9 @@ class TouchBarInfoAction(ActionBase):
                     for r in worldclock_ctrls["all_rows"]: r.set_visible(False)
                     return
 
-                # Date Visibility (Full: 1, 2 | Split: 1)
-                show_date = (widget_choice in [1, 2]) if is_full_mode else (widget_choice == 1)
+                # Date Visibility (Full: 2 [Date], 6 [Stacked] | Split: 2 [Date])
+                show_date = (widget_choice in [2, 6]) if is_full_mode else (widget_choice == 2)
+                date_ctrls["date_hdr"].set_visible(show_date)
                 date_ctrls["fmt_combo"].set_visible(show_date)
                 date_ctrls["font_row"].set_visible(show_date)
                 date_ctrls["fill_sw"].set_visible(show_date)
@@ -980,8 +991,9 @@ class TouchBarInfoAction(ActionBase):
                 date_ctrls["out_color_row"].set_visible(show_date and date_ctrls["out_sw"].get_active())
                 date_ctrls["out_size_spin"].set_visible(show_date and date_ctrls["out_sw"].get_active())
 
-                # Time Visibility (Full: 1, 3 | Split: 2)
-                show_time = (widget_choice in [1, 3]) if is_full_mode else (widget_choice == 2)
+                # Time Visibility (Full: 6 [Stacked], 7 [Time] | Split: 6 [Time])
+                show_time = (widget_choice in [6, 7]) if is_full_mode else (widget_choice == 6)
+                time_ctrls["time_hdr"].set_visible(show_time)
                 time_ctrls["sw_24h"].set_visible(show_time)
                 time_ctrls["sw_sec"].set_visible(show_time)
                 time_ctrls["font_row"].set_visible(show_time)
@@ -991,8 +1003,8 @@ class TouchBarInfoAction(ActionBase):
                 time_ctrls["out_color_row"].set_visible(show_time and time_ctrls["out_sw"].get_active())
                 time_ctrls["out_size_spin"].set_visible(show_time and time_ctrls["out_sw"].get_active())
 
-                # Weather Visibility (Full: 4 | Split: 3)
-                show_weather = (widget_choice == 4) if is_full_mode else (widget_choice == 3)
+                # Weather Visibility (Full: 8 | Split: 7)
+                show_weather = (widget_choice == 8) if is_full_mode else (widget_choice == 7)
                 weather_ctrls["loc_entry"].set_visible(show_weather)
                 weather_ctrls["res_combo"].set_visible(show_weather and len(self.search_results_data) > 0)
                 weather_ctrls["unit_combo"].set_visible(show_weather)
@@ -1004,21 +1016,21 @@ class TouchBarInfoAction(ActionBase):
                 weather_ctrls["out_color_row"].set_visible(show_weather and weather_ctrls["out_sw"].get_active())
                 weather_ctrls["out_size_spin"].set_visible(show_weather and weather_ctrls["out_sw"].get_active())
 
-                # CPU Visibility (Full: 5 | Split: 4)
-                show_cpu = (widget_choice == 5) if is_full_mode else (widget_choice == 4)
+                # CPU Visibility (Full: 1 | Split: 1)
+                show_cpu = (widget_choice == 1) if is_full_mode else (widget_choice == 1)
                 for r in cpu_ctrls["all_rows"]: r.set_visible(show_cpu)
 
-                # Network Visibility (Full: 6 | Split: 5)
-                show_net = (widget_choice == 6) if is_full_mode else (widget_choice == 5)
+                # Disk Visibility (Full: 3 | Split: 3)
+                show_disk = (widget_choice == 3) if is_full_mode else (widget_choice == 3)
+                for r in disk_ctrls["all_rows"]: r.set_visible(show_disk)
+
+                # Network Visibility (Full: 4 | Split: 4)
+                show_net = (widget_choice == 4) if is_full_mode else (widget_choice == 4)
                 for r in net_ctrls["all_rows"]: r.set_visible(show_net)
 
-                # RAM Visibility (Full: 7 | Split: 6)
-                show_ram = (widget_choice == 7) if is_full_mode else (widget_choice == 6)
+                # RAM Visibility (Full: 5 | Split: 5)
+                show_ram = (widget_choice == 5) if is_full_mode else (widget_choice == 5)
                 for r in ram_ctrls["all_rows"]: r.set_visible(show_ram)
-
-                # Disk Visibility (Full: 8 | Split: 7)
-                show_disk = (widget_choice == 8) if is_full_mode else (widget_choice == 7)
-                for r in disk_ctrls["all_rows"]: r.set_visible(show_disk)
 
                 # World Clock Visibility (Full: 9 | Split: 8)
                 show_wc = (widget_choice == 9) if is_full_mode else (widget_choice == 8)
@@ -2903,58 +2915,58 @@ class TouchBarInfoAction(ActionBase):
 
         def render_section(mode, full_choice, top_choice, bot_choice, full_box, top_box, bot_box):
             if mode == 0: # 1 Widget (Full Section)
-                if full_choice == 1: # Stacked Date & Time
-                    self.draw_stacked(draw, full_box, date_str, time_str, font_date, font_time, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
+                if full_choice == 1: # CPU Usage
+                    self.draw_cpu_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, cpu_mode_idx)
                 elif full_choice == 2: # Date
                     self.draw_single(draw, full_box, date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz)
-                elif full_choice == 3: # Time
-                    self.draw_single(draw, full_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
-                elif full_choice == 4: # Weather
-                    self.draw_weather(image, draw, full_box, font_weather_full, font_loc_full, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
-                elif full_choice == 5: # CPU Usage
-                    self.draw_cpu_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, cpu_mode_idx)
-                elif full_choice == 6: # Network Activity
-                    self.draw_net_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
-                elif full_choice == 7: # RAM Usage
-                    self.draw_ram_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, ram_mode_idx)
-                elif full_choice == 8: # Disk Usage
+                elif full_choice == 3: # Disk Usage
                     self.draw_disk_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
+                elif full_choice == 4: # Network Activity
+                    self.draw_net_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
+                elif full_choice == 5: # RAM Usage
+                    self.draw_ram_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, ram_mode_idx)
+                elif full_choice == 6: # Stacked Date & Time
+                    self.draw_stacked(draw, full_box, date_str, time_str, font_date, font_time, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
+                elif full_choice == 7: # Time
+                    self.draw_single(draw, full_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
+                elif full_choice == 8: # Weather
+                    self.draw_weather(image, draw, full_box, font_weather_full, font_loc_full, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
                 elif full_choice == 9: # World Clock
                     self.draw_world_clock(draw, full_box, font_wc_city_full, font_wc_time_full, font_wc_sub_full, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
             else: # 2 Widgets (Split Top / Bottom)
                 # Top Sub-slot
-                if top_choice == 1: # Date
-                    self.draw_single(draw, top_box, date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz)
-                elif top_choice == 2: # Time
-                    self.draw_single(draw, top_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
-                elif top_choice == 3: # Weather
-                    self.draw_weather(image, draw, top_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
-                elif top_choice == 4: # CPU Usage
+                if top_choice == 1: # CPU Usage
                     self.draw_cpu_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, cpu_mode_idx)
-                elif top_choice == 5: # Network Activity
-                    self.draw_net_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
-                elif top_choice == 6: # RAM Usage
-                    self.draw_ram_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, ram_mode_idx)
-                elif top_choice == 7: # Disk Usage
+                elif top_choice == 2: # Date
+                    self.draw_single(draw, top_box, date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz)
+                elif top_choice == 3: # Disk Usage
                     self.draw_disk_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
+                elif top_choice == 4: # Network Activity
+                    self.draw_net_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
+                elif top_choice == 5: # RAM Usage
+                    self.draw_ram_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, ram_mode_idx)
+                elif top_choice == 6: # Time
+                    self.draw_single(draw, top_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
+                elif top_choice == 7: # Weather
+                    self.draw_weather(image, draw, top_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
                 elif top_choice == 8: # World Clock
                     self.draw_world_clock(draw, top_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
 
                 # Bottom Sub-slot
-                if bot_choice == 1: # Date
-                    self.draw_single(draw, bot_box, date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz)
-                elif bot_choice == 2: # Time
-                    self.draw_single(draw, bot_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
-                elif bot_choice == 3: # Weather
-                    self.draw_weather(image, draw, bot_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
-                elif bot_choice == 4: # CPU Usage
+                if bot_choice == 1: # CPU Usage
                     self.draw_cpu_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, cpu_mode_idx)
-                elif bot_choice == 5: # Network Activity
-                    self.draw_net_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
-                elif bot_choice == 6: # RAM Usage
-                    self.draw_ram_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, ram_mode_idx)
-                elif bot_choice == 7: # Disk Usage
+                elif bot_choice == 2: # Date
+                    self.draw_single(draw, bot_box, date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz)
+                elif bot_choice == 3: # Disk Usage
                     self.draw_disk_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
+                elif bot_choice == 4: # Network Activity
+                    self.draw_net_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
+                elif bot_choice == 5: # RAM Usage
+                    self.draw_ram_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, ram_mode_idx)
+                elif bot_choice == 6: # Time
+                    self.draw_single(draw, bot_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
+                elif bot_choice == 7: # Weather
+                    self.draw_weather(image, draw, bot_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
                 elif bot_choice == 8: # World Clock
                     self.draw_world_clock(draw, bot_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
 
