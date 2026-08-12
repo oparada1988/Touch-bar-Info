@@ -218,19 +218,17 @@ class TouchBarInfoAction(ActionBase):
         disks = []
         seen = set()
 
-        ignored_prefixes = ("/boot", "/run", "/sys", "/proc", "/dev", "/etc", "/usr", "/var/lib/flatpak", "/var/lib/docker")
         ignored_fstypes = ["swap", "squashfs", "iso9660", "tmpfs", "devtmpfs", "overlay", "ramfs"]
 
         def is_valid_mount(mount: str) -> bool:
             if not mount:
                 return False
-            if mount.startswith(ignored_prefixes):
-                return False
-            if mount.startswith("/home/") and mount != "/home":
-                return False
-            if mount.startswith("/var/") and mount != "/var":
-                return False
-            return True
+            # Allowed system mount targets: root, /home, /mnt/*, /media/*, /run/media/*
+            if mount == "/" or mount == "/home":
+                return True
+            if mount.startswith(("/mnt/", "/media/", "/run/media/")):
+                return True
+            return False
 
         # Strategy 1: Host lsblk JSON query (Discovers physical partitions, LVM, USB, SD cards)
         lsblk_cmds = [
