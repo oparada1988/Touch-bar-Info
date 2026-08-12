@@ -43,7 +43,7 @@ class TouchBarInfoAction(ActionBase):
         self.net_tx_rate = 0.0
         self.net_rx_rate = 0.0
         self.process_count = 0
-        self._blanked_for_lock = False
+        self._was_locked = False
         self.init_options()
 
     def init_options(self):
@@ -153,15 +153,14 @@ class TouchBarInfoAction(ActionBase):
 
     def handle_lock_blanking(self) -> bool:
         if self.is_locked_or_hidden():
-            if not getattr(self, "_blanked_for_lock", False):
-                self._blanked_for_lock = True
-                self.clear_background()
+            if not getattr(self, "_was_locked", False):
+                self._was_locked = True
             return True
         else:
-            if getattr(self, "_blanked_for_lock", False):
-                self._blanked_for_lock = False
+            if getattr(self, "_was_locked", False):
+                self._was_locked = False
                 self.last_rendered_key = ""
-                self.update_display()
+                GLib.idle_add(self.update_display)
             return False
 
     def on_ready(self) -> None:
