@@ -708,6 +708,7 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.disk-select.label", "System Disk Mount"),
                 subtitle=self.get_locale_text("actions.touchbar-info.disk-select.subtitle", "Select system disk partition to monitor")
             )
+            mount_combo.connect("notify::selected", self.on_disk_mount_changed)
 
             refresh_btn = Gtk.Button(label="🔄 " + self.get_locale_text("actions.touchbar-info.disk-refresh.choose", "Refresh Disks"))
             refresh_btn.set_valign(Gtk.Align.CENTER)
