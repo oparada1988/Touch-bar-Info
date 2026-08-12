@@ -2339,43 +2339,54 @@ class TouchBarInfoAction(ActionBase):
         if not mount_path:
             mount_path = "/"
         import shutil
-        # 1. Native df query first
-        for df_bin in ["df", "/usr/bin/df"]:
+
+        host_env = dict(os.environ)
+        uid = os.getuid() if hasattr(os, "getuid") else 1000
+        if "DBUS_SESSION_BUS_ADDRESS" not in host_env or not host_env["DBUS_SESSION_BUS_ADDRESS"]:
+            host_env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{uid}/bus"
+        if "XDG_RUNTIME_DIR" not in host_env or not host_env["XDG_RUNTIME_DIR"]:
+            host_env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+
+        # 1. Host flatpak-spawn df query (Primary inside Flatpak container)
+        if shutil.which("flatpak-spawn"):
             try:
-                p = subprocess.run([df_bin, "-B1", mount_path], capture_output=True, text=True, timeout=2)
+                cmd = ["flatpak-spawn", "--host", "--directory=/", "df", "-k", mount_path]
+                p = subprocess.run(cmd, capture_output=True, text=True, timeout=3, env=host_env)
                 if p.returncode == 0 and p.stdout:
                     lines = p.stdout.strip().splitlines()
                     if len(lines) >= 2:
                         parts = lines[-1].split()
                         if len(parts) >= 5:
-                            total_b = float(parts[1])
-                            used_b = float(parts[2])
-                            free_b = float(parts[3])
+                            total_k = float(parts[1])
+                            used_k = float(parts[2])
+                            free_k = float(parts[3])
                             pct_str = parts[4].rstrip("%")
-                            pct = float(pct_str) if pct_str.replace(".", "", 1).isdigit() else (used_b / max(1.0, total_b)) * 100.0
-                            return pct, used_b / (1024**3), free_b / (1024**3)
+                            pct = float(pct_str) if pct_str.replace(".", "", 1).isdigit() else (used_k / max(1.0, total_k)) * 100.0
+                            used_gb = used_k / (1024.0 * 1024.0)
+                            free_gb = free_k / (1024.0 * 1024.0)
+                            return pct, used_gb, free_gb
+            except Exception as e:
+                log.error(f"TouchBarInfo: get_disk_usage_host flatpak-spawn error for {mount_path}: {e}")
+
+        # 2. Native df query fallback
+        for df_bin in ["df", "/usr/bin/df"]:
+            try:
+                p = subprocess.run([df_bin, "-k", mount_path], capture_output=True, text=True, timeout=2)
+                if p.returncode == 0 and p.stdout:
+                    lines = p.stdout.strip().splitlines()
+                    if len(lines) >= 2:
+                        parts = lines[-1].split()
+                        if len(parts) >= 5:
+                            total_k = float(parts[1])
+                            used_k = float(parts[2])
+                            free_k = float(parts[3])
+                            pct_str = parts[4].rstrip("%")
+                            pct = float(pct_str) if pct_str.replace(".", "", 1).isdigit() else (used_k / max(1.0, total_k)) * 100.0
+                            used_gb = used_k / (1024.0 * 1024.0)
+                            free_gb = free_k / (1024.0 * 1024.0)
+                            return pct, used_gb, free_gb
             except Exception:
                 pass
-
-        # 2. Host flatpak-spawn fallback if running inside Flatpak
-        if shutil.which("flatpak-spawn"):
-            for df_bin in ["df", "/usr/bin/df"]:
-                try:
-                    cmd = ["flatpak-spawn", "--host", df_bin, "-B1", mount_path]
-                    p = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
-                    if p.returncode == 0 and p.stdout:
-                        lines = p.stdout.strip().splitlines()
-                        if len(lines) >= 2:
-                            parts = lines[-1].split()
-                            if len(parts) >= 5:
-                                total_b = float(parts[1])
-                                used_b = float(parts[2])
-                                free_b = float(parts[3])
-                                pct_str = parts[4].rstrip("%")
-                                pct = float(pct_str) if pct_str.replace(".", "", 1).isdigit() else (used_b / max(1.0, total_b)) * 100.0
-                                return pct, used_b / (1024**3), free_b / (1024**3)
-                except Exception:
-                    pass
 
         # 3. psutil fallback
         try:
