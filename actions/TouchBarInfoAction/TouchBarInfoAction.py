@@ -684,7 +684,7 @@ class TouchBarInfoAction(ActionBase):
             self.all_ram_mode_combos.append(mode_combo)
             return {"mode_combo": mode_combo, "all_rows": [mode_combo]}
 
-        # Helper to create Disk controls (Mount Dropdown + Refresh Button)
+        # Helper to create Disk controls (Mount Dropdown + Refresh Button Row)
         def build_disk_controls():
             mount_model = Gtk.StringList()
             for _, d_name in self.disk_mounts: mount_model.append(d_name)
@@ -695,10 +695,14 @@ class TouchBarInfoAction(ActionBase):
             )
             mount_combo.connect("notify::selected", self.on_disk_mount_changed)
 
+            refresh_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.disk-refresh.label", "Refresh Available Disks"),
+                subtitle=self.get_locale_text("actions.touchbar-info.disk-refresh.subtitle", "Re-scan host storage drives and mount points")
+            )
             refresh_btn = Gtk.Button(label="🔄 " + self.get_locale_text("actions.touchbar-info.disk-refresh.choose", "Refresh Disks"))
             refresh_btn.set_valign(Gtk.Align.CENTER)
             refresh_btn.connect("clicked", self.on_refresh_disks_clicked)
-            mount_combo.add_suffix(refresh_btn)
+            refresh_row.add_suffix(refresh_btn)
 
             mode_model = Gtk.StringList()
             for opt in self.disk_mode_options: mode_model.append(opt)
@@ -712,8 +716,9 @@ class TouchBarInfoAction(ActionBase):
             self.all_disk_mode_combos.append(mode_combo)
             return {
                 "mount_combo": mount_combo,
+                "refresh_row": refresh_row,
                 "mode_combo": mode_combo,
-                "all_rows": [mount_combo, mode_combo]
+                "all_rows": [mount_combo, refresh_row, mode_combo]
             }
 
         # Helper to create World Clock controls
