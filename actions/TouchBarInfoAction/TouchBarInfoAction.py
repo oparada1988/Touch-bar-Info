@@ -2514,13 +2514,20 @@ class TouchBarInfoAction(ActionBase):
                 # Ticks
                 for i in range(12):
                     angle = math.radians(i * 30)
-                    tick_len = 5 if i % 3 == 0 else 3
+                    tick_len = 6 if i % 3 == 0 else 3
                     tick_w = 2 if i % 3 == 0 else 1
                     x1 = cx + (dial_r - tick_len) * math.sin(angle)
                     y1 = cy - (dial_r - tick_len) * math.cos(angle)
                     x2 = cx + (dial_r - 1) * math.sin(angle)
                     y2 = cy - (dial_r - 1) * math.cos(angle)
                     draw.line((x1, y1, x2, y2), fill=fill_col, width=tick_w)
+
+                # 12, 3, 6, 9 Hour Number Markers (Full Slot)
+                font_marker = self.get_font_from_desc("DejaVu Sans Bold 9", default_size=9)
+                draw.text((cx, cy - dial_r + 11), "12", fill=fill_col, font=font_marker, anchor="mm")
+                draw.text((cx + dial_r - 10, cy), "3", fill=fill_col, font=font_marker, anchor="mm")
+                draw.text((cx, cy + dial_r - 10), "6", fill=fill_col, font=font_marker, anchor="mm")
+                draw.text((cx - dial_r + 10, cy), "9", fill=fill_col, font=font_marker, anchor="mm")
 
                 # Clock Hands
                 hour = city_now.hour % 12
@@ -2578,6 +2585,25 @@ class TouchBarInfoAction(ActionBase):
                 cy = y_min + (box_h / 2)
 
                 draw.ellipse((cx - dial_r, cy - dial_r, cx + dial_r, cy + dial_r), outline=fill_col, width=1)
+
+                # Ticks with 12, 3, 6, 9 cardinal markers
+                for i in range(12):
+                    angle = math.radians(i * 30)
+                    is_cardinal = (i % 3 == 0)
+                    tick_len = 4 if is_cardinal else 2
+                    tick_w = 2 if is_cardinal else 1
+                    x1 = cx + (dial_r - tick_len) * math.sin(angle)
+                    y1 = cy - (dial_r - tick_len) * math.cos(angle)
+                    x2 = cx + (dial_r - 1) * math.sin(angle)
+                    y2 = cy - (dial_r - 1) * math.cos(angle)
+                    draw.line((x1, y1, x2, y2), fill=fill_col, width=tick_w)
+
+                # 12, 3, 6, 9 Hour Number Markers (Split Slot)
+                font_marker_sub = self.get_font_from_desc("DejaVu Sans Bold 6", default_size=6)
+                draw.text((cx, cy - dial_r + 6), "12", fill=fill_col, font=font_marker_sub, anchor="mm")
+                draw.text((cx + dial_r - 6, cy), "3", fill=fill_col, font=font_marker_sub, anchor="mm")
+                draw.text((cx, cy + dial_r - 6), "6", fill=fill_col, font=font_marker_sub, anchor="mm")
+                draw.text((cx - dial_r + 6, cy), "9", fill=fill_col, font=font_marker_sub, anchor="mm")
 
                 hour = city_now.hour % 12
                 minute = city_now.minute
