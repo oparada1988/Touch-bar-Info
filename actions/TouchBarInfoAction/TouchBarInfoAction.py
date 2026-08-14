@@ -3181,7 +3181,7 @@ class TouchBarInfoAction(ActionBase):
 
     def start_anim_timer(self):
         if self._anim_timer_id is None:
-            self._anim_timer_id = GLib.timeout_add(40, self._anim_tick)
+            self._anim_timer_id = GLib.timeout_add(80, self._anim_tick)
 
     def stop_anim_timer(self):
         if self._anim_timer_id is not None:
@@ -3305,7 +3305,9 @@ class TouchBarInfoAction(ActionBase):
         render_path = os.path.join(assets_dir, f"touchbar_render_{self.state}.png")
 
         try:
-            final_image.save(render_path, format="PNG", compress_level=1)
+            tmp_path = render_path + ".tmp"
+            final_image.save(tmp_path, format="PNG", compress_level=1)
+            os.replace(tmp_path, render_path)
             self.page.set_background_image(self.input_ident, self.state, render_path, update=False)
         except Exception as e:
             log.error(f"TouchBarInfo: Error saving touchscreen background: {e}")
@@ -3395,6 +3397,21 @@ class TouchBarInfoAction(ActionBase):
 
         settings = self.get_settings() or {}
         now = datetime.datetime.now()
+
+        # Check if anything changed on screen to prevent constant deck flashing/re-rendering
+        media_active = self.is_media_active_and_playing()
+        weather_repr = tuple((k, v.get("temp_str"), v.get("weathercode")) for k, v in sorted(self.weather_caches.items()))
+        cpu_val = round(self.cpu_history[-1], 1) if self.cpu_history else 0
+        ram_val = round(self.ram_history[-1], 1) if self.ram_history else 0
+        net_val = (round(self.net_tx_rate / 1024.0, 1), round(self.net_rx_rate / 1024.0, 1))
+        media_val = (self.vis_tick, self.media_state.get("title"), self.media_state.get("artist"), self.media_state.get("status"), self.media_state.get("art_url")) if media_active else "nomedia"
+        time_sig = now.strftime("%Y-%m-%d %H:%M:%S")
+        settings_sig = hash(tuple(sorted((k, str(v)) for k, v in settings.items() if not k.startswith("_"))))
+
+        combined_key = (time_sig, cpu_val, ram_val, net_val, media_val, weather_repr, settings_sig)
+        if combined_key == self.last_rendered_key:
+            return
+        self.last_rendered_key = combined_key
 
         # Canvas & Background (Transparent overlay layer for widgets)
         image = Image.new("RGBA", (800, 100), (0, 0, 0, 0))
@@ -3579,7 +3596,3 @@ class TouchBarInfoAction(ActionBase):
                 render_slot_widget(f"{prefix}_bot", bot_choice, bot_box, is_full=False, align=align)
 
         self.render_to_input(image)
-        try:
-            self.set_media(image=image)
-        except Exception:
-            pass
