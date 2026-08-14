@@ -102,6 +102,8 @@
     "actions.touchbar-info.weather-unit.subtitle": "Select Fahrenheit (°F) or Celsius (°C)",
     "actions.touchbar-info.weather-refresh.label": "Refresh Interval",
     "actions.touchbar-info.weather-refresh.subtitle": "Automatic weather update frequency",
+    "actions.touchbar-info.hdr-weather-font.label": "Font Settings",
+    "actions.touchbar-info.hdr-weather-font.subtitle": "Typography, colors, and stroke styling for temperature display",
     "actions.touchbar-info.bg-image.label": "Custom Touch Bar Background Wallpaper",
     "actions.touchbar-info.bg-image.subtitle": "Select custom wallpaper image (PNG/JPG) to render behind all Touch Bar widgets",
     "actions.touchbar-info.bg-image.choose": "Choose Image...",

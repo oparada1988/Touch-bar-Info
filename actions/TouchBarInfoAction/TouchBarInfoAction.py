@@ -73,13 +73,13 @@ class TouchBarInfoAction(ActionBase):
         if hasattr(self.plugin_base, "lm") and self.plugin_base.lm is not None:
             try:
                 val = self.plugin_base.lm.get(key)
-                if val and val != key: return val
+                if isinstance(val, str) and val and val != key: return val
             except Exception:
                 pass
         if hasattr(self.plugin_base, "locale_manager") and self.plugin_base.locale_manager is not None:
             try:
                 val = self.plugin_base.locale_manager.get(key)
-                if val and val != key: return val
+                if isinstance(val, str) and val and val != key: return val
             except Exception:
                 pass
         return default
@@ -796,7 +796,7 @@ class TouchBarInfoAction(ActionBase):
             ref_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "weather_refresh_idx", combo.get_selected()))
 
             weather_font_expander = Adw.ExpanderRow(
-                title=self.get_locale_text("actions.touchbar-info.hdr-weather-font.label", "Text & Font Settings"),
+                title=self.get_locale_text("actions.touchbar-info.hdr-weather-font.label", "Font Settings"),
                 subtitle=self.get_locale_text("actions.touchbar-info.hdr-weather-font.subtitle", "Typography, colors, and stroke styling for temperature display")
             )
             weather_font_expander.add_css_class("touchbar-subhdr-row")
@@ -1102,7 +1102,7 @@ class TouchBarInfoAction(ActionBase):
         # Helper to create Media controls with Expanders for Song & Artist
         def build_media_controls(slot_key: str, is_full_mode: bool = True):
             media_hdr = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.hdr-media.label", "Media Player & Visualizer"),
+                title=self.get_locale_text("actions.touchbar-info.hdr-media.label", "Media Player and Visualizer"),
                 subtitle=self.get_locale_text("actions.touchbar-info.hdr-media.subtitle", "Universal MPRIS player display, album artwork, and real-time audio visualizers")
             )
             media_hdr.add_css_class("touchbar-subhdr-row")
