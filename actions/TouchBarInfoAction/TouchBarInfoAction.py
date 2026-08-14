@@ -340,12 +340,7 @@ class TouchBarInfoAction(ActionBase):
                 base = os.path.basename(cleaned.rstrip('/'))
                 clean_name = base.capitalize() if base else cleaned
 
-            dev_base = os.path.basename(dev_name) if dev_name and not dev_name.startswith('/dev/loop') else ''
-            if dev_base:
-                disp = f'{clean_name} — {cleaned} ({dev_base})'
-            else:
-                disp = f'{clean_name} — {cleaned}'
-
+            disp = clean_name
             disks.append((cleaned, disp))
 
         # Strategy 1: flatpak-spawn host /proc/mounts
