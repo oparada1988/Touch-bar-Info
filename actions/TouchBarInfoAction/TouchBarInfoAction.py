@@ -77,9 +77,11 @@ class TouchBarInfoAction(ActionBase):
         self._active_highlight_slot = None
         self._dial_css_provider = None
         self._volume_hud_until = 0.0
+        self._volume_hud_timer_id = None
         self._current_vol_pct = 50
         self._current_is_muted = False
         self._vol_initialized = False
+        self._last_dial_event = (None, None, None, 0.0)
 
         try:
             sm = Adw.StyleManager.get_default()
@@ -3144,13 +3146,13 @@ class TouchBarInfoAction(ActionBase):
 
     def query_system_volume(self):
         try:
-            res = subprocess.run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"], capture_output=True, text=True, timeout=0.6)
+            res = subprocess.run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"], capture_output=True, text=True, timeout=0.4)
             if res.returncode == 0 and res.stdout:
                 line = res.stdout.strip()
                 parts = line.split()
                 if len(parts) >= 2:
                     val = float(parts[1])
-                    self._current_vol_pct = int(round(val * 100))
+                    self._current_vol_pct = max(0, min(100, int(round(val * 100))))
                     self._current_is_muted = "[MUTED]" in line
                     self._vol_initialized = True
                     return
@@ -3158,7 +3160,7 @@ class TouchBarInfoAction(ActionBase):
             pass
 
         try:
-            res = subprocess.run(["pactl", "get-sink-volume", "@DEFAULT_SINK@"], capture_output=True, text=True, timeout=0.6)
+            res = subprocess.run(["pactl", "get-sink-volume", "@DEFAULT_SINK@"], capture_output=True, text=True, timeout=0.4)
             if res.returncode == 0 and res.stdout:
                 import re
                 m = re.search(r"(\d+)%", res.stdout)
@@ -3171,13 +3173,12 @@ class TouchBarInfoAction(ActionBase):
     def is_volume_hud_active(self) -> bool:
         return time.time() < getattr(self, "_volume_hud_until", 0.0)
 
-    def _dismiss_volume_hud(self) -> bool:
-        if time.time() >= getattr(self, "_volume_hud_until", 0.0):
-            self._volume_hud_until = 0.0
-            self.last_rendered_key = ""
-            self.update_display()
-            return False
-        return True
+    def _on_volume_hud_timeout(self) -> bool:
+        self._volume_hud_timer_id = None
+        self._volume_hud_until = 0.0
+        self.last_rendered_key = ""
+        self.trigger_redraw()
+        return False
 
     def draw_volume_meter_bar(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], align: str = "left"):
         x_min, y_min, x_max, y_max = box
@@ -3238,16 +3239,13 @@ class TouchBarInfoAction(ActionBase):
         tx2 = int(x_max - badge_w - 12)
         if tx2 > tx1 + 10:
             r_track = track_h // 2
-            # Dark background slot
             draw.rounded_rectangle([tx1, ty1, tx2, ty2], radius=r_track, fill=(28, 28, 34, 230), outline=(55, 55, 65, 255), width=1)
 
-            # Filled level
             fill_len = int((tx2 - tx1) * (vol / 100.0))
             if fill_len > 2 and not is_muted:
                 fx2 = min(tx2, tx1 + fill_len)
                 fill_col = (ar, ag, ab, 255)
                 draw.rounded_rectangle([tx1, ty1, fx2, ty2], radius=r_track, fill=fill_col)
-                # Subtle highlight sheen on top edge of progress bar
                 if fx2 > tx1 + r_track:
                     draw.line([(tx1 + r_track // 2, ty1 + 1), (fx2 - r_track // 2, ty1 + 1)], fill=(255, 255, 255, 120), width=1)
 
@@ -3258,33 +3256,43 @@ class TouchBarInfoAction(ActionBase):
         self._current_vol_pct = max(0, min(100, getattr(self, "_current_vol_pct", 50) + delta_percent))
         self._current_is_muted = False
         self._volume_hud_until = time.time() + 3.0
+
+        if getattr(self, "_volume_hud_timer_id", None) is not None:
+            try:
+                GLib.source_remove(self._volume_hud_timer_id)
+            except Exception:
+                pass
+            self._volume_hud_timer_id = None
+
+        self._volume_hud_timer_id = GLib.timeout_add(3000, self._on_volume_hud_timeout)
+
         self.last_rendered_key = ""
-        GLib.idle_add(self.update_display)
-        GLib.timeout_add(150, self._dismiss_volume_hud)
+        self.trigger_redraw()
+        self.start_anim_timer()
 
         def _run():
             try:
-                if vol_target == 0: # System Master Sink Volume
-                    sign = "+" if delta_percent > 0 else "-"
+                if vol_target == 0:
                     amount = abs(delta_percent)
+                    step_str = f"{amount}%+" if delta_percent > 0 else f"{amount}%-"
                     try:
+                        subprocess.run(
+                            ["wpctl", "set-volume", "-l", "1.5", "@DEFAULT_AUDIO_SINK@", step_str],
+                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
+                        )
+                        return
+                    except Exception:
+                        pass
+                    try:
+                        sign = "+" if delta_percent > 0 else "-"
                         subprocess.run(
                             ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{sign}{amount}%"],
-                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
                         )
                         return
                     except Exception:
                         pass
-                    try:
-                        step_str = f"{amount}%+" if delta_percent > 0 else f"{amount}%-"
-                        subprocess.run(
-                            ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", step_str],
-                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                        )
-                        return
-                    except Exception:
-                        pass
-                else: # MPRIS Player Volume
+                else:
                     if not self.session_bus:
                         self.session_bus = dbus.SessionBus()
                     target_name = self._resolve_target_player_name(target_player_id)
@@ -3302,30 +3310,40 @@ class TouchBarInfoAction(ActionBase):
     def toggle_audio_mute(self, vol_target: int = 0, target_player_id: str = "auto"):
         self._current_is_muted = not getattr(self, "_current_is_muted", False)
         self._volume_hud_until = time.time() + 3.0
+
+        if getattr(self, "_volume_hud_timer_id", None) is not None:
+            try:
+                GLib.source_remove(self._volume_hud_timer_id)
+            except Exception:
+                pass
+            self._volume_hud_timer_id = None
+
+        self._volume_hud_timer_id = GLib.timeout_add(3000, self._on_volume_hud_timeout)
+
         self.last_rendered_key = ""
-        GLib.idle_add(self.update_display)
-        GLib.timeout_add(150, self._dismiss_volume_hud)
+        self.trigger_redraw()
+        self.start_anim_timer()
 
         def _run():
             try:
-                if vol_target == 0: # System Master Mute
-                    try:
-                        subprocess.run(
-                            ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"],
-                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                        )
-                        return
-                    except Exception:
-                        pass
+                if vol_target == 0:
                     try:
                         subprocess.run(
                             ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"],
-                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
                         )
                         return
                     except Exception:
                         pass
-                else: # MPRIS Player Mute simulation
+                    try:
+                        subprocess.run(
+                            ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"],
+                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
+                        )
+                        return
+                    except Exception:
+                        pass
+                else:
                     if not self.session_bus:
                         self.session_bus = dbus.SessionBus()
                     target_name = self._resolve_target_player_name(target_player_id)
@@ -3348,7 +3366,6 @@ class TouchBarInfoAction(ActionBase):
         if not hasattr(self, "deck_controller") or self.deck_controller is None:
             return
 
-        # 1. Hook deck_controller.dial_event_callback and underlying deck callback
         if not getattr(self.deck_controller, "_touchpulse_dial_hooked", False):
             original_dial_callback = getattr(self.deck_controller, "dial_event_callback", None)
 
@@ -3368,7 +3385,6 @@ class TouchBarInfoAction(ActionBase):
                     log.warning(f"TouchPulse: Could not rebind deck dial callback: {e}")
             self.deck_controller._touchpulse_dial_hooked = True
 
-        # 2. ALSO hook each individual ControllerDial input directly
         if hasattr(self.deck_controller, "inputs") and hasattr(Input, "Dial") and Input.Dial in self.deck_controller.inputs:
             for dial_input in self.deck_controller.inputs[Input.Dial]:
                 if not getattr(dial_input, "_touchpulse_hooked", False):
@@ -3404,6 +3420,13 @@ class TouchBarInfoAction(ActionBase):
         if not is_turn and not is_push:
             return
 
+        # 40ms event deduplication window
+        now_ts = time.time()
+        last_dial, last_event, last_val, last_time = getattr(self, "_last_dial_event", (None, None, None, 0.0))
+        if dial_idx == last_dial and event_str == str(last_event).upper() and value == last_val and (now_ts - last_time < 0.04):
+            return
+        self._last_dial_event = (dial_idx, event_type, value, now_ts)
+
         settings = self.get_settings() or {}
         action_mode = None # 0: Media Control, 1: Volume Control, 2: Disabled
         vol_step = 5
@@ -3433,7 +3456,7 @@ class TouchBarInfoAction(ActionBase):
                 widget = self.get_slot_setting(settings, "sec_b", "full_widget", 0)
                 sk = "sec_b_full"
                 if widget == 4:
-                    action_mode = self.get_slot_setting(settings, sk, "media_dial_left", 0) # default 0: Media Control
+                    action_mode = self.get_slot_setting(settings, sk, "media_dial_left", 0)
                     vol_step = self.get_slot_setting(settings, sk, "media_vol_step", 5)
                     vol_target = self.get_slot_setting(settings, sk, "media_vol_target", 0)
                     target_player = self.get_slot_setting(settings, sk, "media_player_id", "auto")
@@ -3455,7 +3478,7 @@ class TouchBarInfoAction(ActionBase):
                 widget = self.get_slot_setting(settings, "sec_b", "full_widget", 0)
                 sk = "sec_b_full"
                 if widget == 4:
-                    action_mode = self.get_slot_setting(settings, sk, "media_dial_right", 1) # default 1: Volume Control
+                    action_mode = self.get_slot_setting(settings, sk, "media_dial_right", 1)
                     vol_step = self.get_slot_setting(settings, sk, "media_vol_step", 5)
                     vol_target = self.get_slot_setting(settings, sk, "media_vol_target", 0)
                     target_player = self.get_slot_setting(settings, sk, "media_player_id", "auto")
@@ -3941,12 +3964,22 @@ class TouchBarInfoAction(ActionBase):
         if self._was_locked:
             self._anim_timer_id = None
             return False
-        if not self.is_media_active_and_playing():
-            self._anim_timer_id = None
-            self.vis_heights = [0.04] * len(self.vis_heights)
-            self.last_rendered_key = ""
-            self.update_display()
-            return False
+
+        is_playing_or_hud = self.is_media_active_and_playing()
+        if not is_playing_or_hud:
+            # Smoothly decay visualizer bars towards baseline before stopping
+            max_h = max(self.vis_heights) if self.vis_heights else 0.0
+            if max_h > 0.045:
+                self.vis_heights = [max(0.04, h * 0.85) for h in self.vis_heights]
+                self.last_rendered_key = ""
+                self.update_display()
+                return True
+            else:
+                self._anim_timer_id = None
+                self.vis_heights = [0.04] * len(self.vis_heights)
+                self.last_rendered_key = ""
+                self.update_display()
+                return False
 
         self.update_media_state(poll_dbus=False)
         self.update_display()
@@ -3973,7 +4006,7 @@ class TouchBarInfoAction(ActionBase):
                 if self.get_slot_setting(settings, f"{prefix}_bot", "widget", self.get_slot_setting(settings, prefix, "bottom_widget", 0)) == 4:
                     is_active = True
                     break
-        return is_active and (self.media_state.get("status") == "Playing")
+        return is_active and ((self.media_state.get("status") == "Playing") or self.is_volume_hud_active())
 
     def is_screen_locked(self) -> bool:
         try:
@@ -4202,13 +4235,20 @@ class TouchBarInfoAction(ActionBase):
         cpu_val = round(self.cpu_history[-1], 1) if (any_cpu and self.cpu_history) else 0
         ram_val = round(self.ram_history[-1], 1) if (any_ram and self.ram_history) else 0
         net_val = (round(self.net_tx_rate / 1024.0, 1), round(self.net_rx_rate / 1024.0, 1)) if any_net else (0, 0)
-        media_val = (self.vis_tick, self.media_state.get("title"), self.media_state.get("artist"), self.media_state.get("status"), self.media_state.get("art_url")) if (any_media and self.is_media_active_and_playing()) else "nomedia"
+        media_val = (
+            self.vis_tick if self.is_media_active_and_playing() else 0,
+            self.media_state.get("title"),
+            self.media_state.get("artist"),
+            self.media_state.get("status"),
+            self.media_state.get("art_url")
+        ) if any_media else "nomedia"
+        vol_sig = (self.is_volume_hud_active(), getattr(self, "_current_vol_pct", 50), getattr(self, "_current_is_muted", False), self.vis_tick if self.is_volume_hud_active() else 0)
         weather_repr = tuple((k, v.get("temp_str"), v.get("wmo_code"), v.get("location")) for k, v in sorted(self.weather_caches.items())) if any_weather else ()
         settings_sig = hash(tuple(sorted((k, str(v)) for k, v in settings.items() if not k.startswith("_"))))
         accent_col = self.get_streamcontroller_accent_color()
         highlight_sig = (self._active_highlight_slot, accent_col)
 
-        combined_key = (time_sig, cpu_val, ram_val, net_val, media_val, weather_repr, settings_sig, highlight_sig)
+        combined_key = (time_sig, cpu_val, ram_val, net_val, media_val, vol_sig, weather_repr, settings_sig, highlight_sig)
         if combined_key == self.last_rendered_key:
             return
         self.last_rendered_key = combined_key
