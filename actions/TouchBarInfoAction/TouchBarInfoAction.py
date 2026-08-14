@@ -4106,11 +4106,22 @@ class TouchBarInfoAction(ActionBase):
 
         if hasattr(self, "deck_controller") and self.deck_controller is not None:
             c_input = self.deck_controller.get_input(self.input_ident)
-            if c_input is not None and hasattr(c_input, "update"):
+            if c_input is not None:
+                if hasattr(c_input, "update"):
+                    try:
+                        c_input.update()
+                    except Exception as e:
+                        log.error(f"TouchBarInfo: Error updating touchscreen controller: {e}")
+                # Realtime GUI Mirroring: push rendered RGBA image to desktop app canvas
                 try:
-                    c_input.update()
-                except Exception as e:
-                    log.error(f"TouchBarInfo: Error updating touchscreen controller: {e}")
+                    if hasattr(c_input, "set_ui_image"):
+                        c_input.set_ui_image(final_image)
+                    elif recursive_hasattr(self.deck_controller, "own_deck_stack_child.page_settings.deck_config.screenbar.image"):
+                        sb = self.deck_controller.own_deck_stack_child.page_settings.deck_config.screenbar
+                        if sb and hasattr(sb, "image") and sb.image:
+                            GLib.idle_add(sb.image.set_image, final_image)
+                except Exception:
+                    pass
 
     def update_system_stats(self):
         try:
@@ -4147,20 +4158,25 @@ class TouchBarInfoAction(ActionBase):
         if self.is_media_active_and_playing():
             self.start_anim_timer()
 
-        def background_timer():
-            while True:
-                time.sleep(1.0)
-                if not self.handle_lock_blanking():
-                    self.update_system_stats()
-                    self.update_media_state(poll_dbus=True)
-                    self.fetch_weather_async()
-                    if self.is_media_active_and_playing():
-                        GLib.idle_add(self.start_anim_timer)
-                    else:
-                        GLib.idle_add(self.stop_anim_timer)
-                    GLib.idle_add(self.update_display)
+        if not getattr(self, "_bg_timer_started", False):
+            self._bg_timer_started = True
+            def background_timer():
+                while True:
+                    time.sleep(1.0)
+                    try:
+                        if not self.handle_lock_blanking():
+                            self.update_system_stats()
+                            self.update_media_state(poll_dbus=True)
+                            self.fetch_weather_async()
+                            if self.is_media_active_and_playing():
+                                GLib.idle_add(self.start_anim_timer)
+                            else:
+                                GLib.idle_add(self.stop_anim_timer)
+                            GLib.idle_add(self.update_display)
+                    except Exception as e:
+                        log.error(f"TouchBarInfo: Exception in background_timer: {e}")
 
-        Thread(target=background_timer, daemon=True).start()
+            Thread(target=background_timer, daemon=True).start()
 
     def on_key_down(self):
         self.fetch_weather_async(force=True)
@@ -4245,9 +4261,9 @@ class TouchBarInfoAction(ActionBase):
         else:
             time_sig = "static"
 
-        cpu_val = round(self.cpu_history[-1], 1) if (any_cpu and self.cpu_history) else 0
-        ram_val = round(self.ram_history[-1], 1) if (any_ram and self.ram_history) else 0
-        net_val = (round(self.net_tx_rate / 1024.0, 1), round(self.net_rx_rate / 1024.0, 1)) if any_net else (0, 0)
+        cpu_val = tuple(round(x, 1) for x in self.cpu_history[-10:]) if (any_cpu and self.cpu_history) else 0
+        ram_val = tuple(round(x, 1) for x in self.ram_history[-10:]) if (any_ram and self.ram_history) else 0
+        net_val = (tuple(round(x, 1) for x in self.net_history[-10:]), round(self.net_tx_rate / 1024.0, 1), round(self.net_rx_rate / 1024.0, 1)) if any_net else (0, 0)
         media_val = (
             self.vis_tick if self.is_media_active_and_playing() else 0,
             self.media_state.get("title"),
