@@ -25,6 +25,64 @@ You have the flexibility to configure each section independently:
 
 ---
 
+## Universal Hardware Dial Controls (Stream Deck +)
+
+TouchPulse features a universal, hardware-aligned dial control architecture designed to intuitively map the Stream Deck +'s four rotary push-encoders directly to the Touch Bar canvas positioned above them:
+
+```
+ ┌───────────────────┬───────────────────────────────────────┬───────────────────┐
+ │   Section A       │               Section B               │   Section C       │
+ │   (Left - 200px)  │            (Center - 400px)           │   (Right - 200px) │
+ └─────────┬─────────┴───────────┬───────────────┬───────────┴─────────┬─────────┘
+           │                     │               │                     │
+       ┌───┴───┐             ┌───┴───┐       ┌───┴───┐             ┌───┴───┐
+       │Dial #1│             │Dial #2│       │Dial #3│             │Dial #4│
+       └───────┘             └───────┘       └───────┘             └───────┘
+```
+
+### 🎛️ Section-by-Section Universal Dial Architecture
+
+#### 1. Left Section — Section A (Dial 1 / Dial #0)
+* **Whole (Full Section Mode)**:
+  * Dial 1 functions as a single unified controller dedicated to the full 100px widget.
+* **Split Mode (Top & Bottom Sub-sections)**:
+  * **Click to Toggle Sub-section**: Pushing/clicking Dial 1 switches active control between the **Top** and **Bottom** sub-sections, allowing effortless single-dial interaction across stacked widgets.
+
+#### 2. Center Section — Section B (Dials 2 & 3 / Dials #1 & #2)
+* **Whole (Full Section Mode)**:
+  * Both dials operate in tandem as a synchronized **dual-dial control pair** for the wide 400px widget:
+    * **Left Dial (Dial 2)**: Primary navigation / selection (e.g. track skipping, scrolling).
+    * **Right Dial (Dial 3)**: Secondary control / adjustment (e.g. volume adjustment, action toggles).
+* **Split Mode (Top & Bottom Sub-sections)**:
+  * Dedicated 1-to-1 hardware mapping:
+    * **Left Dial (Dial 2)** is dedicated entirely to the **Top** sub-section widget.
+    * **Right Dial (Dial 3)** is dedicated entirely to the **Bottom** sub-section widget.
+
+#### 3. Right Section — Section C (Dial 4 / Dial #3)
+* **Whole (Full Section Mode)**:
+  * Dial 4 functions as a single unified controller dedicated to the full 100px widget.
+* **Split Mode (Top & Bottom Sub-sections)**:
+  * **Click to Toggle Sub-section**: Pushing/clicking Dial 4 switches active control between the **Top** and **Bottom** sub-sections.
+
+---
+
+### 💡 Example Widget Integrations
+
+* **Media Player (Center Section Full Mode)**:
+  * **Left Dial**: Turn to skip Previous / Next track; Click to Play / Pause.
+  * **Right Dial**: Turn to adjust Volume (replaces the visualizer with an animated Volume Meter HUD for 3 seconds); Click to Mute / Unmute.
+* **Media Player (Split Mode / Section A or C)**:
+  * Full control mapped either to the top or bottom sub-slot with single-dial toggle or dedicated dual-slot assignment.
+* **Weather & Clocks**:
+  * Push dials to trigger instantaneous background data refresh or toggle display modes.
+
+---
+
+### 🌟 Interactive Configuration Dial Glowing
+* Inside the StreamController application window, expanding the configuration settings for **Section A**, **Section B**, or **Section C** dynamically illuminates and glows the corresponding physical dials on the StreamController interface, providing instant visual feedback on which hardware knobs control each section.
+
+---
+
 ## Available Widgets
 
 All widgets can be placed anywhere across Sections A, B, and C in Full or Split mode and are listed in alphabetical order:
