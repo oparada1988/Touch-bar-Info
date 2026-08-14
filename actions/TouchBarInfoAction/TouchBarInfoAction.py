@@ -280,13 +280,20 @@ class TouchBarInfoAction(ActionBase):
             self.get_locale_text("actions.touchbar-info.media-colormode.gradient", "Dynamic Gradient (3 Colors)")
         ]
 
-        media_players_list = self.get_available_media_players()
-        self.media_player_options = [label for _, label in media_players_list]
-        self.media_player_ids = [pid for pid, _ in media_players_list]
+        if not hasattr(self, "_cached_media_players") or not self._cached_media_players:
+            self._cached_media_players = self.get_available_media_players()
+        self.media_players_list = self._cached_media_players
+        self.media_player_options = [label for _, label in self.media_players_list]
+        self.media_player_ids = [pid for pid, _ in self.media_players_list]
 
-        self.disk_mounts = self.get_system_disk_mounts()
+        if not hasattr(self, "_cached_disk_mounts") or not self._cached_disk_mounts:
+            self._cached_disk_mounts = self.get_system_disk_mounts()
+        self.disk_mounts = self._cached_disk_mounts
 
     def get_system_disk_mounts(self) -> list[tuple[str, str]]:
+        if getattr(self, "_cached_disk_mounts", None):
+            return self._cached_disk_mounts
+
         disks = []
         seen = set()
 
@@ -315,60 +322,44 @@ class TouchBarInfoAction(ActionBase):
 
         ignored_fstypes = {'tmpfs', 'devtmpfs', 'squashfs', 'overlay', 'proc', 'sysfs', 'securityfs', 'cgroup', 'cgroup2', 'pstore', 'bpf', 'autofs', 'ramfs', 'hugetlbfs', 'mqueue', 'debugfs', 'tracefs', 'fuse.portal', 'fuse.gvfsd-fuse'}
 
-        host_env = dict(os.environ)
-        uid = os.getuid() if hasattr(os, "getuid") else 1000
-        if "DBUS_SESSION_BUS_ADDRESS" not in host_env or not host_env["DBUS_SESSION_BUS_ADDRESS"]:
-            host_env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{uid}/bus"
-        if "XDG_RUNTIME_DIR" not in host_env or not host_env["XDG_RUNTIME_DIR"]:
-            host_env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
-
+        # Fast direct read of /proc/mounts if available
         try:
-            p = subprocess.run(['flatpak-spawn', '--host', '--directory=/', 'cat', '/proc/mounts'], capture_output=True, text=True, timeout=3, env=host_env)
-            if p.stdout:
-                for line in p.stdout.splitlines():
-                    parts = line.split()
-                    if len(parts) >= 3:
-                        dev, m, fs = parts[0], parts[1], parts[2]
-                        if dev.startswith('/dev/') and fs not in ignored_fstypes:
-                            add_target(m, dev, "proc_mounts")
+            if os.path.exists('/proc/mounts'):
+                with open('/proc/mounts', 'r') as f:
+                    for line in f:
+                        parts = line.split()
+                        if len(parts) >= 3:
+                            dev, m, fs = parts[0], parts[1], parts[2]
+                            if dev.startswith('/dev/') and fs not in ignored_fstypes:
+                                add_target(m, dev, "proc_mounts")
         except Exception:
             pass
 
-        try:
-            p = subprocess.run(['flatpak-spawn', '--host', '--directory=/', 'df', '-k'], capture_output=True, text=True, timeout=3, env=host_env)
-            if p.stdout:
-                for line in p.stdout.splitlines()[1:]:
-                    parts = line.split()
-                    if parts:
-                        dev = parts[0]
-                        m = parts[-1]
-                        if dev.startswith('/dev/'):
-                            add_target(m, dev, "df")
-        except Exception:
-            pass
+        if not disks:
+            host_env = dict(os.environ)
+            uid = os.getuid() if hasattr(os, "getuid") else 1000
+            if "DBUS_SESSION_BUS_ADDRESS" not in host_env or not host_env["DBUS_SESSION_BUS_ADDRESS"]:
+                host_env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{uid}/bus"
+            if "XDG_RUNTIME_DIR" not in host_env or not host_env["XDG_RUNTIME_DIR"]:
+                host_env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
 
-        try:
-            p = subprocess.run(['flatpak-spawn', '--host', '--directory=/', 'lsblk', '-r', '-o', 'NAME,MOUNTPOINT,FSTYPE'], capture_output=True, text=True, timeout=3, env=host_env)
-            if p.stdout:
-                for line in p.stdout.splitlines()[1:]:
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        dev_name, m = parts[0], parts[1]
-                        fs = parts[2] if len(parts) >= 3 else 'ext4'
-                        if fs not in ignored_fstypes:
-                            add_target(m, f'/dev/{dev_name}', "lsblk")
-        except Exception:
-            pass
+            try:
+                p = subprocess.run(['flatpak-spawn', '--host', '--directory=/', 'cat', '/proc/mounts'], capture_output=True, text=True, timeout=1, env=host_env)
+                if p.stdout:
+                    for line in p.stdout.splitlines():
+                        parts = line.split()
+                        if len(parts) >= 3:
+                            dev, m, fs = parts[0], parts[1], parts[2]
+                            if dev.startswith('/dev/') and fs not in ignored_fstypes:
+                                add_target(m, dev, "proc_mounts")
+            except Exception:
+                pass
 
-        try:
-            p = subprocess.run(['flatpak-spawn', '--host', '--directory=/', 'ls', '-d', '/mnt/*', '/media/*', '/run/media/*/*'], capture_output=True, text=True, timeout=3, env=host_env)
-            if p.stdout:
-                for line in p.stdout.splitlines():
-                    path = line.strip()
-                    if path and not path.startswith(('/proc', '/sys', '/dev')) and '*' not in path:
-                        add_target(path, "", "dir_scan")
-        except Exception:
-            pass
+        if not disks:
+            add_target("/", "/dev/root", "default")
+
+        self._cached_disk_mounts = disks
+        return disks
 
         if len(disks) <= 1:
             try:
@@ -424,6 +415,8 @@ class TouchBarInfoAction(ActionBase):
         return default
 
     def set_slot_setting(self, slot_key: str, sub_key: str, val):
+        if getattr(self, "_syncing_controls", False):
+            return
         settings = self.get_settings()
         if settings is not None:
             settings[f"{slot_key}_{sub_key}"] = val
@@ -1114,8 +1107,8 @@ class TouchBarInfoAction(ActionBase):
             )
             media_hdr.add_css_class("touchbar-subhdr-row")
 
-            media_players = self.get_available_media_players()
-            player_ids = [pid for pid, _ in media_players]
+            media_players = self.media_players_list
+            player_ids = self.media_player_ids
             player_model = Gtk.StringList()
             for _, label in media_players:
                 player_model.append(label)
@@ -1782,7 +1775,7 @@ class TouchBarInfoAction(ActionBase):
                 dk = ctrls["disk"]
                 dk["mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "disk_mode_idx", 0))
                 mount_path = self.get_slot_setting(settings, slot_key, "disk_mount_path", "/")
-                mount_paths = [p for p, _ in self.get_system_disk_mounts()]
+                mount_paths = [p for p, _ in self.disk_mounts]
                 mount_idx = mount_paths.index(mount_path) if mount_path in mount_paths else 0
                 dk["mount_combo"].set_selected(mount_idx)
 
@@ -3303,8 +3296,7 @@ class TouchBarInfoAction(ActionBase):
                     self._cached_bg_path = resolved_bg_path
                 final_image = Image.alpha_composite(self._cached_bg_image, image)
             else:
-                base = Image.new("RGBA", (800, 100), (0, 0, 0, 255))
-                final_image = Image.alpha_composite(base, image)
+                final_image = image
         except Exception as e:
             log.error(f"TouchBarInfo: Error compositing custom background image: {e}")
 
