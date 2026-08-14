@@ -3398,14 +3398,65 @@ class TouchBarInfoAction(ActionBase):
         settings = self.get_settings() or {}
         now = datetime.datetime.now()
 
-        # Check if anything changed on screen to prevent constant deck flashing/re-rendering
-        media_active = self.is_media_active_and_playing()
-        weather_repr = tuple((k, v.get("temp_str"), v.get("weathercode")) for k, v in sorted(self.weather_caches.items()))
-        cpu_val = round(self.cpu_history[-1], 1) if self.cpu_history else 0
-        ram_val = round(self.ram_history[-1], 1) if self.ram_history else 0
-        net_val = (round(self.net_tx_rate / 1024.0, 1), round(self.net_rx_rate / 1024.0, 1))
-        media_val = (self.vis_tick, self.media_state.get("title"), self.media_state.get("artist"), self.media_state.get("status"), self.media_state.get("art_url")) if media_active else "nomedia"
-        time_sig = now.strftime("%Y-%m-%d %H:%M:%S")
+        # Determine which widgets are active to only update when displayed data changes
+        any_seconds = False
+        any_time = False
+        any_date = False
+        any_cpu = False
+        any_ram = False
+        any_net = False
+        any_disk = False
+        any_weather = False
+        any_worldclock = False
+        any_media = False
+
+        for prefix in ["sec_a", "sec_b", "sec_c"]:
+            sec_mode = self.get_slot_setting(settings, prefix, "mode", 0)
+            if sec_mode == 0:
+                choices = [(self.get_slot_setting(settings, prefix, "full_widget", 0), f"{prefix}_full", True)]
+            else:
+                choices = [
+                    (self.get_slot_setting(settings, prefix, "top_widget", 0), f"{prefix}_top", False),
+                    (self.get_slot_setting(settings, prefix, "bottom_widget", 0), f"{prefix}_bot", False)
+                ]
+
+            for c, sk, is_full in choices:
+                if c == 1: any_cpu = True
+                elif c == 2: any_date = True
+                elif c == 3: any_disk = True
+                elif c == 4: any_media = True
+                elif c == 5: any_net = True
+                elif c == 6: any_ram = True
+                elif c == 7 and is_full: # Stacked Date & Time
+                    any_date = True
+                    any_time = True
+                    if self.get_slot_setting(settings, sk, "show_seconds", False):
+                        any_seconds = True
+                elif (c == 8 and is_full) or (c == 7 and not is_full): # Time
+                    any_time = True
+                    if self.get_slot_setting(settings, sk, "show_seconds", False):
+                        any_seconds = True
+                elif (c == 9 and is_full) or (c == 8 and not is_full): # Weather
+                    any_weather = True
+                elif (c == 10 and is_full) or (c == 9 and not is_full): # World Clock
+                    any_worldclock = True
+                    if self.get_slot_setting(settings, sk, "worldclock_show_seconds", False):
+                        any_seconds = True
+
+        if any_seconds:
+            time_sig = now.strftime("%Y-%m-%d %H:%M:%S")
+        elif any_time or any_worldclock:
+            time_sig = now.strftime("%Y-%m-%d %H:%M")
+        elif any_date:
+            time_sig = now.strftime("%Y-%m-%d")
+        else:
+            time_sig = "static"
+
+        cpu_val = round(self.cpu_history[-1], 1) if (any_cpu and self.cpu_history) else 0
+        ram_val = round(self.ram_history[-1], 1) if (any_ram and self.ram_history) else 0
+        net_val = (round(self.net_tx_rate / 1024.0, 1), round(self.net_rx_rate / 1024.0, 1)) if any_net else (0, 0)
+        media_val = (self.vis_tick, self.media_state.get("title"), self.media_state.get("artist"), self.media_state.get("status"), self.media_state.get("art_url")) if (any_media and self.is_media_active_and_playing()) else "nomedia"
+        weather_repr = tuple((k, v.get("temp_str"), v.get("weathercode")) for k, v in sorted(self.weather_caches.items())) if any_weather else ()
         settings_sig = hash(tuple(sorted((k, str(v)) for k, v in settings.items() if not k.startswith("_"))))
 
         combined_key = (time_sig, cpu_val, ram_val, net_val, media_val, weather_repr, settings_sig)
