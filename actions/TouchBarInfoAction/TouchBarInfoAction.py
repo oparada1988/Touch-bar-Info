@@ -45,7 +45,10 @@ class TouchBarInfoAction(ActionBase):
         self.media_state = {"status": "Stopped", "title": "", "artist": "", "album": "", "art_url": "", "identity": ""}
         self.media_art_cache = {}
         self.media_fetching_urls = set()
-        self.vis_heights = [0.05] * 16
+        self.num_vis_bars = 32
+        self.vis_heights = [0.05] * self.num_vis_bars
+        self.vis_speeds = [random.uniform(0.75, 1.35) for _ in range(self.num_vis_bars)]
+        self.vis_phases = [random.uniform(0, 6.28) for _ in range(self.num_vis_bars)]
         self.vis_tick = 0
         self.session_bus = None
 
@@ -3754,6 +3757,13 @@ class TouchBarInfoAction(ActionBase):
             artist = "Touch-bar Info"
             playback_status = "Stopped"
 
+        # Normalize Spotify / Web art URLs
+        if art_url:
+            if art_url.startswith("spotify:image:"):
+                art_url = "https://i.scdn.co/image/" + art_url.split(":")[-1]
+            elif "open.spotify.com/image/" in art_url:
+                art_url = "https://i.scdn.co/image/" + art_url.split("/")[-1]
+
         self.media_state = {
             "title": title,
             "artist": artist,
@@ -3762,36 +3772,71 @@ class TouchBarInfoAction(ActionBase):
             "status": playback_status
         }
 
-        # Advance visualizer tick and simulate smooth heights
+        # Advance visualizer tick and simulate independent equalizer bars
         self.vis_tick += 1
         is_playing = (playback_status == "Playing")
         num_bars = len(self.vis_heights)
-        for i in range(num_bars):
-            if is_playing:
-                t = self.vis_tick * 0.25
-                phase = i * 0.45
-                noise = math.sin(t + phase) * 0.35 + math.cos(t * 1.7 + phase * 0.8) * 0.25 + math.sin(t * 0.7 - phase * 1.2) * 0.2
-                val = 0.45 + noise
-                flutter = random.uniform(-0.1, 0.1)
-                target = max(0.12, min(0.98, val + flutter))
-                self.vis_heights[i] = self.vis_heights[i] * 0.45 + target * 0.55
-            else:
-                idle_baseline = 0.08 + 0.04 * math.sin(self.vis_tick * 0.05 + i * 0.3)
+
+        if is_playing:
+            t = self.vis_tick * 0.35
+            beat = (math.sin(t * 1.6) ** 4) * 0.55 + (math.sin(t * 0.8 + 1.2) ** 6) * 0.45
+            for i in range(num_bars):
+                norm_idx = i / float(max(1, num_bars - 1))
+                if norm_idx < 0.35:
+                    # Bass frequencies: heavy bounce responding to beat
+                    band_energy = beat * (1.15 - norm_idx * 0.8) + math.sin(t * 0.9 * self.vis_speeds[i] + self.vis_phases[i]) * 0.25
+                    jitter = random.uniform(0.0, 0.22)
+                elif norm_idx < 0.7:
+                    # Mid frequencies: vocal / melodic energy
+                    band_energy = 0.32 + math.sin(t * 1.5 * self.vis_speeds[i] + self.vis_phases[i]) * 0.32 + (beat * 0.28)
+                    jitter = random.uniform(-0.1, 0.22)
+                else:
+                    # High frequencies: fast treble bursts
+                    band_energy = 0.18 + math.sin(t * 2.3 * self.vis_speeds[i] + self.vis_phases[i]) * 0.25
+                    jitter = random.uniform(0.0, 0.38) if random.random() < 0.45 else -0.05
+
+                target = max(0.06, min(0.98, band_energy + jitter))
+
+                # Fast attack (bounces up sharply), smooth gravity decay
+                if target > self.vis_heights[i]:
+                    self.vis_heights[i] = self.vis_heights[i] * 0.25 + target * 0.75
+                else:
+                    self.vis_heights[i] = max(0.05, self.vis_heights[i] * 0.75 + target * 0.25)
+        else:
+            for i in range(num_bars):
+                idle_baseline = 0.05 + 0.02 * math.sin(self.vis_tick * 0.05 + i * 0.2)
                 self.vis_heights[i] = max(0.04, self.vis_heights[i] * 0.85 + idle_baseline * 0.15)
 
     def get_media_art(self, art_url: str, target_size: tuple[int, int], corner_radius: int = 8) -> Image.Image:
         tw, th = target_size
+
+        # URL Normalization
+        if art_url:
+            if art_url.startswith("spotify:image:"):
+                art_url = "https://i.scdn.co/image/" + art_url.split(":")[-1]
+            elif "open.spotify.com/image/" in art_url:
+                art_url = "https://i.scdn.co/image/" + art_url.split("/")[-1]
+
         cache_key = (art_url, tw, th, corner_radius)
-        if cache_key in self.media_art_cache:
+        if art_url and cache_key in self.media_art_cache:
             return self.media_art_cache[cache_key]
 
         raw_img = None
+        is_real_art = False
+
         if art_url:
             if art_url.startswith("file://"):
                 try:
                     p = unquote(urlparse(art_url).path)
                     if os.path.isfile(p):
                         raw_img = Image.open(p).convert("RGBA")
+                        is_real_art = True
+                except Exception:
+                    pass
+            elif os.path.isabs(art_url) and os.path.isfile(art_url):
+                try:
+                    raw_img = Image.open(art_url).convert("RGBA")
+                    is_real_art = True
                 except Exception:
                     pass
             elif art_url.startswith("data:image"):
@@ -3799,32 +3844,41 @@ class TouchBarInfoAction(ActionBase):
                     header, b64data = art_url.split(",", 1)
                     img_data = base64.b64decode(b64data)
                     raw_img = Image.open(io.BytesIO(img_data)).convert("RGBA")
+                    is_real_art = True
                 except Exception:
                     pass
             elif art_url.startswith(("http://", "https://")):
-                cache_dir = os.path.join(gl.DATA_PATH, "touchbar_media_cache") if hasattr(gl, "DATA_PATH") else "/tmp/touchbar_media_cache"
-                os.makedirs(cache_dir, exist_ok=True)
+                cache_dir = os.path.expanduser("~/.cache/touchbar_media_cache")
+                try:
+                    os.makedirs(cache_dir, exist_ok=True)
+                except Exception:
+                    cache_dir = "/tmp/touchbar_media_cache"
+                    os.makedirs(cache_dir, exist_ok=True)
+
                 url_hash = hashlib.md5(art_url.encode("utf-8")).hexdigest()
                 cached_file = os.path.join(cache_dir, f"{url_hash}.png")
                 if os.path.isfile(cached_file):
                     try:
                         raw_img = Image.open(cached_file).convert("RGBA")
+                        is_real_art = True
                     except Exception:
                         pass
                 else:
                     if art_url not in self.media_fetching_urls:
                         self.media_fetching_urls.add(art_url)
-                        def _fetch():
+                        def _fetch(target_url=art_url, out_path=cached_file):
                             try:
-                                resp = requests.get(art_url, timeout=4, headers={"User-Agent": "Mozilla/5.0"})
+                                resp = requests.get(target_url, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
                                 if resp.status_code == 200:
-                                    with open(cached_file, "wb") as f:
+                                    with open(out_path, "wb") as f:
                                         f.write(resp.content)
+                                    self.media_art_cache.clear()
+                                    self.last_rendered_key = ""
                                     GLib.idle_add(self.schedule_update_display)
                             except Exception as e:
-                                log.warning(f"TouchBarInfo: Failed to download media art {art_url}: {e}")
+                                log.warning(f"TouchBarInfo: Failed to download media art {target_url}: {e}")
                             finally:
-                                self.media_fetching_urls.discard(art_url)
+                                self.media_fetching_urls.discard(target_url)
                         Thread(target=_fetch, daemon=True).start()
 
         if raw_img is None:
@@ -3853,7 +3907,9 @@ class TouchBarInfoAction(ActionBase):
         rounded_img = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
         rounded_img.paste(cropped, (0, 0), mask)
 
-        self.media_art_cache[cache_key] = rounded_img
+        if is_real_art:
+            self.media_art_cache[cache_key] = rounded_img
+
         return rounded_img
 
     def draw_marquee_text(self, image: Image.Image, draw: ImageDraw.ImageDraw, pos: tuple[float, float], max_w: float, text: str, font, fill_en: bool = True, fill_col: tuple = (255, 255, 255, 255), out_en: bool = False, out_col: tuple = (0, 0, 0, 255), out_sz: int = 2):
@@ -3889,21 +3945,23 @@ class TouchBarInfoAction(ActionBase):
         x_min, y_min, x_max, y_max = box
         bw = x_max - x_min
         bh = y_max - y_min
-        if bw <= 10 or bh <= 6:
+        if bw <= 8 or bh <= 6:
             return
 
-        col_gap = 3
-        num_cols = min(len(heights), max(6, int((bw + col_gap) / (6 + col_gap))))
-        col_w = max(3.0, (bw - (num_cols - 1) * col_gap) / float(num_cols))
+        col_gap = 2
+        # Target ~4-6px per column
+        num_cols = min(len(heights), max(6, int((bw + col_gap) / (5 + col_gap))))
+        col_w = max(2.0, (bw - (num_cols - 1) * col_gap) / float(num_cols))
 
-        step_gap = 2
-        num_steps = max(3, int((bh + step_gap) / (4 + step_gap)))
+        step_gap = 1
+        # Target ~3px per step block (e.g. 2px block + 1px gap)
+        num_steps = max(4, int((bh + step_gap) / (3 + step_gap)))
         step_h = max(2.0, (bh - (num_steps - 1) * step_gap) / float(num_steps))
 
         for i in range(num_cols):
             val = heights[i % len(heights)]
             norm_h = max(0.0, min(1.0, float(val)))
-            active_steps = int(math.ceil(norm_h * num_steps))
+            active_steps = max(1, int(round(norm_h * num_steps)))
 
             cx_min = x_min + i * (col_w + col_gap)
             cx_max = cx_min + col_w
@@ -3989,7 +4047,7 @@ class TouchBarInfoAction(ActionBase):
             self.draw_marquee_text(image, draw, (content_x, artist_y), avail_w, artist, font_artist, artist_fill_en, artist_fill_col, artist_out_en, artist_out_col, artist_out_sz)
 
         # Visualizer
-        vis_box = (content_x, y_min + int(bh * 0.60), content_max_x, y_max - int(bh * 0.10))
+        vis_box = (content_x, y_min + int(bh * 0.58), content_max_x, y_max - int(bh * 0.08))
         if vis_style == 1:
             self.draw_wave_curves(image, draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, end_col, self.vis_tick * 0.15)
         else:
@@ -4013,7 +4071,7 @@ class TouchBarInfoAction(ActionBase):
         # 2. Right: Full Height Visualizer
         vis_x_min = art_x + art_size + int(bw * 0.04)
         vis_x_max = x_max - margin_x
-        vis_box = (vis_x_min, y_min + int(bh * 0.12), vis_x_max, y_max - int(bh * 0.12))
+        vis_box = (vis_x_min, y_min + 4, vis_x_max, y_max - 4)
 
         if vis_style == 1:
             self.draw_wave_curves(image, draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, end_col, self.vis_tick * 0.15)
