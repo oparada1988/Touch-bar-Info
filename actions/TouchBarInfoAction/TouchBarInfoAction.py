@@ -446,34 +446,30 @@ class TouchBarInfoAction(ActionBase):
         refresh_intervals = [300, 600, 900, 1800, 3600]
         settings = self.get_settings() or {}
 
-        slots_to_check = [
-            ("sec_a_full", True), ("sec_a_top", False), ("sec_a_bot", False),
-            ("sec_b_full", True), ("sec_b_top", False), ("sec_b_bot", False),
-            ("sec_c_full", True), ("sec_c_top", False), ("sec_c_bot", False)
-        ]
-
         weather_targets = []
-        for slot_key, is_full in slots_to_check:
-            prefix = slot_key[:5] # "sec_a", "sec_b", "sec_c"
+        for prefix in ["sec_a", "sec_b", "sec_c"]:
             sec_mode = self.get_slot_setting(settings, prefix, "mode", 0)
-            if is_full and sec_mode != 0:
-                continue
-            if not is_full and sec_mode == 0:
-                continue
+            if sec_mode == 0:
+                slots = [(f"{prefix}_full", self.get_slot_setting(settings, prefix, "full_widget", 0), True)]
+            else:
+                slots = [
+                    (f"{prefix}_top", self.get_slot_setting(settings, prefix, "top_widget", 0), False),
+                    (f"{prefix}_bot", self.get_slot_setting(settings, prefix, "bottom_widget", 0), False)
+                ]
 
-            w_choice = self.get_slot_setting(settings, slot_key, "widget", 0)
-            if (is_full and w_choice == 9) or (not is_full and w_choice == 8):
-                lat = self.get_slot_setting(settings, slot_key, "weather_lat", "25.7617")
-                lon = self.get_slot_setting(settings, slot_key, "weather_lon", "-80.1918")
-                unit_idx = self.get_slot_setting(settings, slot_key, "weather_unit_idx", 0)
-                ref_idx = self.get_slot_setting(settings, slot_key, "weather_refresh_idx", 2)
-                loc_name = self.get_slot_setting(settings, slot_key, "weather_location_name", "Miami")
-                interval_sec = refresh_intervals[min(ref_idx, len(refresh_intervals) - 1)]
-                weather_targets.append((lat, lon, unit_idx, interval_sec, loc_name))
+            for slot_key, w_choice, is_full in slots:
+                if (is_full and w_choice == 9) or (not is_full and w_choice == 8):
+                    lat = str(self.get_slot_setting(settings, slot_key, "weather_lat", "25.7617"))
+                    lon = str(self.get_slot_setting(settings, slot_key, "weather_lon", "-80.1918"))
+                    unit_idx = self.get_slot_setting(settings, slot_key, "weather_unit_idx", 0)
+                    ref_idx = self.get_slot_setting(settings, slot_key, "weather_refresh_idx", 2)
+                    loc_name = self.get_slot_setting(settings, slot_key, "weather_location_name", "Miami")
+                    interval_sec = refresh_intervals[min(ref_idx, len(refresh_intervals) - 1)]
+                    weather_targets.append((lat, lon, unit_idx, interval_sec, loc_name))
 
         if not weather_targets:
-            lat = settings.get("weather_lat", "25.7617")
-            lon = settings.get("weather_lon", "-80.1918")
+            lat = str(settings.get("weather_lat", "25.7617"))
+            lon = str(settings.get("weather_lon", "-80.1918"))
             unit_idx = settings.get("weather_unit_idx", 0)
             ref_idx = settings.get("weather_refresh_idx", 2)
             loc_name = settings.get("weather_location_name", "Miami")
@@ -510,6 +506,7 @@ class TouchBarInfoAction(ActionBase):
                             }
                             self.weather_caches[c_key] = res_dict
                             self.weather_cache = res_dict
+                            self.last_rendered_key = ""
                             GLib.idle_add(self.trigger_redraw)
                     except Exception as e:
                         log.error(f"TouchBarInfo: Failed to fetch weather for {t_name}: {e}")
@@ -758,6 +755,9 @@ class TouchBarInfoAction(ActionBase):
             loc_entry = Adw.EntryRow(
                 title=self.get_locale_text("actions.touchbar-info.weather-location.label", "City / Location Search")
             )
+            saved_loc = self.get_slot_setting(self.get_settings() or {}, slot_key, "weather_location_name", "Miami")
+            loc_entry.set_text(saved_loc)
+
             search_btn = Gtk.Button(label=self.get_locale_text("actions.touchbar-info.weather-search.button", "Search"))
             search_btn.set_valign(Gtk.Align.CENTER)
             loc_entry.add_suffix(search_btn)
@@ -772,18 +772,33 @@ class TouchBarInfoAction(ActionBase):
 
             slot_search_data = []
 
+            def apply_location(c_name: str, lat: str, lon: str):
+                loc_entry.set_text(c_name)
+                settings = self.get_settings()
+                if settings is not None:
+                    settings[f"{slot_key}_weather_location_name"] = c_name
+                    settings[f"{slot_key}_weather_lat"] = lat
+                    settings[f"{slot_key}_weather_lon"] = lon
+                    self.set_settings(settings)
+                    self.weather_caches.clear()
+                    self.last_rendered_key = ""
+                    self.fetch_weather_async(force=True)
+                    self.trigger_redraw()
+
             def on_search_clicked(btn):
                 query = loc_entry.get_text().strip()
                 if not query:
                     return
+                search_btn.set_sensitive(False)
                 def search_task():
                     try:
-                        url = f"https://geocoding-api.open-meteo.com/v1/search?name={quote(query)}&count=5&language=en&format=json"
+                        url = f"https://geocoding-api.open-meteo.com/v1/search?name={quote(query)}&count=10&language=en&format=json"
                         resp = requests.get(url, timeout=5)
                         if resp.status_code == 200:
                             data = resp.json()
                             results = data.get("results", [])
                             def update_ui():
+                                search_btn.set_sensitive(True)
                                 slot_search_data.clear()
                                 while res_model.get_n_items() > 0:
                                     res_model.remove(0)
@@ -799,11 +814,16 @@ class TouchBarInfoAction(ActionBase):
                                         res_model.append(label)
                                         slot_search_data.append((c_name, lat, lon))
                                     res_combo.set_visible(True)
+                                    first_c_name, first_lat, first_lon = slot_search_data[0]
+                                    apply_location(first_c_name, first_lat, first_lon)
                                 else:
                                     res_combo.set_visible(False)
                             GLib.idle_add(update_ui)
+                        else:
+                            GLib.idle_add(lambda: search_btn.set_sensitive(True))
                     except Exception as e:
                         log.error(f"TouchBarInfo: Location search error: {e}")
+                        GLib.idle_add(lambda: search_btn.set_sensitive(True))
                 Thread(target=search_task, daemon=True).start()
 
             search_btn.connect("clicked", on_search_clicked)
@@ -813,15 +833,7 @@ class TouchBarInfoAction(ActionBase):
                 sel = combo.get_selected()
                 if 0 <= sel < len(slot_search_data):
                     c_name, lat, lon = slot_search_data[sel]
-                    loc_entry.set_text(c_name)
-                    settings = self.get_settings()
-                    if settings is not None:
-                        settings[f"{slot_key}_weather_location_name"] = c_name
-                        settings[f"{slot_key}_weather_lat"] = lat
-                        settings[f"{slot_key}_weather_lon"] = lon
-                        self.set_settings(settings)
-                        self.fetch_weather_async(force=True)
-                        self.trigger_redraw()
+                    apply_location(c_name, lat, lon)
 
             res_combo.connect("notify::selected", on_res_selected)
 
@@ -2210,7 +2222,7 @@ class TouchBarInfoAction(ActionBase):
                 log.error(f"TouchBarInfo: Error loading icon {icon_path}: {e}")
         return None
 
-    def draw_weather(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_weather, font_location, fill_en, fill_col, out_en, out_col, out_sz, cache: dict = None, align: str = "left"):
+    def draw_weather(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_weather, font_location, fill_en, fill_col, out_en, out_col, out_sz, cache: dict = None, align: str = "left", default_location: str = "Miami"):
         x_min, y_min, x_max, y_max = box
         box_w = x_max - x_min
         box_h = y_max - y_min
@@ -2219,7 +2231,7 @@ class TouchBarInfoAction(ActionBase):
         temp_str = c.get("temp_str", "--°")
         wmo_code = c.get("wmo_code", 0)
         is_day = c.get("is_day", 1)
-        location_str = c.get("location", "Miami")
+        location_str = c.get("location") or default_location
 
         icon_file = self.get_weather_icon_filename(wmo_code, is_day)
         target_icon_h = int(box_h * 0.70)
@@ -3639,7 +3651,7 @@ class TouchBarInfoAction(ActionBase):
         ram_val = round(self.ram_history[-1], 1) if (any_ram and self.ram_history) else 0
         net_val = (round(self.net_tx_rate / 1024.0, 1), round(self.net_rx_rate / 1024.0, 1)) if any_net else (0, 0)
         media_val = (self.vis_tick, self.media_state.get("title"), self.media_state.get("artist"), self.media_state.get("status"), self.media_state.get("art_url")) if (any_media and self.is_media_active_and_playing()) else "nomedia"
-        weather_repr = tuple((k, v.get("temp_str"), v.get("weathercode")) for k, v in sorted(self.weather_caches.items())) if any_weather else ()
+        weather_repr = tuple((k, v.get("temp_str"), v.get("wmo_code"), v.get("location")) for k, v in sorted(self.weather_caches.items())) if any_weather else ()
         settings_sig = hash(tuple(sorted((k, str(v)) for k, v in settings.items() if not k.startswith("_"))))
         accent_col = self.get_streamcontroller_accent_color()
         highlight_sig = (self._active_highlight_slot, accent_col)
@@ -3779,8 +3791,9 @@ class TouchBarInfoAction(ActionBase):
                 self.draw_single(draw, box, time_str, font_time, t_fill_en, t_fill_col, t_out_en, t_out_col, t_out_sz, align=align)
 
             elif (widget_choice == 9 and is_full) or (widget_choice == 8 and not is_full): # Weather
-                lat = self.get_slot_setting(settings, slot_key, "weather_lat", "25.7617")
-                lon = self.get_slot_setting(settings, slot_key, "weather_lon", "-80.1918")
+                lat = str(self.get_slot_setting(settings, slot_key, "weather_lat", "25.7617"))
+                lon = str(self.get_slot_setting(settings, slot_key, "weather_lon", "-80.1918"))
+                loc_name = self.get_slot_setting(settings, slot_key, "weather_location_name", "Miami")
                 unit_idx = self.get_slot_setting(settings, slot_key, "weather_unit_idx", 0)
                 temp_unit = "fahrenheit" if unit_idx == 0 else "celsius"
                 c_key = f"{lat}_{lon}_{temp_unit}"
@@ -3794,7 +3807,7 @@ class TouchBarInfoAction(ActionBase):
                 w_out_en = self.get_slot_setting(settings, slot_key, "weather_outline_enabled", False)
                 w_out_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "weather_outline_color", "#000000FF"), (0, 0, 0, 255))
                 w_out_sz = self.get_slot_setting(settings, slot_key, "weather_outline_size", 2)
-                self.draw_weather(image, draw, box, font_weather, font_loc, w_fill_en, w_fill_col, w_out_en, w_out_col, w_out_sz, slot_cache, align=align)
+                self.draw_weather(image, draw, box, font_weather, font_loc, w_fill_en, w_fill_col, w_out_en, w_out_col, w_out_sz, slot_cache, align=align, default_location=loc_name)
 
             elif (widget_choice == 10 and is_full) or (widget_choice == 9 and not is_full): # World Clock
                 city_idx = self.get_slot_setting(settings, slot_key, "worldclock_city_idx", 0)
