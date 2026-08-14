@@ -2,6 +2,13 @@
 from src.backend.PluginManager.ActionBase import ActionBase
 from src.backend.DeckManagement.InputIdentifier import Input
 
+try:
+    from StreamDeck.Devices.StreamDeck import DialEventType
+except Exception:
+    class DialEventType:
+        PUSH = 1
+        TURN = 2
+
 # Import python modules
 import os
 import glob
@@ -285,6 +292,17 @@ class TouchBarInfoAction(ActionBase):
         self.media_color_mode_options = [
             self.get_locale_text("actions.touchbar-info.media-colormode.solid", "Solid Color"),
             self.get_locale_text("actions.touchbar-info.media-colormode.gradient", "Dynamic Gradient (3 Colors)")
+        ]
+
+        self.media_dial_options = [
+            self.get_locale_text("actions.touchbar-info.media-dial-opt.media", "Media Player Control (Prev / Next / Play-Pause)"),
+            self.get_locale_text("actions.touchbar-info.media-dial-opt.volume", "Volume Control (Vol - / Vol + / Mute)"),
+            self.get_locale_text("actions.touchbar-info.media-dial-opt.none", "Disabled (No Dial Action)")
+        ]
+
+        self.media_vol_target_options = [
+            self.get_locale_text("actions.touchbar-info.media-vol-target.system", "System Master Volume (PipeWire / PulseAudio)"),
+            self.get_locale_text("actions.touchbar-info.media-vol-target.mpris", "Active Media Player (MPRIS)")
         ]
 
         if not hasattr(self, "_cached_media_players") or not self._cached_media_players:
@@ -1356,9 +1374,70 @@ class TouchBarInfoAction(ActionBase):
                 artist_expander.add_row(artist_out_color_row)
                 artist_expander.add_row(artist_out_size_spin)
 
+            dial_expander = None
+            dial_left_combo = None
+            dial_right_combo = None
+            dial_single_combo = None
+            vol_step_spin = None
+            vol_target_combo = None
+
+            if is_full_mode:
+                dial_expander = Adw.ExpanderRow(
+                    title=self.get_locale_text("actions.touchbar-info.hdr-media-dials.label", "Hardware Dial Controls"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.hdr-media-dials.subtitle", "Configure rotary dial actions below this touch section")
+                )
+
+                if "sec_b" in slot_key:
+                    dial_left_model = Gtk.StringList()
+                    for opt in self.media_dial_options: dial_left_model.append(opt)
+                    dial_left_combo = Adw.ComboRow(
+                        model=dial_left_model,
+                        title=self.get_locale_text("actions.touchbar-info.media-dial-left.label", "Left Dial Action (Section B)"),
+                        subtitle=self.get_locale_text("actions.touchbar-info.media-dial-left.subtitle", "Action assigned to the dial below Section B (Left)")
+                    )
+                    dial_left_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "media_dial_left", combo.get_selected()))
+
+                    dial_right_model = Gtk.StringList()
+                    for opt in self.media_dial_options: dial_right_model.append(opt)
+                    dial_right_combo = Adw.ComboRow(
+                        model=dial_right_model,
+                        title=self.get_locale_text("actions.touchbar-info.media-dial-right.label", "Right Dial Action (Section B)"),
+                        subtitle=self.get_locale_text("actions.touchbar-info.media-dial-right.subtitle", "Action assigned to the dial below Section B (Right)")
+                    )
+                    dial_right_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "media_dial_right", combo.get_selected()))
+
+                    dial_expander.add_row(dial_left_combo)
+                    dial_expander.add_row(dial_right_combo)
+                else:
+                    dial_single_model = Gtk.StringList()
+                    for opt in self.media_dial_options: dial_single_model.append(opt)
+                    dial_single_combo = Adw.ComboRow(
+                        model=dial_single_model,
+                        title=self.get_locale_text("actions.touchbar-info.media-dial-single.label", "Dial Action"),
+                        subtitle=self.get_locale_text("actions.touchbar-info.media-dial-single.subtitle", "Action assigned to the dial directly below this section")
+                    )
+                    dial_single_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "media_dial_single", combo.get_selected()))
+                    dial_expander.add_row(dial_single_combo)
+
+                vol_step_spin = Adw.SpinRow.new_with_range(1, 20, 1)
+                vol_step_spin.set_title(self.get_locale_text("actions.touchbar-info.media-vol-step.label", "Volume Step Size"))
+                vol_step_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.media-vol-step.subtitle", "Percentage volume adjustment per dial turn tick (e.g. 5%)"))
+                vol_step_spin.connect("notify::value", lambda spin, pspec, sk=slot_key: self.set_slot_setting(sk, "media_vol_step", int(spin.get_value())))
+                dial_expander.add_row(vol_step_spin)
+
+                vol_target_model = Gtk.StringList()
+                for opt in self.media_vol_target_options: vol_target_model.append(opt)
+                vol_target_combo = Adw.ComboRow(
+                    model=vol_target_model,
+                    title=self.get_locale_text("actions.touchbar-info.media-vol-target.label", "Volume Control Target"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.media-vol-target.subtitle", "Target audio device or player for volume adjustments")
+                )
+                vol_target_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "media_vol_target", combo.get_selected()))
+                dial_expander.add_row(vol_target_combo)
+
             all_rows = [media_hdr, player_combo, vis_combo, color_mode_combo, solid_color_row, grad_start_row, grad_mid_row, grad_end_row]
             if is_full_mode:
-                all_rows.extend([artist_expander, song_expander])
+                all_rows.extend([dial_expander, artist_expander, song_expander])
 
             return {
                 "media_hdr": media_hdr, "player_combo": player_combo, "vis_combo": vis_combo,
@@ -1366,6 +1445,9 @@ class TouchBarInfoAction(ActionBase):
                 "solid_color_btn": solid_color_btn, "grad_start_row": grad_start_row,
                 "grad_start_btn": grad_start_btn, "grad_mid_row": grad_mid_row, "grad_mid_btn": grad_mid_btn,
                 "grad_end_row": grad_end_row, "grad_end_btn": grad_end_btn,
+                "dial_expander": dial_expander, "dial_left_combo": dial_left_combo,
+                "dial_right_combo": dial_right_combo, "dial_single_combo": dial_single_combo,
+                "vol_step_spin": vol_step_spin, "vol_target_combo": vol_target_combo,
                 "artist_expander": artist_expander, "artist_font_btn": artist_font_btn,
                 "artist_fill_sw": artist_fill_sw, "artist_fill_color_btn": artist_fill_color_btn,
                 "artist_out_sw": artist_out_sw, "artist_out_color_btn": artist_out_color_btn,
@@ -1937,6 +2019,17 @@ class TouchBarInfoAction(ActionBase):
                 self.set_color_button_rgba(m["grad_end_btn"], self.get_slot_setting(settings, slot_key, "media_grad_end", "#FF2A6DFF"))
 
                 if m["is_full_mode"]:
+                    if m.get("dial_left_combo"):
+                        m["dial_left_combo"].set_selected(self.get_slot_setting(settings, slot_key, "media_dial_left", 0))
+                    if m.get("dial_right_combo"):
+                        m["dial_right_combo"].set_selected(self.get_slot_setting(settings, slot_key, "media_dial_right", 1))
+                    if m.get("dial_single_combo"):
+                        m["dial_single_combo"].set_selected(self.get_slot_setting(settings, slot_key, "media_dial_single", 0))
+                    if m.get("vol_step_spin"):
+                        m["vol_step_spin"].set_value(self.get_slot_setting(settings, slot_key, "media_vol_step", 5))
+                    if m.get("vol_target_combo"):
+                        m["vol_target_combo"].set_selected(self.get_slot_setting(settings, slot_key, "media_vol_target", 0))
+
                     m["song_font_btn"].set_font(self.get_slot_setting(settings, slot_key, "media_song_font_str", "DejaVu Sans Bold 18"))
                     s_fill_en = self.get_slot_setting(settings, slot_key, "media_song_fill_enabled", True)
                     m["song_fill_sw"].set_active(s_fill_en)
@@ -2929,17 +3022,305 @@ class TouchBarInfoAction(ActionBase):
             local_t = (t - 0.5) * 2.0
             return self.interpolate_color(c_mid, c_end, local_t)
 
+    def _resolve_target_player_name(self, player_id: str = "auto") -> str | None:
+        try:
+            if not self.session_bus:
+                self.session_bus = dbus.SessionBus()
+            player_names = [name for name in self.session_bus.list_names() if name.startswith("org.mpris.MediaPlayer2.")]
+        except Exception:
+            player_names = []
+
+        if not player_names:
+            return None
+
+        if player_id and player_id != "auto":
+            for name in player_names:
+                if player_id.lower() in name.lower():
+                    return name
+
+        # Auto-detect: search for active Playing player first, else Paused, else first available
+        playing_candidates = []
+        paused_candidates = []
+        for name in player_names:
+            try:
+                obj = self.session_bus.get_object(name, "/org/mpris/MediaPlayer2")
+                props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
+                status = str(props.Get("org.mpris.MediaPlayer2.Player", "PlaybackStatus"))
+                if status == "Playing":
+                    playing_candidates.append(name)
+                elif status == "Paused":
+                    paused_candidates.append(name)
+            except Exception:
+                pass
+        if playing_candidates:
+            return playing_candidates[0]
+        elif paused_candidates:
+            return paused_candidates[0]
+        return player_names[0]
+
+    def send_media_command(self, cmd: str, target_player_id: str = "auto"):
+        def _run():
+            try:
+                if not self.session_bus:
+                    self.session_bus = dbus.SessionBus()
+                target_name = self._resolve_target_player_name(target_player_id)
+                if target_name:
+                    obj = self.session_bus.get_object(target_name, "/org/mpris/MediaPlayer2")
+                    player_iface = dbus.Interface(obj, "org.mpris.MediaPlayer2.Player")
+                    if cmd == "next":
+                        player_iface.Next()
+                    elif cmd == "previous":
+                        player_iface.Previous()
+                    elif cmd == "play_pause":
+                        player_iface.PlayPause()
+                    elif cmd == "play":
+                        player_iface.Play()
+                    elif cmd == "pause":
+                        player_iface.Pause()
+                    elif cmd == "stop":
+                        player_iface.Stop()
+
+                    time.sleep(0.12)
+                    self.update_media_state(poll_dbus=True)
+                    GLib.idle_add(self.schedule_update_display)
+            except Exception as e:
+                log.error(f"TouchPulse: Error executing media command '{cmd}': {e}")
+
+        Thread(target=_run, daemon=True).start()
+
+    def adjust_volume(self, delta_percent: int, vol_target: int = 0, target_player_id: str = "auto"):
+        def _run():
+            try:
+                if vol_target == 0: # System Master Sink Volume
+                    sign = "+" if delta_percent > 0 else "-"
+                    amount = abs(delta_percent)
+                    # Try pactl
+                    try:
+                        subprocess.run(
+                            ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{sign}{amount}%"],
+                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                        )
+                        return
+                    except Exception:
+                        pass
+                    # Try wpctl
+                    try:
+                        step_str = f"{amount}%+" if delta_percent > 0 else f"{amount}%-"
+                        subprocess.run(
+                            ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", step_str],
+                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                        )
+                        return
+                    except Exception:
+                        pass
+                else: # MPRIS Player Volume
+                    if not self.session_bus:
+                        self.session_bus = dbus.SessionBus()
+                    target_name = self._resolve_target_player_name(target_player_id)
+                    if target_name:
+                        obj = self.session_bus.get_object(target_name, "/org/mpris/MediaPlayer2")
+                        props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
+                        curr_vol = float(props.Get("org.mpris.MediaPlayer2.Player", "Volume"))
+                        new_vol = max(0.0, min(1.0, curr_vol + (delta_percent / 100.0)))
+                        props.Set("org.mpris.MediaPlayer2.Player", "Volume", dbus.Double(new_vol))
+            except Exception as e:
+                log.error(f"TouchPulse: Error adjusting volume: {e}")
+
+        Thread(target=_run, daemon=True).start()
+
+    def toggle_audio_mute(self, vol_target: int = 0, target_player_id: str = "auto"):
+        def _run():
+            try:
+                if vol_target == 0: # System Master Mute
+                    try:
+                        subprocess.run(
+                            ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"],
+                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                        )
+                        return
+                    except Exception:
+                        pass
+                    try:
+                        subprocess.run(
+                            ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"],
+                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                        )
+                        return
+                    except Exception:
+                        pass
+                else: # MPRIS Player Mute simulation
+                    if not self.session_bus:
+                        self.session_bus = dbus.SessionBus()
+                    target_name = self._resolve_target_player_name(target_player_id)
+                    if target_name:
+                        obj = self.session_bus.get_object(target_name, "/org/mpris/MediaPlayer2")
+                        props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
+                        curr_vol = float(props.Get("org.mpris.MediaPlayer2.Player", "Volume"))
+                        if curr_vol > 0.01:
+                            self._mpris_saved_vol = curr_vol
+                            props.Set("org.mpris.MediaPlayer2.Player", "Volume", dbus.Double(0.0))
+                        else:
+                            restore_vol = getattr(self, "_mpris_saved_vol", 0.5)
+                            props.Set("org.mpris.MediaPlayer2.Player", "Volume", dbus.Double(restore_vol))
+            except Exception as e:
+                log.error(f"TouchPulse: Error toggling audio mute: {e}")
+
+        Thread(target=_run, daemon=True).start()
+
+    def setup_dial_interceptor(self):
+        if not hasattr(self, "deck_controller") or self.deck_controller is None:
+            return
+        if getattr(self.deck_controller, "_touchpulse_dial_hooked", False):
+            return
+
+        original_dial_callback = getattr(self.deck_controller, "dial_event_callback", None)
+        if not original_dial_callback:
+            return
+
+        def hooked_dial_callback(deck, dial, *args, **kwargs):
+            try:
+                self.handle_deck_dial_event(dial, *args, **kwargs)
+            except Exception as e:
+                log.error(f"TouchPulse: dial hook handler error: {e}")
+            if original_dial_callback:
+                return original_dial_callback(deck, dial, *args, **kwargs)
+
+        self.deck_controller.dial_event_callback = hooked_dial_callback
+        if hasattr(self.deck_controller, "deck") and self.deck_controller.deck is not None:
+            try:
+                self.deck_controller.deck.set_dial_callback(hooked_dial_callback)
+            except Exception as e:
+                log.warning(f"TouchPulse: Could not rebind deck dial callback: {e}")
+        self.deck_controller._touchpulse_dial_hooked = True
+
+    def handle_deck_dial_event(self, dial_index, *args, **kwargs):
+        if hasattr(self, "page") and hasattr(self, "deck_controller"):
+            if getattr(self.deck_controller, "active_page", None) != self.page:
+                return
+
+        try:
+            dial_idx = int(dial_index)
+        except Exception:
+            return
+
+        event_type = args[0] if len(args) > 0 else kwargs.get("event_type", None)
+        value = args[1] if len(args) > 1 else kwargs.get("value", None)
+
+        event_str = str(event_type).upper()
+        is_turn = (event_type == getattr(DialEventType, "TURN", None) or "TURN" in event_str)
+        is_push = (event_type == getattr(DialEventType, "PUSH", None) or "PUSH" in event_str)
+
+        if not is_turn and not is_push:
+            return
+
+        settings = self.get_settings() or {}
+        action_mode = None # 0: Media Control, 1: Volume Control, 2: Disabled
+        vol_step = 5
+        vol_target = 0
+        target_player = "auto"
+
+        if dial_idx == 0: # Section A
+            sec_mode = self.get_slot_setting(settings, "sec_a", "mode", 0)
+            if sec_mode == 0:
+                widget = self.get_slot_setting(settings, "sec_a", "full_widget", 0)
+                sk = "sec_a_full"
+            else:
+                widget = self.get_slot_setting(settings, "sec_a", "top_widget", 0)
+                sk = "sec_a_top"
+                if widget != 4:
+                    widget = self.get_slot_setting(settings, "sec_a", "bottom_widget", 0)
+                    sk = "sec_a_bot"
+            if widget == 4:
+                action_mode = self.get_slot_setting(settings, sk, "media_dial_single", 0)
+                vol_step = self.get_slot_setting(settings, sk, "media_vol_step", 5)
+                vol_target = self.get_slot_setting(settings, sk, "media_vol_target", 0)
+                target_player = self.get_slot_setting(settings, sk, "media_player_id", "auto")
+
+        elif dial_idx == 1: # Section B Left
+            sec_mode = self.get_slot_setting(settings, "sec_b", "mode", 0)
+            if sec_mode == 0: # Full mode
+                widget = self.get_slot_setting(settings, "sec_b", "full_widget", 0)
+                sk = "sec_b_full"
+                if widget == 4:
+                    action_mode = self.get_slot_setting(settings, sk, "media_dial_left", 0) # default 0: Media Control
+                    vol_step = self.get_slot_setting(settings, sk, "media_vol_step", 5)
+                    vol_target = self.get_slot_setting(settings, sk, "media_vol_target", 0)
+                    target_player = self.get_slot_setting(settings, sk, "media_player_id", "auto")
+            else: # Split mode
+                widget = self.get_slot_setting(settings, "sec_b", "top_widget", 0)
+                sk = "sec_b_top"
+                if widget != 4:
+                    widget = self.get_slot_setting(settings, "sec_b", "bottom_widget", 0)
+                    sk = "sec_b_bot"
+                if widget == 4:
+                    action_mode = self.get_slot_setting(settings, sk, "media_dial_left", 0)
+                    vol_step = self.get_slot_setting(settings, sk, "media_vol_step", 5)
+                    vol_target = self.get_slot_setting(settings, sk, "media_vol_target", 0)
+                    target_player = self.get_slot_setting(settings, sk, "media_player_id", "auto")
+
+        elif dial_idx == 2: # Section B Right
+            sec_mode = self.get_slot_setting(settings, "sec_b", "mode", 0)
+            if sec_mode == 0: # Full mode
+                widget = self.get_slot_setting(settings, "sec_b", "full_widget", 0)
+                sk = "sec_b_full"
+                if widget == 4:
+                    action_mode = self.get_slot_setting(settings, sk, "media_dial_right", 1) # default 1: Volume Control
+                    vol_step = self.get_slot_setting(settings, sk, "media_vol_step", 5)
+                    vol_target = self.get_slot_setting(settings, sk, "media_vol_target", 0)
+                    target_player = self.get_slot_setting(settings, sk, "media_player_id", "auto")
+            else: # Split mode
+                widget = self.get_slot_setting(settings, "sec_b", "top_widget", 0)
+                sk = "sec_b_top"
+                if widget != 4:
+                    widget = self.get_slot_setting(settings, "sec_b", "bottom_widget", 0)
+                    sk = "sec_b_bot"
+                if widget == 4:
+                    action_mode = self.get_slot_setting(settings, sk, "media_dial_right", 1)
+                    vol_step = self.get_slot_setting(settings, sk, "media_vol_step", 5)
+                    vol_target = self.get_slot_setting(settings, sk, "media_vol_target", 0)
+                    target_player = self.get_slot_setting(settings, sk, "media_player_id", "auto")
+
+        elif dial_idx == 3: # Section C
+            sec_mode = self.get_slot_setting(settings, "sec_c", "mode", 0)
+            if sec_mode == 0:
+                widget = self.get_slot_setting(settings, "sec_c", "full_widget", 0)
+                sk = "sec_c_full"
+            else:
+                widget = self.get_slot_setting(settings, "sec_c", "top_widget", 0)
+                sk = "sec_c_top"
+                if widget != 4:
+                    widget = self.get_slot_setting(settings, "sec_c", "bottom_widget", 0)
+                    sk = "sec_c_bot"
+            if widget == 4:
+                action_mode = self.get_slot_setting(settings, sk, "media_dial_single", 0)
+                vol_step = self.get_slot_setting(settings, sk, "media_vol_step", 5)
+                vol_target = self.get_slot_setting(settings, sk, "media_vol_target", 0)
+                target_player = self.get_slot_setting(settings, sk, "media_player_id", "auto")
+
+        if action_mode is None or action_mode == 2:
+            return
+
+        if action_mode == 0: # Media Player Control
+            if is_turn:
+                if value < 0:
+                    self.send_media_command("previous", target_player)
+                elif value > 0:
+                    self.send_media_command("next", target_player)
+            elif is_push and bool(value):
+                self.send_media_command("play_pause", target_player)
+
+        elif action_mode == 1: # Volume Control
+            if is_turn:
+                step_mult = int(value) if isinstance(value, (int, float)) and value != 0 else (1 if value > 0 else -1)
+                delta = vol_step * step_mult
+                self.adjust_volume(delta, vol_target, target_player)
+            elif is_push and bool(value):
+                self.toggle_audio_mute(vol_target, target_player)
+
     def update_media_state(self, poll_dbus: bool = True):
         now_ts = time.time()
         if poll_dbus or (now_ts - self._last_dbus_poll > 0.8):
             self._last_dbus_poll = now_ts
-            try:
-                if not self.session_bus:
-                    self.session_bus = dbus.SessionBus()
-                player_names = [name for name in self.session_bus.list_names() if name.startswith("org.mpris.MediaPlayer2.")]
-            except Exception:
-                player_names = []
-
             settings = self.get_settings() or {}
             player_id = settings.get("media_player_id", "") if isinstance(settings, dict) else ""
             if not player_id:
@@ -2947,34 +3328,7 @@ class TouchBarInfoAction(ActionBase):
                 player_id = self.media_player_ids[player_idx] if hasattr(self, "media_player_ids") and isinstance(player_idx, int) and player_idx < len(self.media_player_ids) else "auto"
             player_id = str(player_id) if isinstance(player_id, str) else "auto"
 
-            target_name = None
-            if player_id and player_id != "auto":
-                for name in player_names:
-                    if player_id in name.lower():
-                        target_name = name
-                        break
-
-            # Auto-detect: search for active Playing player first, else Paused, else first available
-            if target_name is None and player_names and self.session_bus:
-                playing_candidates = []
-                paused_candidates = []
-                for name in player_names:
-                    try:
-                        obj = self.session_bus.get_object(name, "/org/mpris/MediaPlayer2")
-                        props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
-                        status = str(props.Get("org.mpris.MediaPlayer2.Player", "PlaybackStatus"))
-                        if status == "Playing":
-                            playing_candidates.append(name)
-                        elif status == "Paused":
-                            paused_candidates.append(name)
-                    except Exception:
-                        pass
-                if playing_candidates:
-                    target_name = playing_candidates[0]
-                elif paused_candidates:
-                    target_name = paused_candidates[0]
-                else:
-                    target_name = player_names[0]
+            target_name = self._resolve_target_player_name(player_id)
 
             title = ""
             artist = ""
@@ -3542,6 +3896,7 @@ class TouchBarInfoAction(ActionBase):
             log.error(f"TouchBarInfo: Error updating system stats: {e}")
 
     def on_ready(self):
+        self.setup_dial_interceptor()
         self.fetch_weather_async()
         self.update_system_stats()
         self.update_media_state(poll_dbus=True)

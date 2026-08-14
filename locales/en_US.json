@@ -139,5 +139,22 @@
     "actions.touchbar-info.media-artist-font.label": "Artist Text Font & Styling",
     "actions.touchbar-info.media-artist-font.subtitle": "Choose font family, size, fill color, and outline for artist name",
     "actions.touchbar-info.media-song-font.label": "Song Title Font & Styling",
-    "actions.touchbar-info.media-song-font.subtitle": "Choose font family, size, fill color, and outline for song title"
+    "actions.touchbar-info.media-song-font.subtitle": "Choose font family, size, fill color, and outline for song title",
+    "actions.touchbar-info.hdr-media-dials.label": "Hardware Dial Controls",
+    "actions.touchbar-info.hdr-media-dials.subtitle": "Configure rotary dial actions below this touch section",
+    "actions.touchbar-info.media-dial-left.label": "Left Dial Action (Section B)",
+    "actions.touchbar-info.media-dial-left.subtitle": "Action assigned to the dial below Section B (Left)",
+    "actions.touchbar-info.media-dial-right.label": "Right Dial Action (Section B)",
+    "actions.touchbar-info.media-dial-right.subtitle": "Action assigned to the dial below Section B (Right)",
+    "actions.touchbar-info.media-dial-single.label": "Dial Action",
+    "actions.touchbar-info.media-dial-single.subtitle": "Action assigned to the dial directly below this section",
+    "actions.touchbar-info.media-dial-opt.media": "Media Player Control (Prev / Next / Play-Pause)",
+    "actions.touchbar-info.media-dial-opt.volume": "Volume Control (Vol - / Vol + / Mute)",
+    "actions.touchbar-info.media-dial-opt.none": "Disabled (No Dial Action)",
+    "actions.touchbar-info.media-vol-step.label": "Volume Step Size",
+    "actions.touchbar-info.media-vol-step.subtitle": "Percentage volume adjustment per dial turn tick (e.g. 5%)",
+    "actions.touchbar-info.media-vol-target.label": "Volume Control Target",
+    "actions.touchbar-info.media-vol-target.subtitle": "Target audio device or player for volume adjustments",
+    "actions.touchbar-info.media-vol-target.system": "System Master Volume (PipeWire / PulseAudio)",
+    "actions.touchbar-info.media-vol-target.mpris": "Active Media Player (MPRIS)"
 }

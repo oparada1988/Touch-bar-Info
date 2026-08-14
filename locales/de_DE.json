@@ -139,5 +139,22 @@
     "actions.touchbar-info.media-artist-font.label": "Künstler-Schriftart und Stil",
     "actions.touchbar-info.media-artist-font.subtitle": "Schriftfamilie, Größe, Füllfarbe und Umrandung für Künstlernamen wählen",
     "actions.touchbar-info.media-song-font.label": "Songtitel-Schriftart und Stil",
-    "actions.touchbar-info.media-song-font.subtitle": "Schriftfamilie, Größe, Füllfarbe und Umrandung für Songtitel wählen"
+    "actions.touchbar-info.media-song-font.subtitle": "Schriftfamilie, Größe, Füllfarbe und Umrandung für Songtitel wählen",
+    "actions.touchbar-info.hdr-media-dials.label": "Hardware-Drehregler-Steuerung",
+    "actions.touchbar-info.hdr-media-dials.subtitle": "Aktionen für die Drehregler unter diesem Bereich konfigurieren",
+    "actions.touchbar-info.media-dial-left.label": "Linker Drehregler (Bereich B)",
+    "actions.touchbar-info.media-dial-left.subtitle": "Aktion für den linken Drehregler unter Bereich B",
+    "actions.touchbar-info.media-dial-right.label": "Rechter Drehregler (Bereich B)",
+    "actions.touchbar-info.media-dial-right.subtitle": "Aktion für den rechten Drehregler unter Bereich B",
+    "actions.touchbar-info.media-dial-single.label": "Drehregler-Aktion",
+    "actions.touchbar-info.media-dial-single.subtitle": "Aktion für den Drehregler direkt unter diesem Bereich",
+    "actions.touchbar-info.media-dial-opt.media": "Mediaplayer-Steuerung (Zurück / Weiter / Wiedergabe-Pause)",
+    "actions.touchbar-info.media-dial-opt.volume": "Lautstärkesteuerung (Leiser / Lauter / Stummschalten)",
+    "actions.touchbar-info.media-dial-opt.none": "Deaktiviert (Keine Drehregler-Aktion)",
+    "actions.touchbar-info.media-vol-step.label": "Lautstärke-Schrittgröße",
+    "actions.touchbar-info.media-vol-step.subtitle": "Prozentuale Lautstärkeanpassung pro Drehregler-Tick (z.B. 5%)",
+    "actions.touchbar-info.media-vol-target.label": "Lautstärkeziel",
+    "actions.touchbar-info.media-vol-target.subtitle": "Zielgerät oder Mediaplayer für Lautstärkeanpassungen",
+    "actions.touchbar-info.media-vol-target.system": "System-Hauptlautstärke (PipeWire / PulseAudio)",
+    "actions.touchbar-info.media-vol-target.mpris": "Aktiver Mediaplayer (MPRIS)"
 }
