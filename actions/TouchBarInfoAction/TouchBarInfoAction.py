@@ -11,6 +11,12 @@ import requests
 import psutil
 import json
 import math
+import random
+import io
+import base64
+import hashlib
+from urllib.parse import urlparse, unquote
+import dbus
 from threading import Thread, Timer
 from PIL import Image, ImageDraw, ImageFont
 
@@ -34,6 +40,14 @@ class TouchBarInfoAction(ActionBase):
         self.update_vis_callbacks = []
         self._syncing_controls = False
         self._update_scheduled = False
+
+        # Media Player State
+        self.media_state = {"status": "Stopped", "title": "", "artist": "", "album": "", "art_url": "", "identity": ""}
+        self.media_art_cache = {}
+        self.media_fetching_urls = set()
+        self.vis_heights = [0.05] * 16
+        self.vis_tick = 0
+        self.session_bus = None
 
         # System Monitor Stats Buffers
         self.cpu_history = [0.0] * 20
@@ -67,7 +81,8 @@ class TouchBarInfoAction(ActionBase):
             self.get_locale_text("actions.touchbar-info.widget.stacked", "Stacked Date and Time"),
             self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
             self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
-            self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock")
+            self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock"),
+            self.get_locale_text("actions.touchbar-info.widget.media", "Media Player")
         ]
         self.split_widget_options = [
             self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
@@ -78,7 +93,20 @@ class TouchBarInfoAction(ActionBase):
             self.get_locale_text("actions.touchbar-info.widget.ram", "RAM Usage"),
             self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
             self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
-            self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock")
+            self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock"),
+            self.get_locale_text("actions.touchbar-info.widget.media", "Media Player")
+        ]
+        self.media_player_options = [
+            self.get_locale_text("actions.touchbar-info.media-player-auto", "Active Player (Automatic)"),
+            "Spotify", "VLC", "Firefox", "Chrome", "Chromium", "Rhythmbox", "Cider", "Brave"
+        ]
+        self.media_vis_options = [
+            self.get_locale_text("actions.touchbar-info.media-vis.stepped-bars", "Wave Stepped Bars"),
+            self.get_locale_text("actions.touchbar-info.media-vis.wave-curves", "Wave Curves")
+        ]
+        self.media_color_mode_options = [
+            self.get_locale_text("actions.touchbar-info.media-color-mode.solid", "Solid Color"),
+            self.get_locale_text("actions.touchbar-info.media-color-mode.gradient", "Gradient")
         ]
         self.worldclock_cities = [
             ("London", "Europe/London"),
@@ -168,6 +196,7 @@ class TouchBarInfoAction(ActionBase):
             return
         self.collect_system_stats()
         self.fetch_weather_async(force=True)
+        self.update_media_state()
         self.update_display()
 
     def on_tick(self) -> None:
@@ -175,6 +204,7 @@ class TouchBarInfoAction(ActionBase):
             return
         self.collect_system_stats()
         self.fetch_weather_async(force=False)
+        self.update_media_state()
         self.update_display()
 
     def on_remove(self) -> None:
@@ -492,6 +522,26 @@ class TouchBarInfoAction(ActionBase):
         self.all_disk_mode_combos = []
         self.all_disk_mount_combos = []
         self.all_disk_browse_rows = []
+
+        # Media Player Global Trackers
+        self.all_media_player_combos = []
+        self.all_media_vis_combos = []
+        self.all_media_color_mode_combos = []
+        self.all_media_solid_color_btns = []
+        self.all_media_grad_start_btns = []
+        self.all_media_grad_end_btns = []
+        self.all_media_artist_font_btns = []
+        self.all_media_artist_fill_switches = []
+        self.all_media_artist_fill_color_btns = []
+        self.all_media_artist_out_switches = []
+        self.all_media_artist_out_color_btns = []
+        self.all_media_artist_out_size_spins = []
+        self.all_media_song_font_btns = []
+        self.all_media_song_fill_switches = []
+        self.all_media_song_fill_color_btns = []
+        self.all_media_song_out_switches = []
+        self.all_media_song_out_color_btns = []
+        self.all_media_song_out_size_spins = []
 
         self.search_results_data = []
 
@@ -910,6 +960,184 @@ class TouchBarInfoAction(ActionBase):
                 "all_rows": [city_combo, view_combo, label_entry, tz_entry, sec_sw, offset_sw, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
             }
 
+        # Helper to create Media controls
+        def build_media_controls(is_full_mode=True):
+            media_hdr = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.media-settings.label", "Media Player Settings"),
+                subtitle=self.get_locale_text("actions.touchbar-info.media-settings.subtitle", "Player source, visualizer style, colors, gradient, and font styling")
+            )
+            media_hdr.add_css_class("touchbar-subhdr-row")
+
+            player_model = Gtk.StringList()
+            for opt in self.media_player_options: player_model.append(opt)
+            player_combo = Adw.ComboRow(
+                model=player_model,
+                title=self.get_locale_text("actions.touchbar-info.media-player-source.label", "Media Player Source"),
+                subtitle=self.get_locale_text("actions.touchbar-info.media-player-source.subtitle", "Choose specific player or auto-detect active playing player")
+            )
+
+            vis_model = Gtk.StringList()
+            for opt in self.media_vis_options: vis_model.append(opt)
+            vis_combo = Adw.ComboRow(
+                model=vis_model,
+                title=self.get_locale_text("actions.touchbar-info.media-vis-style.label", "Visualizer Style"),
+                subtitle=self.get_locale_text("actions.touchbar-info.media-vis-style.subtitle", "Select visualizer animation type")
+            )
+
+            color_mode_model = Gtk.StringList()
+            for opt in self.media_color_mode_options: color_mode_model.append(opt)
+            color_mode_combo = Adw.ComboRow(
+                model=color_mode_model,
+                title=self.get_locale_text("actions.touchbar-info.media-color-mode.label", "Visualizer Color Mode"),
+                subtitle=self.get_locale_text("actions.touchbar-info.media-color-mode.subtitle", "Choose solid color or gradient coloring")
+            )
+
+            # Solid Color
+            solid_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.media-solid-color.label", "Visualizer Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.media-solid-color.subtitle", "Color for visualizer bars or waves")
+            )
+            solid_color_btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog.new())
+            solid_color_btn.set_valign(Gtk.Align.CENTER)
+            solid_color_row.add_suffix(solid_color_btn)
+
+            # Gradient Start Color
+            grad_start_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.media-grad-start.label", "Gradient Start Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.media-grad-start.subtitle", "Bottom for Stepped Bars / Left for Wave Curves")
+            )
+            grad_start_btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog.new())
+            grad_start_btn.set_valign(Gtk.Align.CENTER)
+            grad_start_row.add_suffix(grad_start_btn)
+
+            # Gradient End Color
+            grad_end_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.media-grad-end.label", "Gradient End Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.media-grad-end.subtitle", "Top for Stepped Bars / Right for Wave Curves")
+            )
+            grad_end_btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog.new())
+            grad_end_btn.set_valign(Gtk.Align.CENTER)
+            grad_end_row.add_suffix(grad_end_btn)
+
+            # Artist typography (only in full mode)
+            artist_font_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.media-artist-font.label", "Artist Font and Size"),
+                subtitle=self.get_locale_text("actions.touchbar-info.media-artist-font.subtitle", "Choose font family, style, and size for artist text")
+            )
+            artist_font_btn = Gtk.FontButton.new()
+            artist_font_btn.set_use_font(False)
+            artist_font_btn.set_use_size(False)
+            artist_font_btn.set_valign(Gtk.Align.CENTER)
+            artist_font_btn.set_hexpand(False)
+            artist_font_row.add_suffix(artist_font_btn)
+
+            artist_fill_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Artist Text Fill"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill for artist")
+            )
+            artist_fill_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Artist Fill Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for artist text interior fill")
+            )
+            artist_fill_color_btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog.new())
+            artist_fill_color_btn.set_valign(Gtk.Align.CENTER)
+            artist_fill_color_row.add_suffix(artist_fill_color_btn)
+
+            artist_out_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Artist Text Outline"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around artist text")
+            )
+            artist_out_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Artist Outline Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for artist text outline")
+            )
+            artist_out_color_btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog.new())
+            artist_out_color_btn.set_valign(Gtk.Align.CENTER)
+            artist_out_color_row.add_suffix(artist_out_color_btn)
+
+            artist_out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
+            artist_out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Artist Outline Thickness"))
+            artist_out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+
+            # Song typography (only in full mode)
+            song_font_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.media-song-font.label", "Song Title Font and Size"),
+                subtitle=self.get_locale_text("actions.touchbar-info.media-song-font.subtitle", "Choose font family, style, and size for song title")
+            )
+            song_font_btn = Gtk.FontButton.new()
+            song_font_btn.set_use_font(False)
+            song_font_btn.set_use_size(False)
+            song_font_btn.set_valign(Gtk.Align.CENTER)
+            song_font_btn.set_hexpand(False)
+            song_font_row.add_suffix(song_font_btn)
+
+            song_fill_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Song Title Fill"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill for song title")
+            )
+            song_fill_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Song Title Fill Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for song title interior fill")
+            )
+            song_fill_color_btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog.new())
+            song_fill_color_btn.set_valign(Gtk.Align.CENTER)
+            song_fill_color_row.add_suffix(song_fill_color_btn)
+
+            song_out_sw = Adw.SwitchRow(
+                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Song Title Outline"),
+                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around song title")
+            )
+            song_out_color_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Song Title Outline Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for song title outline")
+            )
+            song_out_color_btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog.new())
+            song_out_color_btn.set_valign(Gtk.Align.CENTER)
+            song_out_color_row.add_suffix(song_out_color_btn)
+
+            song_out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
+            song_out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Song Title Outline Thickness"))
+            song_out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+
+            self.all_media_player_combos.append(player_combo)
+            self.all_media_vis_combos.append(vis_combo)
+            self.all_media_color_mode_combos.append(color_mode_combo)
+            self.all_media_solid_color_btns.append(solid_color_btn)
+            self.all_media_grad_start_btns.append(grad_start_btn)
+            self.all_media_grad_end_btns.append(grad_end_btn)
+            self.all_media_artist_font_btns.append(artist_font_btn)
+            self.all_media_artist_fill_switches.append(artist_fill_sw)
+            self.all_media_artist_fill_color_btns.append(artist_fill_color_btn)
+            self.all_media_artist_out_switches.append(artist_out_sw)
+            self.all_media_artist_out_color_btns.append(artist_out_color_btn)
+            self.all_media_artist_out_size_spins.append(artist_out_size_spin)
+            self.all_media_song_font_btns.append(song_font_btn)
+            self.all_media_song_fill_switches.append(song_fill_sw)
+            self.all_media_song_fill_color_btns.append(song_fill_color_btn)
+            self.all_media_song_out_switches.append(song_out_sw)
+            self.all_media_song_out_color_btns.append(song_out_color_btn)
+            self.all_media_song_out_size_spins.append(song_out_size_spin)
+
+            all_rows = [media_hdr, player_combo, vis_combo, color_mode_combo, solid_color_row, grad_start_row, grad_end_row]
+            if is_full_mode:
+                all_rows.extend([
+                    artist_font_row, artist_fill_sw, artist_fill_color_row, artist_out_sw, artist_out_color_row, artist_out_size_spin,
+                    song_font_row, song_fill_sw, song_fill_color_row, song_out_sw, song_out_color_row, song_out_size_spin
+                ])
+
+            return {
+                "media_hdr": media_hdr, "player_combo": player_combo, "vis_combo": vis_combo,
+                "color_mode_combo": color_mode_combo, "solid_color_row": solid_color_row,
+                "grad_start_row": grad_start_row, "grad_end_row": grad_end_row,
+                "artist_font_row": artist_font_row, "artist_fill_sw": artist_fill_sw,
+                "artist_fill_color_row": artist_fill_color_row, "artist_out_sw": artist_out_sw,
+                "artist_out_color_row": artist_out_color_row, "artist_out_size_spin": artist_out_size_spin,
+                "song_font_row": song_font_row, "song_fill_sw": song_fill_sw,
+                "song_fill_color_row": song_fill_color_row, "song_out_sw": song_out_sw,
+                "song_out_color_row": song_out_color_row, "song_out_size_spin": song_out_size_spin,
+                "all_rows": all_rows, "is_full_mode": is_full_mode
+            }
+
         # Helper to create Section Expander with clean subsection expanders for split mode
         def create_section_expander(title_key, default_title, subtitle_key, default_sub, prefix_key):
             expander = Adw.ExpanderRow(
@@ -941,6 +1169,7 @@ class TouchBarInfoAction(ActionBase):
             full_ram_ctrls = build_ram_controls()
             full_disk_ctrls = build_disk_controls()
             full_worldclock_ctrls = build_worldclock_controls()
+            full_media_ctrls = build_media_controls(is_full_mode=True)
 
             # --- 2. Top Subsection Expander ---
             top_expander = Adw.ExpanderRow(
@@ -962,6 +1191,7 @@ class TouchBarInfoAction(ActionBase):
             top_ram_ctrls = build_ram_controls()
             top_disk_ctrls = build_disk_controls()
             top_worldclock_ctrls = build_worldclock_controls()
+            top_media_ctrls = build_media_controls(is_full_mode=False)
 
             top_expander.add_row(top_combo)
             for r in top_date_ctrls["all_rows"]: top_expander.add_row(r)
@@ -972,6 +1202,7 @@ class TouchBarInfoAction(ActionBase):
             for r in top_ram_ctrls["all_rows"]: top_expander.add_row(r)
             for r in top_disk_ctrls["all_rows"]: top_expander.add_row(r)
             for r in top_worldclock_ctrls["all_rows"]: top_expander.add_row(r)
+            for r in top_media_ctrls["all_rows"]: top_expander.add_row(r)
 
             # --- 3. Bottom Subsection Expander ---
             bot_expander = Adw.ExpanderRow(
@@ -993,6 +1224,7 @@ class TouchBarInfoAction(ActionBase):
             bot_ram_ctrls = build_ram_controls()
             bot_disk_ctrls = build_disk_controls()
             bot_worldclock_ctrls = build_worldclock_controls()
+            bot_media_ctrls = build_media_controls(is_full_mode=False)
 
             bot_expander.add_row(bot_combo)
             for r in bot_date_ctrls["all_rows"]: bot_expander.add_row(r)
@@ -1003,6 +1235,7 @@ class TouchBarInfoAction(ActionBase):
             for r in bot_ram_ctrls["all_rows"]: bot_expander.add_row(r)
             for r in bot_disk_ctrls["all_rows"]: bot_expander.add_row(r)
             for r in bot_worldclock_ctrls["all_rows"]: bot_expander.add_row(r)
+            for r in bot_media_ctrls["all_rows"]: bot_expander.add_row(r)
 
             # Add rows to parent section expander
             expander.add_row(mode_combo)
@@ -1016,12 +1249,13 @@ class TouchBarInfoAction(ActionBase):
             for r in full_ram_ctrls["all_rows"]: expander.add_row(r)
             for r in full_disk_ctrls["all_rows"]: expander.add_row(r)
             for r in full_worldclock_ctrls["all_rows"]: expander.add_row(r)
+            for r in full_media_ctrls["all_rows"]: expander.add_row(r)
 
             expander.add_row(top_expander)
             expander.add_row(bot_expander)
 
             # --- Unified Group Visibility Helper ---
-            def update_group_vis(widget_choice, is_active, date_ctrls, time_ctrls, weather_ctrls, cpu_ctrls, net_ctrls, ram_ctrls, disk_ctrls, worldclock_ctrls, is_full_mode=True):
+            def update_group_vis(widget_choice, is_active, date_ctrls, time_ctrls, weather_ctrls, cpu_ctrls, net_ctrls, ram_ctrls, disk_ctrls, worldclock_ctrls, media_ctrls, is_full_mode=True):
                 # Hide all if group is not active
                 if not is_active:
                     for r in date_ctrls["all_rows"]: r.set_visible(False)
@@ -1032,6 +1266,7 @@ class TouchBarInfoAction(ActionBase):
                     for r in ram_ctrls["all_rows"]: r.set_visible(False)
                     for r in disk_ctrls["all_rows"]: r.set_visible(False)
                     for r in worldclock_ctrls["all_rows"]: r.set_visible(False)
+                    for r in media_ctrls["all_rows"]: r.set_visible(False)
                     return
 
                 # Date Visibility (Full: 2 [Date], 6 [Stacked] | Split: 2 [Date])
@@ -1114,6 +1349,39 @@ class TouchBarInfoAction(ActionBase):
                 worldclock_ctrls["out_size_spin"].set_visible(show_wc)
                 worldclock_ctrls["out_size_spin"].set_sensitive(show_wc and worldclock_ctrls["out_sw"].get_active())
 
+                # Media Player Visibility (Full: 10 | Split: 9)
+                show_media = (widget_choice == 10) if is_full_mode else (widget_choice == 9)
+                is_gradient = (media_ctrls["color_mode_combo"].get_selected() == 1)
+
+                media_ctrls["media_hdr"].set_visible(show_media)
+                media_ctrls["player_combo"].set_visible(show_media)
+                media_ctrls["vis_combo"].set_visible(show_media)
+                media_ctrls["color_mode_combo"].set_visible(show_media)
+                media_ctrls["solid_color_row"].set_visible(show_media and not is_gradient)
+                media_ctrls["grad_start_row"].set_visible(show_media and is_gradient)
+                media_ctrls["grad_end_row"].set_visible(show_media and is_gradient)
+
+                if is_full_mode:
+                    media_ctrls["artist_font_row"].set_visible(show_media)
+                    media_ctrls["artist_fill_sw"].set_visible(show_media)
+                    media_ctrls["artist_fill_color_row"].set_visible(show_media)
+                    media_ctrls["artist_fill_color_row"].set_sensitive(show_media and media_ctrls["artist_fill_sw"].get_active())
+                    media_ctrls["artist_out_sw"].set_visible(show_media)
+                    media_ctrls["artist_out_color_row"].set_visible(show_media)
+                    media_ctrls["artist_out_color_row"].set_sensitive(show_media and media_ctrls["artist_out_sw"].get_active())
+                    media_ctrls["artist_out_size_spin"].set_visible(show_media)
+                    media_ctrls["artist_out_size_spin"].set_sensitive(show_media and media_ctrls["artist_out_sw"].get_active())
+
+                    media_ctrls["song_font_row"].set_visible(show_media)
+                    media_ctrls["song_fill_sw"].set_visible(show_media)
+                    media_ctrls["song_fill_color_row"].set_visible(show_media)
+                    media_ctrls["song_fill_color_row"].set_sensitive(show_media and media_ctrls["song_fill_sw"].get_active())
+                    media_ctrls["song_out_sw"].set_visible(show_media)
+                    media_ctrls["song_out_color_row"].set_visible(show_media)
+                    media_ctrls["song_out_color_row"].set_sensitive(show_media and media_ctrls["song_out_sw"].get_active())
+                    media_ctrls["song_out_size_spin"].set_visible(show_media)
+                    media_ctrls["song_out_size_spin"].set_sensitive(show_media and media_ctrls["song_out_sw"].get_active())
+
             # Main Section Visibility Controller
             def update_visibility():
                 is_full = (mode_combo.get_selected() == 0)
@@ -1133,6 +1401,7 @@ class TouchBarInfoAction(ActionBase):
                     ram_ctrls=full_ram_ctrls,
                     disk_ctrls=full_disk_ctrls,
                     worldclock_ctrls=full_worldclock_ctrls,
+                    media_ctrls=full_media_ctrls,
                     is_full_mode=True
                 )
 
@@ -1148,6 +1417,7 @@ class TouchBarInfoAction(ActionBase):
                     ram_ctrls=top_ram_ctrls,
                     disk_ctrls=top_disk_ctrls,
                     worldclock_ctrls=top_worldclock_ctrls,
+                    media_ctrls=top_media_ctrls,
                     is_full_mode=False
                 )
 
@@ -1163,6 +1433,7 @@ class TouchBarInfoAction(ActionBase):
                     ram_ctrls=bot_ram_ctrls,
                     disk_ctrls=bot_disk_ctrls,
                     worldclock_ctrls=bot_worldclock_ctrls,
+                    media_ctrls=bot_media_ctrls,
                     is_full_mode=False
                 )
 
@@ -1173,17 +1444,27 @@ class TouchBarInfoAction(ActionBase):
             bot_combo.connect("notify::selected", lambda *a: update_visibility())
 
             # Connect Sub-switch Signals to update_visibility
-            for ctrls in [full_date_ctrls, full_time_ctrls, full_weather_ctrls, full_worldclock_ctrls, top_date_ctrls, top_time_ctrls, top_weather_ctrls, top_worldclock_ctrls, bot_date_ctrls, bot_time_ctrls, bot_weather_ctrls, bot_worldclock_ctrls]:
+            for ctrls in [full_date_ctrls, full_time_ctrls, full_weather_ctrls, full_worldclock_ctrls, full_media_ctrls, top_date_ctrls, top_time_ctrls, top_weather_ctrls, top_worldclock_ctrls, top_media_ctrls, bot_date_ctrls, bot_time_ctrls, bot_weather_ctrls, bot_worldclock_ctrls, bot_media_ctrls]:
                 if "city_combo" in ctrls:
                     ctrls["city_combo"].connect("notify::selected", lambda *a: update_visibility())
                 if "view_combo" in ctrls:
                     ctrls["view_combo"].connect("notify::selected", lambda *a: update_visibility())
+                if "color_mode_combo" in ctrls:
+                    ctrls["color_mode_combo"].connect("notify::selected", lambda *a: update_visibility())
                 if "sec_sw" in ctrls:
                     ctrls["sec_sw"].connect("notify::active", lambda *a: update_visibility())
                 if "fill_sw" in ctrls:
                     ctrls["fill_sw"].connect("notify::active", lambda *a: update_visibility())
                 if "out_sw" in ctrls:
                     ctrls["out_sw"].connect("notify::active", lambda *a: update_visibility())
+                if "artist_fill_sw" in ctrls:
+                    ctrls["artist_fill_sw"].connect("notify::active", lambda *a: update_visibility())
+                if "artist_out_sw" in ctrls:
+                    ctrls["artist_out_sw"].connect("notify::active", lambda *a: update_visibility())
+                if "song_fill_sw" in ctrls:
+                    ctrls["song_fill_sw"].connect("notify::active", lambda *a: update_visibility())
+                if "song_out_sw" in ctrls:
+                    ctrls["song_out_sw"].connect("notify::active", lambda *a: update_visibility())
 
             self.update_vis_callbacks.append(update_visibility)
             update_visibility()
@@ -1289,6 +1570,28 @@ class TouchBarInfoAction(ActionBase):
         for btn in self.all_worldclock_out_color_btns: btn.connect("color-set", self.on_worldclock_out_color_set)
         for spin in self.all_worldclock_out_size_spins: spin.connect("notify::value", self.on_worldclock_out_size_changed)
 
+        # Media Player Signals
+        for combo in self.all_media_player_combos: combo.connect("notify::selected", self.on_media_player_changed)
+        for combo in self.all_media_vis_combos: combo.connect("notify::selected", self.on_media_vis_changed)
+        for combo in self.all_media_color_mode_combos: combo.connect("notify::selected", self.on_media_color_mode_changed)
+        for btn in self.all_media_solid_color_btns: btn.connect("color-set", self.on_media_solid_color_set)
+        for btn in self.all_media_grad_start_btns: btn.connect("color-set", self.on_media_grad_start_set)
+        for btn in self.all_media_grad_end_btns: btn.connect("color-set", self.on_media_grad_end_set)
+
+        for fb in self.all_media_artist_font_btns: fb.connect("font-set", self.on_media_artist_font_set)
+        for sw in self.all_media_artist_fill_switches: sw.connect("notify::active", self.on_media_artist_fill_toggled)
+        for btn in self.all_media_artist_fill_color_btns: btn.connect("color-set", self.on_media_artist_fill_color_set)
+        for sw in self.all_media_artist_out_switches: sw.connect("notify::active", self.on_media_artist_out_toggled)
+        for btn in self.all_media_artist_out_color_btns: btn.connect("color-set", self.on_media_artist_out_color_set)
+        for spin in self.all_media_artist_out_size_spins: spin.connect("notify::value", self.on_media_artist_out_size_changed)
+
+        for fb in self.all_media_song_font_btns: fb.connect("font-set", self.on_media_song_font_set)
+        for sw in self.all_media_song_fill_switches: sw.connect("notify::active", self.on_media_song_fill_toggled)
+        for btn in self.all_media_song_fill_color_btns: btn.connect("color-set", self.on_media_song_fill_color_set)
+        for sw in self.all_media_song_out_switches: sw.connect("notify::active", self.on_media_song_out_toggled)
+        for btn in self.all_media_song_out_color_btns: btn.connect("color-set", self.on_media_song_out_color_set)
+        for spin in self.all_media_song_out_size_spins: spin.connect("notify::value", self.on_media_song_out_size_changed)
+
         # Custom Touch Bar Background Row
         self.bg_image_row = Adw.ActionRow(
             title=self.get_locale_text("actions.touchbar-info.bg-image.label", "Custom Touch Bar Background Wallpaper"),
@@ -1387,6 +1690,28 @@ class TouchBarInfoAction(ActionBase):
         worldclock_outline_color = settings.setdefault("worldclock_outline_color", "#000000FF")
         worldclock_outline_size = settings.setdefault("worldclock_outline_size", 2)
 
+        # Media Player Defaults
+        media_player_idx = settings.setdefault("media_player_idx", 0)
+        media_vis_style_idx = settings.setdefault("media_vis_style_idx", 0)
+        media_color_mode_idx = settings.setdefault("media_color_mode_idx", 0)
+        media_solid_color = settings.setdefault("media_solid_color", "#FFFFFFFF")
+        media_grad_start = settings.setdefault("media_grad_start", "#00D2FFFF")
+        media_grad_end = settings.setdefault("media_grad_end", "#FF2A6DFF")
+
+        media_artist_font_str = settings.setdefault("media_artist_font_str", "DejaVu Sans Bold 18")
+        media_artist_fill_enabled = settings.setdefault("media_artist_fill_enabled", True)
+        media_artist_font_color = settings.setdefault("media_artist_font_color", "#FFFFFFFF")
+        media_artist_outline_enabled = settings.setdefault("media_artist_outline_enabled", False)
+        media_artist_outline_color = settings.setdefault("media_artist_outline_color", "#000000FF")
+        media_artist_outline_size = settings.setdefault("media_artist_outline_size", 2)
+
+        media_song_font_str = settings.setdefault("media_song_font_str", "DejaVu Sans Bold 18")
+        media_song_fill_enabled = settings.setdefault("media_song_fill_enabled", True)
+        media_song_font_color = settings.setdefault("media_song_font_color", "#FFFFFFFF")
+        media_song_outline_enabled = settings.setdefault("media_song_outline_enabled", False)
+        media_song_outline_color = settings.setdefault("media_song_outline_color", "#000000FF")
+        media_song_outline_size = settings.setdefault("media_song_outline_size", 2)
+
         # Sync Date/Time basic controls
         for sw in self.all_time_24h_switches: sw.set_active(use_24h)
         for sw in self.all_time_sec_switches: sw.set_active(show_seconds)
@@ -1478,6 +1803,31 @@ class TouchBarInfoAction(ActionBase):
         for sw in self.all_worldclock_out_switches: sw.set_active(worldclock_outline_enabled)
         for btn in self.all_worldclock_out_color_btns: self.set_color_button_rgba(btn, worldclock_outline_color)
         for spin in self.all_worldclock_out_size_spins: spin.set_value(worldclock_outline_size)
+
+        # Sync Media Player Controls
+        for combo in self.all_media_player_combos:
+            if 0 <= media_player_idx < len(self.media_player_options): combo.set_selected(media_player_idx)
+        for combo in self.all_media_vis_combos:
+            if 0 <= media_vis_style_idx < len(self.media_vis_options): combo.set_selected(media_vis_style_idx)
+        for combo in self.all_media_color_mode_combos:
+            if 0 <= media_color_mode_idx < len(self.media_color_mode_options): combo.set_selected(media_color_mode_idx)
+        for btn in self.all_media_solid_color_btns: self.set_color_button_rgba(btn, media_solid_color)
+        for btn in self.all_media_grad_start_btns: self.set_color_button_rgba(btn, media_grad_start)
+        for btn in self.all_media_grad_end_btns: self.set_color_button_rgba(btn, media_grad_end)
+
+        for fb in self.all_media_artist_font_btns: fb.set_font(media_artist_font_str)
+        for sw in self.all_media_artist_fill_switches: sw.set_active(media_artist_fill_enabled)
+        for btn in self.all_media_artist_fill_color_btns: self.set_color_button_rgba(btn, media_artist_font_color)
+        for sw in self.all_media_artist_out_switches: sw.set_active(media_artist_outline_enabled)
+        for btn in self.all_media_artist_out_color_btns: self.set_color_button_rgba(btn, media_artist_outline_color)
+        for spin in self.all_media_artist_out_size_spins: spin.set_value(media_artist_outline_size)
+
+        for fb in self.all_media_song_font_btns: fb.set_font(media_song_font_str)
+        for sw in self.all_media_song_fill_switches: sw.set_active(media_song_fill_enabled)
+        for btn in self.all_media_song_fill_color_btns: self.set_color_button_rgba(btn, media_song_font_color)
+        for sw in self.all_media_song_out_switches: sw.set_active(media_song_outline_enabled)
+        for btn in self.all_media_song_out_color_btns: self.set_color_button_rgba(btn, media_song_outline_color)
+        for spin in self.all_media_song_out_size_spins: spin.set_value(media_song_outline_size)
 
     def set_color_button_rgba(self, button: Gtk.ColorButton, hex_str: str):
         try:
@@ -2238,6 +2588,289 @@ class TouchBarInfoAction(ActionBase):
                 val = int(spin.get_value())
                 settings["worldclock_outline_size"] = val
                 for s in self.all_worldclock_out_size_spins:
+                    if s != spin and int(s.get_value()) != val: s.set_value(val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    # --- Media Player Callbacks ---
+    def on_media_player_changed(self, combo, *args):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = combo.get_selected()
+                settings["media_player_idx"] = val
+                for c in self.all_media_player_combos:
+                    if c != combo and c.get_selected() != val: c.set_selected(val)
+                self.set_settings(settings)
+                self.trigger_redraw()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_vis_changed(self, combo, *args):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = combo.get_selected()
+                settings["media_vis_style_idx"] = val
+                for c in self.all_media_vis_combos:
+                    if c != combo and c.get_selected() != val: c.set_selected(val)
+                self.set_settings(settings)
+                self.trigger_redraw()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_color_mode_changed(self, combo, *args):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = combo.get_selected()
+                settings["media_color_mode_idx"] = val
+                for c in self.all_media_color_mode_combos:
+                    if c != combo and c.get_selected() != val: c.set_selected(val)
+                self.set_settings(settings)
+                self.notify_visibility_change()
+                self.trigger_redraw()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_solid_color_set(self, button):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["media_solid_color"] = hex_val
+                for btn in self.all_media_solid_color_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_grad_start_set(self, button):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["media_grad_start"] = hex_val
+                for btn in self.all_media_grad_start_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_grad_end_set(self, button):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["media_grad_end"] = hex_val
+                for btn in self.all_media_grad_end_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_artist_font_set(self, font_btn):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = font_btn.get_font()
+                settings["media_artist_font_str"] = val
+                for fb in self.all_media_artist_font_btns:
+                    if fb != font_btn: fb.set_font(val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_artist_fill_toggled(self, switch, *args):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = switch.get_active()
+                settings["media_artist_fill_enabled"] = val
+                for sw in self.all_media_artist_fill_switches:
+                    if sw != switch and sw.get_active() != val: sw.set_active(val)
+                self.set_settings(settings)
+                self.notify_visibility_change()
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_artist_fill_color_set(self, button):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["media_artist_font_color"] = hex_val
+                for btn in self.all_media_artist_fill_color_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_artist_out_toggled(self, switch, *args):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = switch.get_active()
+                settings["media_artist_outline_enabled"] = val
+                for sw in self.all_media_artist_out_switches:
+                    if sw != switch and sw.get_active() != val: sw.set_active(val)
+                self.set_settings(settings)
+                self.notify_visibility_change()
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_artist_out_color_set(self, button):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["media_artist_outline_color"] = hex_val
+                for btn in self.all_media_artist_out_color_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_artist_out_size_changed(self, spin, *args):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = int(spin.get_value())
+                settings["media_artist_outline_size"] = val
+                for s in self.all_media_artist_out_size_spins:
+                    if s != spin and int(s.get_value()) != val: s.set_value(val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_song_font_set(self, font_btn):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = font_btn.get_font()
+                settings["media_song_font_str"] = val
+                for fb in self.all_media_song_font_btns:
+                    if fb != font_btn: fb.set_font(val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_song_fill_toggled(self, switch, *args):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = switch.get_active()
+                settings["media_song_fill_enabled"] = val
+                for sw in self.all_media_song_fill_switches:
+                    if sw != switch and sw.get_active() != val: sw.set_active(val)
+                self.set_settings(settings)
+                self.notify_visibility_change()
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_song_fill_color_set(self, button):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["media_song_font_color"] = hex_val
+                for btn in self.all_media_song_fill_color_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_song_out_toggled(self, switch, *args):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = switch.get_active()
+                settings["media_song_outline_enabled"] = val
+                for sw in self.all_media_song_out_switches:
+                    if sw != switch and sw.get_active() != val: sw.set_active(val)
+                self.set_settings(settings)
+                self.notify_visibility_change()
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_song_out_color_set(self, button):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["media_song_outline_color"] = hex_val
+                for btn in self.all_media_song_out_color_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_song_out_size_changed(self, spin, *args):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                val = int(spin.get_value())
+                settings["media_song_outline_size"] = val
+                for s in self.all_media_song_out_size_spins:
                     if s != spin and int(s.get_value()) != val: s.set_value(val)
                 self.set_settings(settings)
                 self.schedule_update_display()
@@ -3016,6 +3649,377 @@ class TouchBarInfoAction(ActionBase):
                 self.render_styled_text(draw, (center_x, city_y), disp_city, font_city, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
                 self.render_styled_text(draw, (center_x, time_y), full_time_line, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
+    # --- Media Player Drawers & Helpers ---
+    def interpolate_color(self, c1: tuple, c2: tuple, t: float) -> tuple:
+        t = max(0.0, min(1.0, float(t)))
+        r = int(c1[0] + (c2[0] - c1[0]) * t)
+        g = int(c1[1] + (c2[1] - c1[1]) * t)
+        b = int(c1[2] + (c2[2] - c1[2]) * t)
+        a = int(c1[3] + (c2[3] - c1[3]) * t) if len(c1) > 3 and len(c2) > 3 else 255
+        return (r, g, b, a)
+
+    def update_media_state(self):
+        try:
+            if not self.session_bus:
+                self.session_bus = dbus.SessionBus()
+            player_names = [name for name in self.session_bus.list_names() if name.startswith("org.mpris.MediaPlayer2.")]
+        except Exception:
+            player_names = []
+
+        settings = self.get_settings() or {}
+        player_idx = settings.get("media_player_idx", 0)
+
+        target_name = None
+        if player_idx == 1: # Spotify
+            for name in player_names:
+                if "spotify" in name.lower():
+                    target_name = name
+                    break
+        elif player_idx == 2: # Chrome/Chromium
+            for name in player_names:
+                if "chrome" in name.lower() or "chromium" in name.lower():
+                    target_name = name
+                    break
+        elif player_idx == 3: # Firefox
+            for name in player_names:
+                if "firefox" in name.lower():
+                    target_name = name
+                    break
+        elif player_idx == 4: # VLC
+            for name in player_names:
+                if "vlc" in name.lower():
+                    target_name = name
+                    break
+        elif player_idx == 5: # Rhythmbox
+            for name in player_names:
+                if "rhythmbox" in name.lower():
+                    target_name = name
+                    break
+        elif player_idx == 6: # Generic
+            if player_names:
+                target_name = player_names[0]
+
+        # Auto-detect: search for active Playing player first, else Paused, else first available
+        if target_name is None and player_names and self.session_bus:
+            playing_candidates = []
+            paused_candidates = []
+            for name in player_names:
+                try:
+                    obj = self.session_bus.get_object(name, "/org/mpris/MediaPlayer2")
+                    props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
+                    status = str(props.Get("org.mpris.MediaPlayer2.Player", "PlaybackStatus"))
+                    if status == "Playing":
+                        playing_candidates.append(name)
+                    elif status == "Paused":
+                        paused_candidates.append(name)
+                except Exception:
+                    pass
+            if playing_candidates:
+                target_name = playing_candidates[0]
+            elif paused_candidates:
+                target_name = paused_candidates[0]
+            else:
+                target_name = player_names[0]
+
+        title = ""
+        artist = ""
+        album = ""
+        art_url = ""
+        playback_status = "Stopped"
+
+        if target_name and self.session_bus:
+            try:
+                obj = self.session_bus.get_object(target_name, "/org/mpris/MediaPlayer2")
+                props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
+                playback_status = str(props.Get("org.mpris.MediaPlayer2.Player", "PlaybackStatus"))
+                metadata = props.Get("org.mpris.MediaPlayer2.Player", "Metadata")
+                if metadata:
+                    if "xesam:title" in metadata:
+                        title = str(metadata["xesam:title"])
+                    if "xesam:artist" in metadata:
+                        raw_artist = metadata["xesam:artist"]
+                        if isinstance(raw_artist, (list, dbus.Array)):
+                            artist = ", ".join(str(a) for a in raw_artist if str(a))
+                        else:
+                            artist = str(raw_artist)
+                    if "xesam:album" in metadata:
+                        album = str(metadata["xesam:album"])
+                    if "mpris:artUrl" in metadata:
+                        art_url = str(metadata["mpris:artUrl"])
+            except Exception:
+                pass
+
+        if not title and not artist:
+            title = "No Media Playing"
+            artist = "Touch-bar Info"
+            playback_status = "Stopped"
+
+        self.media_state = {
+            "title": title,
+            "artist": artist,
+            "album": album,
+            "art_url": art_url,
+            "status": playback_status
+        }
+
+        # Advance visualizer tick and simulate smooth heights
+        self.vis_tick += 1
+        is_playing = (playback_status == "Playing")
+        num_bars = len(self.vis_heights)
+        for i in range(num_bars):
+            if is_playing:
+                t = self.vis_tick * 0.25
+                phase = i * 0.45
+                noise = math.sin(t + phase) * 0.35 + math.cos(t * 1.7 + phase * 0.8) * 0.25 + math.sin(t * 0.7 - phase * 1.2) * 0.2
+                val = 0.45 + noise
+                flutter = random.uniform(-0.1, 0.1)
+                target = max(0.12, min(0.98, val + flutter))
+                self.vis_heights[i] = self.vis_heights[i] * 0.45 + target * 0.55
+            else:
+                idle_baseline = 0.08 + 0.04 * math.sin(self.vis_tick * 0.05 + i * 0.3)
+                self.vis_heights[i] = max(0.04, self.vis_heights[i] * 0.85 + idle_baseline * 0.15)
+
+    def get_media_art(self, art_url: str, target_size: tuple[int, int], corner_radius: int = 8) -> Image.Image:
+        tw, th = target_size
+        cache_key = (art_url, tw, th, corner_radius)
+        if cache_key in self.media_art_cache:
+            return self.media_art_cache[cache_key]
+
+        raw_img = None
+        if art_url:
+            if art_url.startswith("file://"):
+                try:
+                    p = unquote(urlparse(art_url).path)
+                    if os.path.isfile(p):
+                        raw_img = Image.open(p).convert("RGBA")
+                except Exception:
+                    pass
+            elif art_url.startswith("data:image"):
+                try:
+                    header, b64data = art_url.split(",", 1)
+                    img_data = base64.b64decode(b64data)
+                    raw_img = Image.open(io.BytesIO(img_data)).convert("RGBA")
+                except Exception:
+                    pass
+            elif art_url.startswith(("http://", "https://")):
+                cache_dir = os.path.join(gl.DATA_PATH, "touchbar_media_cache") if hasattr(gl, "DATA_PATH") else "/tmp/touchbar_media_cache"
+                os.makedirs(cache_dir, exist_ok=True)
+                url_hash = hashlib.md5(art_url.encode("utf-8")).hexdigest()
+                cached_file = os.path.join(cache_dir, f"{url_hash}.png")
+                if os.path.isfile(cached_file):
+                    try:
+                        raw_img = Image.open(cached_file).convert("RGBA")
+                    except Exception:
+                        pass
+                else:
+                    if art_url not in self.media_fetching_urls:
+                        self.media_fetching_urls.add(art_url)
+                        def _fetch():
+                            try:
+                                resp = requests.get(art_url, timeout=4, headers={"User-Agent": "Mozilla/5.0"})
+                                if resp.status_code == 200:
+                                    with open(cached_file, "wb") as f:
+                                        f.write(resp.content)
+                                    GLib.idle_add(self.schedule_update_display)
+                            except Exception as e:
+                                log.warning(f"TouchBarInfo: Failed to download media art {art_url}: {e}")
+                            finally:
+                                self.media_fetching_urls.discard(art_url)
+                        Thread(target=_fetch, daemon=True).start()
+
+        if raw_img is None:
+            placeholder_path = os.path.join(self.plugin_base.PATH, "assets", "media_placeholder.png")
+            if os.path.isfile(placeholder_path):
+                try:
+                    raw_img = Image.open(placeholder_path).convert("RGBA")
+                except Exception:
+                    pass
+            if raw_img is None:
+                raw_img = Image.new("RGBA", (tw, th), (35, 39, 42, 255))
+                d = ImageDraw.Draw(raw_img)
+                d.ellipse((int(tw * 0.1), int(th * 0.1), int(tw * 0.9), int(th * 0.9)), fill=(20, 20, 20, 255), outline=(100, 100, 100, 255), width=2)
+                d.ellipse((int(tw * 0.4), int(th * 0.4), int(tw * 0.6), int(th * 0.6)), fill=(230, 70, 70, 255))
+
+        # Center crop square and resize
+        iw, ih = raw_img.size
+        min_dim = min(iw, ih)
+        crop_box = ((iw - min_dim) // 2, (ih - min_dim) // 2, (iw + min_dim) // 2, (ih + min_dim) // 2)
+        cropped = raw_img.crop(crop_box).resize((tw, th), Image.Resampling.LANCZOS)
+
+        # Rounded corner mask
+        mask = Image.new("L", (tw, th), 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.rounded_rectangle((0, 0, tw, th), radius=corner_radius, fill=255)
+        rounded_img = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
+        rounded_img.paste(cropped, (0, 0), mask)
+
+        self.media_art_cache[cache_key] = rounded_img
+        return rounded_img
+
+    def draw_marquee_text(self, image: Image.Image, draw: ImageDraw.ImageDraw, pos: tuple[float, float], max_w: float, text: str, font, fill_en: bool = True, fill_col: tuple = (255, 255, 255, 255), out_en: bool = False, out_col: tuple = (0, 0, 0, 255), out_sz: int = 2):
+        if not text:
+            return
+        x, y = pos
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+
+        if tw <= max_w:
+            center_y = y + (th / 2.0)
+            self.render_styled_text(draw, (x, center_y), text, font, fill_en, fill_col, out_en, out_col, out_sz, anchor="lm")
+            return
+
+        gap = 40
+        loop_w = tw + gap
+        scroll_offset = (self.vis_tick * 2) % loop_w
+
+        surf_w = int(max_w)
+        surf_h = int(th + max(4, out_sz * 4) + 4)
+        sub_img = Image.new("RGBA", (surf_w, surf_h), (0, 0, 0, 0))
+        sub_draw = ImageDraw.Draw(sub_img)
+
+        text_y = surf_h / 2.0
+        self.render_styled_text(sub_draw, (-scroll_offset, text_y), text, font, fill_en, fill_col, out_en, out_col, out_sz, anchor="lm")
+        self.render_styled_text(sub_draw, (-scroll_offset + loop_w, text_y), text, font, fill_en, fill_col, out_en, out_col, out_sz, anchor="lm")
+
+        paste_y = int(y - (surf_h - th) / 2.0)
+        image.paste(sub_img, (int(x), paste_y), sub_img)
+
+    def draw_stepped_bars(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], heights: list[float], color_mode: int, solid_col: tuple, start_col: tuple, end_col: tuple):
+        x_min, y_min, x_max, y_max = box
+        bw = x_max - x_min
+        bh = y_max - y_min
+        if bw <= 10 or bh <= 6:
+            return
+
+        col_gap = 3
+        num_cols = min(len(heights), max(6, int((bw + col_gap) / (6 + col_gap))))
+        col_w = max(3.0, (bw - (num_cols - 1) * col_gap) / float(num_cols))
+
+        step_gap = 2
+        num_steps = max(3, int((bh + step_gap) / (4 + step_gap)))
+        step_h = max(2.0, (bh - (num_steps - 1) * step_gap) / float(num_steps))
+
+        for i in range(num_cols):
+            val = heights[i % len(heights)]
+            norm_h = max(0.0, min(1.0, float(val)))
+            active_steps = int(math.ceil(norm_h * num_steps))
+
+            cx_min = x_min + i * (col_w + col_gap)
+            cx_max = cx_min + col_w
+
+            for s in range(active_steps):
+                sy_max = y_max - s * (step_h + step_gap)
+                sy_min = sy_max - step_h
+
+                if color_mode == 1:
+                    # Vertical Gradient: Bottom Start -> Top End
+                    t = s / max(1.0, float(num_steps - 1))
+                    col = self.interpolate_color(start_col, end_col, t)
+                else:
+                    col = solid_col
+
+                draw.rectangle([cx_min, sy_min, cx_max, sy_max], fill=col)
+
+    def draw_wave_curves(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], heights: list[float], color_mode: int, solid_col: tuple, start_col: tuple, end_col: tuple, phase: float = 0.0):
+        x_min, y_min, x_max, y_max = box
+        bw = x_max - x_min
+        bh = y_max - y_min
+        if bw <= 10 or bh <= 6:
+            return
+
+        num_h = len(heights)
+        pts = []
+        for x in range(int(x_min), int(x_max) + 1):
+            tx = (x - x_min) / float(bw)
+            idx_f = tx * (num_h - 1)
+            i0 = int(idx_f)
+            i1 = min(num_h - 1, i0 + 1)
+            frac = idx_f - i0
+            amp = heights[i0] * (1.0 - frac) + heights[i1] * frac
+
+            wave = math.sin(tx * math.pi * 3.5 + phase) * 0.45 + math.cos(tx * math.pi * 1.8 - phase * 0.8) * 0.35 + 0.2
+            val = max(0.05, min(1.0, amp * (0.5 + 0.5 * wave)))
+            y = y_max - (val * (bh - 2))
+            pts.append((x, y))
+
+        if color_mode == 1:
+            # Horizontal Gradient: Left Start -> Right End
+            for (x, y) in pts:
+                tx = (x - x_min) / float(bw)
+                col = self.interpolate_color(start_col, end_col, tx)
+                fill_col = (col[0], col[1], col[2], int(col[3] * 0.75))
+                draw.line([(x, y), (x, y_max)], fill=fill_col, width=1)
+                draw.point((x, y), fill=col)
+        else:
+            poly = pts + [(x_max, y_max), (x_min, y_max)]
+            fill_col = (solid_col[0], solid_col[1], solid_col[2], int(solid_col[3] * 0.75))
+            draw.polygon(poly, fill=fill_col)
+            if len(pts) >= 2:
+                draw.line(pts, fill=solid_col, width=2)
+
+    def draw_media_full(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_artist, font_song, artist_fill_en, artist_fill_col, artist_out_en, artist_out_col, artist_out_sz, song_fill_en, song_fill_col, song_out_en, song_out_col, song_out_sz, player_idx: int, vis_style: int, color_mode: int, solid_col: tuple, start_col: tuple, end_col: tuple):
+        x_min, y_min, x_max, y_max = box
+        bw = x_max - x_min
+        bh = y_max - y_min
+
+        # 1. Left Album Art
+        art_size = int(bh * 0.76)
+        margin_x = int(bw * 0.04)
+        art_x = x_min + margin_x
+        art_y = y_min + (bh - art_size) // 2
+
+        art_img = self.get_media_art(self.media_state.get("art_url", ""), (art_size, art_size), corner_radius=10)
+        if art_img:
+            image.paste(art_img, (art_x, art_y), art_img)
+
+        # 2. Right Text & Visualizer
+        content_x = art_x + art_size + int(bw * 0.04)
+        content_max_x = x_max - margin_x
+        avail_w = max(20.0, float(content_max_x - content_x))
+
+        title = self.media_state.get("title", "No Media Playing")
+        artist = self.media_state.get("artist", "")
+
+        song_y = y_min + int(bh * 0.10)
+        artist_y = y_min + int(bh * 0.35)
+
+        self.draw_marquee_text(image, draw, (content_x, song_y), avail_w, title, font_song, song_fill_en, song_fill_col, song_out_en, song_out_col, song_out_sz)
+        if artist:
+            self.draw_marquee_text(image, draw, (content_x, artist_y), avail_w, artist, font_artist, artist_fill_en, artist_fill_col, artist_out_en, artist_out_col, artist_out_sz)
+
+        # Visualizer
+        vis_box = (content_x, y_min + int(bh * 0.60), content_max_x, y_max - int(bh * 0.10))
+        if vis_style == 1:
+            self.draw_wave_curves(image, draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, end_col, self.vis_tick * 0.15)
+        else:
+            self.draw_stepped_bars(draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, end_col)
+
+    def draw_media_sub(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], player_idx: int, vis_style: int, color_mode: int, solid_col: tuple, start_col: tuple, end_col: tuple):
+        x_min, y_min, x_max, y_max = box
+        bw = x_max - x_min
+        bh = y_max - y_min
+
+        # 1. Left Album Art
+        art_size = int(bh * 0.76)
+        margin_x = int(bw * 0.04)
+        art_x = x_min + margin_x
+        art_y = y_min + (bh - art_size) // 2
+
+        art_img = self.get_media_art(self.media_state.get("art_url", ""), (art_size, art_size), corner_radius=6)
+        if art_img:
+            image.paste(art_img, (art_x, art_y), art_img)
+
+        # 2. Right: Full Height Visualizer
+        vis_x_min = art_x + art_size + int(bw * 0.04)
+        vis_x_max = x_max - margin_x
+        vis_box = (vis_x_min, y_min + int(bh * 0.12), vis_x_max, y_max - int(bh * 0.12))
+
+        if vis_style == 1:
+            self.draw_wave_curves(image, draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, end_col, self.vis_tick * 0.15)
+        else:
+            self.draw_stepped_bars(draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, end_col)
+
     def update_display(self) -> None:
         if self.handle_lock_blanking():
             return
@@ -3088,6 +4092,28 @@ class TouchBarInfoAction(ActionBase):
         wc_out_col_hex = settings.get("worldclock_outline_color", "#000000FF")
         wc_out_sz = settings.get("worldclock_outline_size", 2)
 
+        # Media Player Settings
+        media_player_idx = settings.get("media_player_idx", 0)
+        media_vis_style_idx = settings.get("media_vis_style_idx", 0)
+        media_color_mode_idx = settings.get("media_color_mode_idx", 0)
+        media_solid_col_hex = settings.get("media_solid_color", "#FFFFFFFF")
+        media_grad_start_hex = settings.get("media_grad_start", "#00D2FFFF")
+        media_grad_end_hex = settings.get("media_grad_end", "#FF2A6DFF")
+
+        media_artist_font_str = settings.get("media_artist_font_str", "DejaVu Sans Bold 18")
+        media_artist_fill_en = settings.get("media_artist_fill_enabled", True)
+        media_artist_fill_col_hex = settings.get("media_artist_font_color", "#FFFFFFFF")
+        media_artist_out_en = settings.get("media_artist_outline_enabled", False)
+        media_artist_out_col_hex = settings.get("media_artist_outline_color", "#000000FF")
+        media_artist_out_sz = settings.get("media_artist_outline_size", 2)
+
+        media_song_font_str = settings.get("media_song_font_str", "DejaVu Sans Bold 18")
+        media_song_fill_en = settings.get("media_song_fill_enabled", True)
+        media_song_fill_col_hex = settings.get("media_song_font_color", "#FFFFFFFF")
+        media_song_out_en = settings.get("media_song_outline_enabled", False)
+        media_song_out_col_hex = settings.get("media_song_outline_color", "#000000FF")
+        media_song_out_sz = settings.get("media_song_outline_size", 2)
+
         date_options = [
             ("%b. %d, %Y", "Mon. Day, Year"),
             ("%a. %d, %Y", "DayOfWeek. Day, Year"),
@@ -3111,7 +4137,13 @@ class TouchBarInfoAction(ActionBase):
         latest_cpu = self.cpu_history[-1] if self.cpu_history else 0.0
         latest_ram = self.ram_history[-1] if self.ram_history else 0.0
 
-        combined_key = f"{date_str}|{time_str}|{cache_temp}|{cache_loc}|{latest_cpu:.1f}|{latest_ram:.1f}|{self.net_tx_rate:.0f}|{self.net_rx_rate:.0f}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{cpu_mode_idx}|{net_mode_idx}|{net_unit_idx}|{ram_mode_idx}|{disk_mode_idx}|{disk_mount_idx}|{disk_mount_path}|{custom_bg_path}|{date_font_str}|{date_fill_en}|{date_fill_col_hex}|{date_out_en}|{date_out_col_hex}|{date_out_sz}|{time_font_str}|{time_fill_en}|{time_fill_col_hex}|{time_out_en}|{time_out_col_hex}|{time_out_sz}|{weather_font_str}|{weather_fill_en}|{weather_fill_col_hex}|{weather_out_en}|{weather_out_col_hex}|{weather_out_sz}|{worldclock_city_idx}|{worldclock_view}|{worldclock_custom_label}|{worldclock_custom_tz}|{worldclock_show_seconds}|{worldclock_show_offset}|{worldclock_font_str}|{wc_fill_en}|{wc_fill_col_hex}|{wc_out_en}|{wc_out_col_hex}|{wc_out_sz}"
+        is_media_active = (sec_a_mode == 0 and sec_a_full == 10) or (sec_a_mode == 1 and (sec_a_top == 9 or sec_a_bot == 9)) or \
+                          (sec_b_mode == 0 and sec_b_full == 10) or (sec_b_mode == 1 and (sec_b_top == 9 or sec_b_bot == 9)) or \
+                          (sec_c_mode == 0 and sec_c_full == 10) or (sec_c_mode == 1 and (sec_c_top == 9 or sec_c_bot == 9))
+
+        media_key = f"{self.vis_tick}|{self.media_state.get('title','')}|{self.media_state.get('artist','')}|{self.media_state.get('status','')}|{self.media_state.get('art_url','')}|{media_player_idx}|{media_vis_style_idx}|{media_color_mode_idx}|{media_solid_col_hex}|{media_grad_start_hex}|{media_grad_end_hex}" if is_media_active else "nomedia"
+
+        combined_key = f"{date_str}|{time_str}|{cache_temp}|{cache_loc}|{latest_cpu:.1f}|{latest_ram:.1f}|{self.net_tx_rate:.0f}|{self.net_rx_rate:.0f}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{cpu_mode_idx}|{net_mode_idx}|{net_unit_idx}|{ram_mode_idx}|{disk_mode_idx}|{disk_mount_idx}|{disk_mount_path}|{custom_bg_path}|{date_font_str}|{date_fill_en}|{date_fill_col_hex}|{date_out_en}|{date_out_col_hex}|{date_out_sz}|{time_font_str}|{time_fill_en}|{time_fill_col_hex}|{time_out_en}|{time_out_col_hex}|{time_out_sz}|{weather_font_str}|{weather_fill_en}|{weather_fill_col_hex}|{weather_out_en}|{weather_out_col_hex}|{weather_out_sz}|{worldclock_city_idx}|{worldclock_view}|{worldclock_custom_label}|{worldclock_custom_tz}|{worldclock_show_seconds}|{worldclock_show_offset}|{worldclock_font_str}|{wc_fill_en}|{wc_fill_col_hex}|{wc_out_en}|{wc_out_col_hex}|{wc_out_sz}|{media_key}"
 
         if combined_key == self.last_rendered_key:
             return
@@ -3147,6 +4179,10 @@ class TouchBarInfoAction(ActionBase):
         font_mon_main_sub = self.get_font_from_desc("DejaVu Sans Bold 18", default_size=18, scale_factor=1.0)
         font_mon_sub_sub = self.get_font_from_desc("DejaVu Sans Bold 13", default_size=13, scale_factor=1.0)
 
+        # Media Player Fonts
+        font_media_artist_full = self.get_font_from_desc(media_artist_font_str, default_size=15, scale_factor=0.8)
+        font_media_song_full = self.get_font_from_desc(media_song_font_str, default_size=18, scale_factor=1.0)
+
         date_fill_col = self.hex_to_rgba_tuple(date_fill_col_hex, default=(170, 200, 230, 255))
         date_out_col = self.hex_to_rgba_tuple(date_out_col_hex, default=(0, 0, 0, 255))
 
@@ -3158,6 +4194,16 @@ class TouchBarInfoAction(ActionBase):
 
         wc_fill_col = self.hex_to_rgba_tuple(wc_fill_col_hex, default=(255, 255, 255, 255))
         wc_out_col = self.hex_to_rgba_tuple(wc_out_col_hex, default=(0, 0, 0, 255))
+
+        media_solid_col = self.hex_to_rgba_tuple(media_solid_col_hex, default=(255, 255, 255, 255))
+        media_grad_start_col = self.hex_to_rgba_tuple(media_grad_start_hex, default=(0, 210, 255, 255))
+        media_grad_end_col = self.hex_to_rgba_tuple(media_grad_end_hex, default=(255, 42, 109, 255))
+
+        media_artist_fill_col = self.hex_to_rgba_tuple(media_artist_fill_col_hex, default=(255, 255, 255, 255))
+        media_artist_out_col = self.hex_to_rgba_tuple(media_artist_out_col_hex, default=(0, 0, 0, 255))
+
+        media_song_fill_col = self.hex_to_rgba_tuple(media_song_fill_col_hex, default=(255, 255, 255, 255))
+        media_song_out_col = self.hex_to_rgba_tuple(media_song_out_col_hex, default=(0, 0, 0, 255))
 
         white_col = (255, 255, 255, 255)
 
@@ -3194,6 +4240,8 @@ class TouchBarInfoAction(ActionBase):
                     self.draw_weather(image, draw, full_box, font_weather_full, font_loc_full, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
                 elif full_choice == 9: # World Clock
                     self.draw_world_clock(draw, full_box, font_wc_city_full, font_wc_time_full, font_wc_sub_full, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
+                elif full_choice == 10: # Media Player
+                    self.draw_media_full(image, draw, full_box, font_media_artist_full, font_media_song_full, media_artist_fill_en, media_artist_fill_col, media_artist_out_en, media_artist_out_col, media_artist_out_sz, media_song_fill_en, media_song_fill_col, media_song_out_en, media_song_out_col, media_song_out_sz, media_player_idx, media_vis_style_idx, media_color_mode_idx, media_solid_col, media_grad_start_col, media_grad_end_col)
             else: # 2 Widgets (Split Top / Bottom)
                 # Top Sub-slot
                 if top_choice == 1: # CPU Usage
@@ -3212,6 +4260,8 @@ class TouchBarInfoAction(ActionBase):
                     self.draw_weather(image, draw, top_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
                 elif top_choice == 8: # World Clock
                     self.draw_world_clock(draw, top_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
+                elif top_choice == 9: # Media Player
+                    self.draw_media_sub(image, draw, top_box, media_player_idx, media_vis_style_idx, media_color_mode_idx, media_solid_col, media_grad_start_col, media_grad_end_col)
 
                 # Bottom Sub-slot
                 if bot_choice == 1: # CPU Usage
@@ -3230,6 +4280,8 @@ class TouchBarInfoAction(ActionBase):
                     self.draw_weather(image, draw, bot_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
                 elif bot_choice == 8: # World Clock
                     self.draw_world_clock(draw, bot_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
+                elif bot_choice == 9: # Media Player
+                    self.draw_media_sub(image, draw, bot_box, media_player_idx, media_vis_style_idx, media_color_mode_idx, media_solid_col, media_grad_start_col, media_grad_end_col)
 
         render_section(sec_a_mode, sec_a_full, sec_a_top, sec_a_bot, box_a_full, box_a_top, box_a_bot)
         render_section(sec_b_mode, sec_b_full, sec_b_top, sec_b_bot, box_b_full, box_b_top, box_b_bot)
