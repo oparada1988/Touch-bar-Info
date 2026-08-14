@@ -2874,39 +2874,63 @@ class TouchBarInfoAction(ActionBase):
                 "status": playback_status
             }
 
-        # Advance visualizer tick and simulate independent equalizer bars
+        # Advance visualizer tick and simulate organic multi-octave equalizer spectrum
         is_playing = (self.media_state["status"] == "Playing")
         num_bars = len(self.vis_heights)
 
         if is_playing:
             self.vis_tick += 1
-            t = self.vis_tick * 0.35
-            beat = (math.sin(t * 1.6) ** 4) * 0.55 + (math.sin(t * 0.8 + 1.2) ** 6) * 0.45
+            # Time progression at 30 FPS
+            t = self.vis_tick * 0.12
+
+            # Dynamic rhythmic beat pulse (kick drum + snare groove)
+            beat_main = (math.sin(t * 1.8) ** 6) * 0.55
+            beat_sub = (math.sin(t * 0.9 + 1.2) ** 4) * 0.35
+            beat_off = (math.sin(t * 3.6 + 0.4) ** 8) * 0.25
+            total_beat = beat_main + beat_sub + beat_off
+
             for i in range(num_bars):
                 norm_idx = i / float(max(1, num_bars - 1))
+                speed = self.vis_speeds[i % len(self.vis_speeds)]
+                phase = self.vis_phases[i % len(self.vis_phases)]
+
+                # Multi-octave harmonic synthesis (no random white-noise jitter)
+                # 1. Low Frequencies (Bass & Sub-bass 0.0 - 0.35)
+                h_bass = (total_beat * (1.2 - norm_idx * 0.9)) + (math.sin(t * 1.4 * speed + phase) * 0.22) + (math.cos(t * 0.7 - norm_idx * 3.0) * 0.15)
+                # 2. Mid Frequencies (Vocals, Keys, Guitars 0.35 - 0.70)
+                h_mid = 0.28 + (math.sin(t * 2.1 * speed + phase) * 0.25) + (math.cos(t * 1.1 + norm_idx * 5.0) * 0.18) + (total_beat * 0.22)
+                # 3. High Frequencies (Hi-hats, Cymbals, Air 0.70 - 1.0)
+                h_high = 0.18 + (math.sin(t * 3.4 * speed + phase) * 0.22) + (math.sin(t * 5.2 - norm_idx * 8.0) * 0.14) + (beat_off * 0.35)
+
                 if norm_idx < 0.35:
-                    # Bass frequencies: heavy bounce responding to beat
-                    band_energy = beat * (1.15 - norm_idx * 0.8) + math.sin(t * 0.9 * self.vis_speeds[i] + self.vis_phases[i]) * 0.25
-                    jitter = random.uniform(0.0, 0.22)
-                elif norm_idx < 0.7:
-                    # Mid frequencies: vocal / melodic energy
-                    band_energy = 0.32 + math.sin(t * 1.5 * self.vis_speeds[i] + self.vis_phases[i]) * 0.32 + (beat * 0.28)
-                    jitter = random.uniform(-0.1, 0.22)
+                    blend = norm_idx / 0.35
+                    raw_energy = h_bass * (1.0 - blend) + h_mid * blend
+                elif norm_idx < 0.70:
+                    blend = (norm_idx - 0.35) / 0.35
+                    raw_energy = h_mid * (1.0 - blend) + h_high * blend
                 else:
-                    # High frequencies: fast treble bursts
-                    band_energy = 0.18 + math.sin(t * 2.3 * self.vis_speeds[i] + self.vis_phases[i]) * 0.25
-                    jitter = random.uniform(0.0, 0.38) if random.random() < 0.45 else -0.05
+                    raw_energy = h_high
 
-                target = max(0.06, min(0.98, band_energy + jitter))
+                # Cross-column spatial wave ripple for organic fluid flow
+                spatial_ripple = math.sin(t * 2.0 - norm_idx * math.pi * 3.0) * 0.08
+                target = max(0.06, min(0.96, raw_energy + spatial_ripple))
 
-                # Fast attack (bounces up sharply), smooth gravity decay
+                # Asymmetric Ballistics Physics: Instant snappy attack, smooth exponential gravity decay
                 if target > self.vis_heights[i]:
-                    self.vis_heights[i] = self.vis_heights[i] * 0.25 + target * 0.75
+                    self.vis_heights[i] = self.vis_heights[i] * 0.35 + target * 0.65
                 else:
-                    self.vis_heights[i] = max(0.05, self.vis_heights[i] * 0.75 + target * 0.25)
+                    self.vis_heights[i] = max(0.05, self.vis_heights[i] * 0.86 + target * 0.14)
         else:
-            # Instant flat baseline when paused or stopped
-            self.vis_heights = [0.04] * num_bars
+            # Smoothly ease down to flat baseline when paused or stopped
+            all_flat = True
+            for i in range(num_bars):
+                if self.vis_heights[i] > 0.045:
+                    self.vis_heights[i] = max(0.04, self.vis_heights[i] * 0.80)
+                    all_flat = False
+                else:
+                    self.vis_heights[i] = 0.04
+            if all_flat:
+                self.vis_heights = [0.04] * num_bars
 
     def get_media_art(self, art_url: str, target_size: tuple[int, int], corner_radius: int = 8) -> Image.Image:
         tw, th = target_size
@@ -3028,7 +3052,7 @@ class TouchBarInfoAction(ActionBase):
 
         gap = 40
         loop_w = tw + gap
-        scroll_offset = (self.vis_tick * 2) % loop_w
+        scroll_offset = (self.vis_tick * 1.2) % loop_w
 
         surf_w = int(max_w)
         surf_h = int(th + max(4, out_sz * 4) + 4)
@@ -3050,34 +3074,48 @@ class TouchBarInfoAction(ActionBase):
             return
 
         col_gap = 2
-        # Target ~4-6px per column
         num_cols = min(len(heights), max(6, int((bw + col_gap) / (5 + col_gap))))
         col_w = max(2.0, (bw - (num_cols - 1) * col_gap) / float(num_cols))
 
         step_gap = 1
-        # Target ~3px per step block (e.g. 2px block + 1px gap)
         num_steps = max(4, int((bh + step_gap) / (3 + step_gap)))
         step_h = max(2.0, (bh - (num_steps - 1) * step_gap) / float(num_steps))
 
         for i in range(num_cols):
             val = heights[i % len(heights)]
             norm_h = max(0.0, min(1.0, float(val)))
-            active_steps = max(1, int(round(norm_h * num_steps)))
+            exact_steps = norm_h * num_steps
+            full_steps = int(exact_steps)
+            frac = exact_steps - full_steps
 
             cx_min = x_min + i * (col_w + col_gap)
             cx_max = cx_min + col_w
 
-            for s in range(active_steps):
+            # Draw full solid steps
+            for s in range(full_steps):
                 sy_max = y_max - s * (step_h + step_gap)
                 sy_min = sy_max - step_h
 
                 if color_mode == 1:
-                    # Vertical 3-Color Gradient: Bottom Start -> Mid -> Top End
                     t = s / max(1.0, float(num_steps - 1))
                     col = self.interpolate_gradient_3(start_col, mid_col, end_col, t)
                 else:
                     col = solid_col
 
+                draw.rectangle([cx_min, sy_min, cx_max, sy_max], fill=col)
+
+            # Draw top fractional step with smooth proportional height and alpha
+            if full_steps < num_steps and frac > 0.08:
+                sy_max = y_max - full_steps * (step_h + step_gap)
+                sy_min = sy_max - (step_h * frac)
+
+                if color_mode == 1:
+                    t = full_steps / max(1.0, float(num_steps - 1))
+                    base_col = self.interpolate_gradient_3(start_col, mid_col, end_col, t)
+                else:
+                    base_col = solid_col
+
+                col = (base_col[0], base_col[1], base_col[2], int(base_col[3] * min(1.0, frac * 1.2)))
                 draw.rectangle([cx_min, sy_min, cx_max, sy_max], fill=col)
 
     def draw_wave_curves(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], heights: list[float], color_mode: int, solid_col: tuple, start_col: tuple, mid_col: tuple, end_col: tuple, phase: float = 0.0):
@@ -3095,24 +3133,31 @@ class TouchBarInfoAction(ActionBase):
             i0 = int(idx_f)
             i1 = min(num_h - 1, i0 + 1)
             frac = idx_f - i0
-            amp = heights[i0] * (1.0 - frac) + heights[i1] * frac
+            # Smooth cubic Hermite interpolation across spectrum heights
+            smooth_frac = frac * frac * (3.0 - 2.0 * frac)
+            amp = heights[i0] * (1.0 - smooth_frac) + heights[i1] * smooth_frac
 
-            wave = math.sin(tx * math.pi * 3.5 + phase) * 0.45 + math.cos(tx * math.pi * 1.8 - phase * 0.8) * 0.35 + 0.2
-            val = max(0.05, min(1.0, amp * (0.5 + 0.5 * wave)))
+            # Flowing dual wave harmonics
+            w1 = math.sin(tx * math.pi * 2.8 + phase) * 0.40
+            w2 = math.cos(tx * math.pi * 5.2 - phase * 0.75) * 0.25
+            w3 = math.sin(tx * math.pi * 8.0 + phase * 1.3) * 0.10
+            wave_mod = max(0.08, min(1.0, 0.45 + w1 + w2 + w3))
+
+            val = max(0.05, min(0.98, amp * wave_mod))
             y = y_max - (val * (bh - 2))
             pts.append((x, y))
 
         if color_mode == 1:
-            # Horizontal 3-Color Gradient: Left Start -> Mid -> Right End
+            # Horizontal 3-Color Dynamic Gradient
             for (x, y) in pts:
                 tx = (x - x_min) / float(bw)
                 col = self.interpolate_gradient_3(start_col, mid_col, end_col, tx)
-                fill_col = (col[0], col[1], col[2], int(col[3] * 0.75))
+                fill_col = (col[0], col[1], col[2], int(col[3] * 0.70))
                 draw.line([(x, y), (x, y_max)], fill=fill_col, width=1)
                 draw.point((x, y), fill=col)
         else:
             poly = pts + [(x_max, y_max), (x_min, y_max)]
-            fill_col = (solid_col[0], solid_col[1], solid_col[2], int(solid_col[3] * 0.75))
+            fill_col = (solid_col[0], solid_col[1], solid_col[2], int(solid_col[3] * 0.65))
             draw.polygon(poly, fill=fill_col)
             if len(pts) >= 2:
                 draw.line(pts, fill=solid_col, width=2)
@@ -3181,7 +3226,7 @@ class TouchBarInfoAction(ActionBase):
 
     def start_anim_timer(self):
         if self._anim_timer_id is None:
-            self._anim_timer_id = GLib.timeout_add(80, self._anim_tick)
+            self._anim_timer_id = GLib.timeout_add(33, self._anim_tick) # ~30 FPS fluid animation
 
     def stop_anim_timer(self):
         if self._anim_timer_id is not None:
