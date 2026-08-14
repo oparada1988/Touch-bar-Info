@@ -68,10 +68,6 @@ class TouchBarInfoAction(ActionBase):
         self.process_count = 0
         self._was_locked = False
         self._active_highlight_slot = None
-        self._font_cache = {}
-        self._font_file_cache = {}
-        self._disk_usage_cache = {}
-        self._marquee_width_cache = {}
         try:
             sm = Adw.StyleManager.get_default()
             sm.connect("notify::accent-color", lambda *args: (setattr(self, "last_rendered_key", ""), self.update_display()))
@@ -444,26 +440,21 @@ class TouchBarInfoAction(ActionBase):
         settings = self.get_settings() or {}
 
         slots_to_check = [
-            ("sec_a", "sec_a_full", "full_widget", True),
-            ("sec_a", "sec_a_top", "top_widget", False),
-            ("sec_a", "sec_a_bot", "bottom_widget", False),
-            ("sec_b", "sec_b_full", "full_widget", True),
-            ("sec_b", "sec_b_top", "top_widget", False),
-            ("sec_b", "sec_b_bot", "bottom_widget", False),
-            ("sec_c", "sec_c_full", "full_widget", True),
-            ("sec_c", "sec_c_top", "top_widget", False),
-            ("sec_c", "sec_c_bot", "bottom_widget", False)
+            ("sec_a_full", True), ("sec_a_top", False), ("sec_a_bot", False),
+            ("sec_b_full", True), ("sec_b_top", False), ("sec_b_bot", False),
+            ("sec_c_full", True), ("sec_c_top", False), ("sec_c_bot", False)
         ]
 
         weather_targets = []
-        for prefix, slot_key, widget_key, is_full in slots_to_check:
+        for slot_key, is_full in slots_to_check:
+            prefix = slot_key[:5] # "sec_a", "sec_b", "sec_c"
             sec_mode = self.get_slot_setting(settings, prefix, "mode", 0)
             if is_full and sec_mode != 0:
                 continue
             if not is_full and sec_mode == 0:
                 continue
 
-            w_choice = self.get_slot_setting(settings, prefix, widget_key, 0)
+            w_choice = self.get_slot_setting(settings, slot_key, "widget", 0)
             if (is_full and w_choice == 9) or (not is_full and w_choice == 8):
                 lat = self.get_slot_setting(settings, slot_key, "weather_lat", "25.7617")
                 lon = self.get_slot_setting(settings, slot_key, "weather_lon", "-80.1918")
@@ -474,7 +465,13 @@ class TouchBarInfoAction(ActionBase):
                 weather_targets.append((lat, lon, unit_idx, interval_sec, loc_name))
 
         if not weather_targets:
-            return
+            lat = settings.get("weather_lat", "25.7617")
+            lon = settings.get("weather_lon", "-80.1918")
+            unit_idx = settings.get("weather_unit_idx", 0)
+            ref_idx = settings.get("weather_refresh_idx", 2)
+            loc_name = settings.get("weather_location_name", "Miami")
+            interval_sec = refresh_intervals[min(ref_idx, len(refresh_intervals) - 1)]
+            weather_targets.append((lat, lon, unit_idx, interval_sec, loc_name))
 
         for lat, lon, unit_idx, interval_sec, loc_name in weather_targets:
             temp_unit = "fahrenheit" if unit_idx == 0 else "celsius"
@@ -2060,9 +2057,6 @@ class TouchBarInfoAction(ActionBase):
 
         if not hasattr(self, "_font_cache"):
             self._font_cache = {}
-        if not hasattr(self, "_font_file_cache"):
-            self._font_file_cache = {}
-
         cache_key = (font_str, default_size, scale_factor)
         if cache_key in self._font_cache:
             return self._font_cache[cache_key]
@@ -2085,31 +2079,23 @@ class TouchBarInfoAction(ActionBase):
             if not style_parts: style_parts.append("Regular")
             style_str = " ".join(style_parts)
 
-            file_key = (family, style_str)
-            if file_key in self._font_file_cache:
-                font_path = self._font_file_cache[file_key]
-                if font_path and os.path.isfile(font_path):
-                    font_obj = ImageFont.truetype(font_path, size)
-            else:
-                # Query fontconfig via fc-match to locate exact font file on disk
+            # Query fontconfig via fc-match to locate exact font file on disk
+            try:
+                cmd = ["fc-match", "-f", "%{file}", f"{family}:style={style_str}"]
+                res = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL).strip()
+                if res and os.path.isfile(res):
+                    font_obj = ImageFont.truetype(res, size)
+            except Exception:
+                pass
+
+            if font_obj is None:
                 try:
-                    cmd = ["fc-match", "-f", "%{file}", f"{family}:style={style_str}"]
-                    res = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL).strip()
-                    if res and os.path.isfile(res):
-                        self._font_file_cache[file_key] = res
-                        font_obj = ImageFont.truetype(res, size)
+                    cmd_fam = ["fc-match", "-f", "%{file}", family]
+                    res_fam = subprocess.check_output(cmd_fam, text=True, stderr=subprocess.DEVNULL).strip()
+                    if res_fam and os.path.isfile(res_fam):
+                        font_obj = ImageFont.truetype(res_fam, size)
                 except Exception:
                     pass
-
-                if font_obj is None:
-                    try:
-                        cmd_fam = ["fc-match", "-f", "%{file}", family]
-                        res_fam = subprocess.check_output(cmd_fam, text=True, stderr=subprocess.DEVNULL).strip()
-                        if res_fam and os.path.isfile(res_fam):
-                            self._font_file_cache[file_key] = res_fam
-                            font_obj = ImageFont.truetype(res_fam, size)
-                    except Exception:
-                        pass
         except Exception as e:
             log.error(f"TouchBarInfo: Error resolving font '{font_str}': {e}")
 
@@ -2123,7 +2109,7 @@ class TouchBarInfoAction(ActionBase):
             ]:
                 if os.path.isfile(fallback):
                     try:
-                        font_obj = ImageFont.truetype(fallback, size)
+                        font_obj = ImageFont.truetype(fallback, default_size)
                         break
                     except Exception:
                         pass
@@ -2610,17 +2596,13 @@ class TouchBarInfoAction(ActionBase):
                             pct = float(pct_str) if pct_str.replace(".", "", 1).isdigit() else (used_k / max(1.0, total_k)) * 100.0
                             used_gb = used_k / (1024.0 * 1024.0)
                             free_gb = free_k / (1024.0 * 1024.0)
-                            res = (pct, used_gb, free_gb)
-                            self._disk_usage_cache[mount_path] = (now, res)
-                            return res
+                            return pct, used_gb, free_gb
             except Exception:
                 pass
 
         try:
             du = psutil.disk_usage(mount_path)
-            res = (du.percent, du.used / (1024**3), du.free / (1024**3))
-            self._disk_usage_cache[mount_path] = (now, res)
-            return res
+            return du.percent, du.used / (1024**3), du.free / (1024**3)
         except Exception:
             return 0.0, 0.0, 0.0
 
@@ -3210,10 +3192,6 @@ class TouchBarInfoAction(ActionBase):
         rounded_img.paste(cropped, (0, 0), mask)
 
         if is_real_art:
-            if len(self.media_art_cache) > 25:
-                keys_to_evict = list(self.media_art_cache.keys())[:12]
-                for k in keys_to_evict:
-                    self.media_art_cache.pop(k, None)
             self.media_art_cache[cache_key] = rounded_img
 
         return rounded_img
@@ -3546,105 +3524,51 @@ class TouchBarInfoAction(ActionBase):
                 except Exception as e:
                     log.error(f"TouchBarInfo: Error updating touchscreen controller: {e}")
 
-    def get_active_widget_flags(self, settings: dict = None) -> dict[str, bool]:
-        if settings is None:
-            settings = self.get_settings() or {}
-        flags = {
-            "seconds": False, "time": False, "date": False,
-            "cpu": False, "ram": False, "net": False, "disk": False,
-            "weather": False, "worldclock": False, "media": False
-        }
-        for prefix in ["sec_a", "sec_b", "sec_c"]:
-            sec_mode = self.get_slot_setting(settings, prefix, "mode", 0)
-            if sec_mode == 0:
-                choices = [(self.get_slot_setting(settings, prefix, "full_widget", 0), f"{prefix}_full", True)]
-            else:
-                choices = [
-                    (self.get_slot_setting(settings, prefix, "top_widget", 0), f"{prefix}_top", False),
-                    (self.get_slot_setting(settings, prefix, "bottom_widget", 0), f"{prefix}_bot", False)
-                ]
-
-            for c, sk, is_full in choices:
-                if c == 1: flags["cpu"] = True
-                elif c == 2: flags["date"] = True
-                elif c == 3: flags["disk"] = True
-                elif c == 4: flags["media"] = True
-                elif c == 5: flags["net"] = True
-                elif c == 6: flags["ram"] = True
-                elif c == 7 and is_full: # Stacked Date & Time
-                    flags["date"] = True
-                    flags["time"] = True
-                    if self.get_slot_setting(settings, sk, "show_seconds", False):
-                        flags["seconds"] = True
-                elif (c == 8 and is_full) or (c == 7 and not is_full): # Time
-                    flags["time"] = True
-                    if self.get_slot_setting(settings, sk, "show_seconds", False):
-                        flags["seconds"] = True
-                elif (c == 9 and is_full) or (c == 8 and not is_full): # Weather
-                    flags["weather"] = True
-                elif (c == 10 and is_full) or (c == 9 and not is_full): # World Clock
-                    flags["worldclock"] = True
-                    if self.get_slot_setting(settings, sk, "worldclock_show_seconds", False):
-                        flags["seconds"] = True
-        return flags
-
-    def update_system_stats(self, flags: dict = None):
+    def update_system_stats(self):
         try:
-            if flags is None or flags.get("cpu", True):
-                cpu = psutil.cpu_percent(interval=None)
-                self.cpu_history.pop(0)
-                self.cpu_history.append(cpu)
-                self.process_count = len(psutil.pids())
+            cpu = psutil.cpu_percent(interval=None)
+            self.cpu_history.pop(0)
+            self.cpu_history.append(cpu)
 
-            if flags is None or flags.get("ram", True):
-                mem = psutil.virtual_memory()
-                self.ram_history.pop(0)
-                self.ram_history.append(mem.percent)
+            mem = psutil.virtual_memory()
+            self.ram_history.pop(0)
+            self.ram_history.append(mem.percent)
 
-            if flags is None or flags.get("net", True):
-                net = psutil.net_io_counters()
-                now = datetime.datetime.now().timestamp()
-                if self.last_net_io is not None:
-                    last_time, last_bytes_sent, last_bytes_recv = self.last_net_io
-                    dt = max(0.1, now - last_time)
-                    self.net_tx_rate = max(0.0, (net.bytes_sent - last_bytes_sent) / dt)
-                    self.net_rx_rate = max(0.0, (net.bytes_recv - last_bytes_recv) / dt)
-                    total_rate_kb = (self.net_tx_rate + self.net_rx_rate) / 1024.0
-                    self.net_history.pop(0)
-                    self.net_history.append(total_rate_kb)
-                self.last_net_io = (now, net.bytes_sent, net.bytes_recv)
+            self.process_count = len(psutil.pids())
+
+            net = psutil.net_io_counters()
+            now = datetime.datetime.now().timestamp()
+            if self.last_net_io is not None:
+                last_time, last_bytes_sent, last_bytes_recv = self.last_net_io
+                dt = max(0.1, now - last_time)
+                self.net_tx_rate = max(0.0, (net.bytes_sent - last_bytes_sent) / dt)
+                self.net_rx_rate = max(0.0, (net.bytes_recv - last_bytes_recv) / dt)
+                total_rate_kb = (self.net_tx_rate + self.net_rx_rate) / 1024.0
+                self.net_history.pop(0)
+                self.net_history.append(total_rate_kb)
+            self.last_net_io = (now, net.bytes_sent, net.bytes_recv)
         except Exception as e:
             log.error(f"TouchBarInfo: Error updating system stats: {e}")
 
     def on_ready(self):
-        flags = self.get_active_widget_flags()
-        if flags["weather"]:
-            self.fetch_weather_async()
-        if flags["cpu"] or flags["ram"] or flags["net"] or flags["disk"]:
-            self.update_system_stats(flags)
-        if flags["media"]:
-            self.update_media_state(poll_dbus=True)
-            if self.is_media_active_and_playing():
-                self.start_anim_timer()
+        self.fetch_weather_async()
+        self.update_system_stats()
+        self.update_media_state(poll_dbus=True)
         self.update_display()
+        if self.is_media_active_and_playing():
+            self.start_anim_timer()
 
         def background_timer():
             while True:
                 time.sleep(1.0)
                 if not self.handle_lock_blanking():
-                    f = self.get_active_widget_flags()
-                    if f["cpu"] or f["ram"] or f["net"] or f["disk"]:
-                        self.update_system_stats(f)
-                    if f["media"]:
-                        self.update_media_state(poll_dbus=True)
-                        if self.is_media_active_and_playing():
-                            GLib.idle_add(self.start_anim_timer)
-                        else:
-                            GLib.idle_add(self.stop_anim_timer)
+                    self.update_system_stats()
+                    self.update_media_state(poll_dbus=True)
+                    self.fetch_weather_async()
+                    if self.is_media_active_and_playing():
+                        GLib.idle_add(self.start_anim_timer)
                     else:
                         GLib.idle_add(self.stop_anim_timer)
-                    if f["weather"]:
-                        self.fetch_weather_async()
                     GLib.idle_add(self.update_display)
 
         Thread(target=background_timer, daemon=True).start()
@@ -3677,17 +3601,51 @@ class TouchBarInfoAction(ActionBase):
 
         settings = self.get_settings() or {}
         now = datetime.datetime.now()
-        flags = self.get_active_widget_flags(settings)
-        any_seconds = flags["seconds"]
-        any_time = flags["time"]
-        any_date = flags["date"]
-        any_cpu = flags["cpu"]
-        any_ram = flags["ram"]
-        any_net = flags["net"]
-        any_disk = flags["disk"]
-        any_weather = flags["weather"]
-        any_worldclock = flags["worldclock"]
-        any_media = flags["media"]
+
+        # Determine which widgets are active to only update when displayed data changes
+        any_seconds = False
+        any_time = False
+        any_date = False
+        any_cpu = False
+        any_ram = False
+        any_net = False
+        any_disk = False
+        any_weather = False
+        any_worldclock = False
+        any_media = False
+
+        for prefix in ["sec_a", "sec_b", "sec_c"]:
+            sec_mode = self.get_slot_setting(settings, prefix, "mode", 0)
+            if sec_mode == 0:
+                choices = [(self.get_slot_setting(settings, prefix, "full_widget", 0), f"{prefix}_full", True)]
+            else:
+                choices = [
+                    (self.get_slot_setting(settings, prefix, "top_widget", 0), f"{prefix}_top", False),
+                    (self.get_slot_setting(settings, prefix, "bottom_widget", 0), f"{prefix}_bot", False)
+                ]
+
+            for c, sk, is_full in choices:
+                if c == 1: any_cpu = True
+                elif c == 2: any_date = True
+                elif c == 3: any_disk = True
+                elif c == 4: any_media = True
+                elif c == 5: any_net = True
+                elif c == 6: any_ram = True
+                elif c == 7 and is_full: # Stacked Date & Time
+                    any_date = True
+                    any_time = True
+                    if self.get_slot_setting(settings, sk, "show_seconds", False):
+                        any_seconds = True
+                elif (c == 8 and is_full) or (c == 7 and not is_full): # Time
+                    any_time = True
+                    if self.get_slot_setting(settings, sk, "show_seconds", False):
+                        any_seconds = True
+                elif (c == 9 and is_full) or (c == 8 and not is_full): # Weather
+                    any_weather = True
+                elif (c == 10 and is_full) or (c == 9 and not is_full): # World Clock
+                    any_worldclock = True
+                    if self.get_slot_setting(settings, sk, "worldclock_show_seconds", False):
+                        any_seconds = True
 
         if any_seconds:
             time_sig = now.strftime("%Y-%m-%d %H:%M:%S")
