@@ -2260,6 +2260,9 @@ class TouchBarInfoAction(ActionBase):
         self._font_cache[cache_key] = font_obj
         return font_obj
 
+    def get_font(self, font_name: str = "DejaVu Sans Bold", size: int = 14) -> ImageFont.FreeTypeFont:
+        return self.get_font_from_desc(f"{font_name} {size}", default_size=size)
+
     def render_styled_text(self, draw: ImageDraw.ImageDraw, pos: tuple[float, float], text: str, font_obj, fill_enabled: bool, fill_color: tuple, outline_enabled: bool, outline_color: tuple, outline_size: int, anchor: str = "mm"):
         x, y = pos
         if outline_enabled and outline_size > 0:
@@ -3181,73 +3184,77 @@ class TouchBarInfoAction(ActionBase):
         return False
 
     def draw_volume_meter_bar(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], align: str = "left"):
-        x_min, y_min, x_max, y_max = box
-        bw = max(10, x_max - x_min)
-        bh = max(10, y_max - y_min)
+        try:
+            x_min, y_min, x_max, y_max = box
+            bw = max(10, x_max - x_min)
+            bh = max(10, y_max - y_min)
 
-        vol = max(0, min(100, getattr(self, "_current_vol_pct", 50)))
-        is_muted = getattr(self, "_current_is_muted", False)
-        ar, ag, ab = self.get_streamcontroller_accent_color()
+            vol = max(0, min(100, getattr(self, "_current_vol_pct", 50)))
+            is_muted = getattr(self, "_current_is_muted", False)
+            ar, ag, ab = self.get_streamcontroller_accent_color()
 
-        cy = y_min + bh / 2.0
-        track_h = max(8, int(bh * 0.50))
-        ty1 = int(cy - track_h / 2.0)
-        ty2 = int(cy + track_h / 2.0)
+            cy = y_min + bh / 2.0
+            track_h = max(8, int(bh * 0.50))
+            ty1 = int(cy - track_h / 2.0)
+            ty2 = int(cy + track_h / 2.0)
 
-        # 1. Left Speaker / Mute symbol
-        icon_w = int(bh * 0.75)
-        icon_col = (255, 80, 80, 255) if is_muted else (ar, ag, ab, 255)
+            # 1. Left Speaker / Mute symbol
+            icon_w = int(bh * 0.75)
+            icon_col = (255, 80, 80, 255) if is_muted else (ar, ag, ab, 255)
 
-        spk_x1 = x_min + int(icon_w * 0.12)
-        spk_x2 = x_min + int(icon_w * 0.38)
-        spk_y1 = int(cy - track_h * 0.65)
-        spk_y2 = int(cy + track_h * 0.65)
+            spk_x1 = x_min + int(icon_w * 0.12)
+            spk_x2 = x_min + int(icon_w * 0.38)
+            spk_y1 = int(cy - track_h * 0.65)
+            spk_y2 = int(cy + track_h * 0.65)
 
-        draw.polygon([
-            (spk_x1, int(cy - track_h * 0.3)),
-            (spk_x2, int(cy - track_h * 0.3)),
-            (x_min + int(icon_w * 0.62), spk_y1),
-            (x_min + int(icon_w * 0.62), spk_y2),
-            (spk_x2, int(cy + track_h * 0.3)),
-            (spk_x1, int(cy + track_h * 0.3))
-        ], fill=icon_col)
+            draw.polygon([
+                (spk_x1, int(cy - track_h * 0.3)),
+                (spk_x2, int(cy - track_h * 0.3)),
+                (x_min + int(icon_w * 0.62), spk_y1),
+                (x_min + int(icon_w * 0.62), spk_y2),
+                (spk_x2, int(cy + track_h * 0.3)),
+                (spk_x1, int(cy + track_h * 0.3))
+            ], fill=icon_col)
 
-        if is_muted:
-            mx = x_min + int(icon_w * 0.82)
-            draw.line([(mx - 4, int(cy - 4)), (mx + 4, int(cy + 4))], fill=(255, 80, 80, 255), width=2)
-            draw.line([(mx - 4, int(cy + 4)), (mx + 4, int(cy - 4))], fill=(255, 80, 80, 255), width=2)
-        else:
-            if vol > 5:
-                draw.arc([x_min + int(icon_w * 0.50), int(cy - 5), x_min + int(icon_w * 0.74), int(cy + 5)], -55, 55, fill=icon_col, width=2)
-            if vol > 45:
-                draw.arc([x_min + int(icon_w * 0.50), int(cy - 9), x_min + int(icon_w * 0.94), int(cy + 9)], -55, 55, fill=icon_col, width=2)
+            if is_muted:
+                mx = x_min + int(icon_w * 0.82)
+                draw.line([(mx - 4, int(cy - 4)), (mx + 4, int(cy + 4))], fill=(255, 80, 80, 255), width=2)
+                draw.line([(mx - 4, int(cy + 4)), (mx + 4, int(cy - 4))], fill=(255, 80, 80, 255), width=2)
+            else:
+                if vol > 5:
+                    draw.arc([x_min + int(icon_w * 0.50), int(cy - 5), x_min + int(icon_w * 0.74), int(cy + 5)], -55, 55, fill=icon_col, width=2)
+                if vol > 45:
+                    draw.arc([x_min + int(icon_w * 0.50), int(cy - 9), x_min + int(icon_w * 0.94), int(cy + 9)], -55, 55, fill=icon_col, width=2)
 
-        # 2. Right text badge (Percentage or MUTED)
-        badge_text = "MUTED" if is_muted else f"{vol}%"
-        badge_font = self.get_font("DejaVu Sans Bold", max(11, int(bh * 0.46)))
-        bbox = draw.textbbox((0, 0), badge_text, font=badge_font)
-        badge_w = bbox[2] - bbox[0]
-        badge_x = x_max - badge_w / 2.0
-        self.render_styled_text(
-            draw, (badge_x, cy), badge_text, badge_font,
-            True, (255, 85, 85, 255) if is_muted else (255, 255, 255, 255),
-            True, (0, 0, 0, 255), 2, anchor="mm"
-        )
+            # 2. Right text badge (Percentage or MUTED)
+            badge_text = "MUTED" if is_muted else f"{vol}%"
+            f_size = max(11, int(bh * 0.46))
+            badge_font = self.get_font_from_desc(f"DejaVu Sans Bold {f_size}", default_size=f_size)
+            bbox = draw.textbbox((0, 0), badge_text, font=badge_font)
+            badge_w = bbox[2] - bbox[0]
+            badge_x = x_max - badge_w / 2.0
+            self.render_styled_text(
+                draw, (badge_x, cy), badge_text, badge_font,
+                True, (255, 85, 85, 255) if is_muted else (255, 255, 255, 255),
+                True, (0, 0, 0, 255), 2, anchor="mm"
+            )
 
-        # 3. Middle Progress Bar Capsule Track
-        tx1 = x_min + icon_w + 6
-        tx2 = int(x_max - badge_w - 12)
-        if tx2 > tx1 + 10:
-            r_track = track_h // 2
-            draw.rounded_rectangle([tx1, ty1, tx2, ty2], radius=r_track, fill=(28, 28, 34, 230), outline=(55, 55, 65, 255), width=1)
+            # 3. Middle Progress Bar Capsule Track
+            tx1 = x_min + icon_w + 6
+            tx2 = int(x_max - badge_w - 12)
+            if tx2 > tx1 + 10:
+                r_track = track_h // 2
+                draw.rounded_rectangle([tx1, ty1, tx2, ty2], radius=r_track, fill=(28, 28, 34, 230), outline=(55, 55, 65, 255), width=1)
 
-            fill_len = int((tx2 - tx1) * (vol / 100.0))
-            if fill_len > 2 and not is_muted:
-                fx2 = min(tx2, tx1 + fill_len)
-                fill_col = (ar, ag, ab, 255)
-                draw.rounded_rectangle([tx1, ty1, fx2, ty2], radius=r_track, fill=fill_col)
-                if fx2 > tx1 + r_track:
-                    draw.line([(tx1 + r_track // 2, ty1 + 1), (fx2 - r_track // 2, ty1 + 1)], fill=(255, 255, 255, 120), width=1)
+                fill_len = int((tx2 - tx1) * (vol / 100.0))
+                if fill_len > 2 and not is_muted:
+                    fx2 = min(tx2, tx1 + fill_len)
+                    fill_col = (ar, ag, ab, 255)
+                    draw.rounded_rectangle([tx1, ty1, fx2, ty2], radius=r_track, fill=fill_col)
+                    if fx2 > tx1 + r_track:
+                        draw.line([(tx1 + r_track // 2, ty1 + 1), (fx2 - r_track // 2, ty1 + 1)], fill=(255, 255, 255, 120), width=1)
+        except Exception as e:
+            log.error(f"TouchPulse: Error drawing Volume HUD: {e}")
 
     def adjust_volume(self, delta_percent: int, vol_target: int = 0, target_player_id: str = "auto"):
         if not getattr(self, "_vol_initialized", False):
