@@ -16,7 +16,7 @@ import random
 import io
 import base64
 import hashlib
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, quote
 import dbus
 import time
 from threading import Thread, Timer
@@ -38,9 +38,9 @@ class TouchBarInfoAction(ActionBase):
         self.has_configuration = True
         self.last_rendered_key = ""
         self.weather_cache = {}
-        self.city_search_timer = None
+        self.weather_caches = {}
+        self.slot_controls = {}
         self.update_vis_callbacks = []
-        self._syncing_controls = False
         self._update_scheduled = False
 
         # Media Player State & Animation Timer
@@ -48,7 +48,7 @@ class TouchBarInfoAction(ActionBase):
         self.media_art_cache = {}
         self.media_fetching_urls = set()
         self.num_vis_bars = 32
-        self.vis_heights = [0.05] * self.num_vis_bars
+        self.vis_heights = [0.04] * self.num_vis_bars
         self.vis_speeds = [random.uniform(0.75, 1.35) for _ in range(self.num_vis_bars)]
         self.vis_phases = [random.uniform(0, 6.28) for _ in range(self.num_vis_bars)]
         self.vis_tick = 0
@@ -68,6 +68,21 @@ class TouchBarInfoAction(ActionBase):
         self.process_count = 0
         self._was_locked = False
         self.init_options()
+
+    def get_locale_text(self, key: str, default: str) -> str:
+        if hasattr(self.plugin_base, "lm") and self.plugin_base.lm is not None:
+            try:
+                val = self.plugin_base.lm.get(key)
+                if val and val != key: return val
+            except Exception:
+                pass
+        if hasattr(self.plugin_base, "locale_manager") and self.plugin_base.locale_manager is not None:
+            try:
+                val = self.plugin_base.locale_manager.get(key)
+                if val and val != key: return val
+            except Exception:
+                pass
+        return default
 
     def get_available_media_players(self) -> list[tuple[str, str]]:
         bus_players = {}
@@ -147,286 +162,158 @@ class TouchBarInfoAction(ActionBase):
         return detected
 
     def init_options(self):
-        self.date_format_options = [
-            ("%b. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.mon-day-year", "Mon. Day, Year (Aug. 11, 2026)")),
-            ("%a. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.dow-day-year", "DayOfWeek. Day, Year (Tue. 11, 2026)")),
-            ("%a. %b. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.dow-mon-day-year", "DayOfWeek. Mon. Day, Year (Tue. Aug. 11, 2026)")),
-            ("%Y-%b-%d", self.get_locale_text("actions.touchbar-info.date-format.year-mon-day", "Year-Mon-Day (2026-Aug-11)"))
-        ]
-        self.mode_options = [
-            self.get_locale_text("actions.touchbar-info.mode.full", "1 Widget (Full Section — 100px)"),
-            self.get_locale_text("actions.touchbar-info.mode.split", "2 Widgets (Split Top/Bottom — 50px each)")
-        ]
+        # Alphabetical Full Section Widget List
         self.full_widget_options = [
-            self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
+            self.get_locale_text("actions.touchbar-info.widget.blank", "Blank / None"),
             self.get_locale_text("actions.touchbar-info.widget.cpu", "CPU Usage"),
             self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
             self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage"),
             self.get_locale_text("actions.touchbar-info.widget.media", "Media Player"),
-            self.get_locale_text("actions.touchbar-info.widget.net", "Network Activity"),
+            self.get_locale_text("actions.touchbar-info.widget.network", "Network Activity"),
             self.get_locale_text("actions.touchbar-info.widget.ram", "RAM Usage"),
-            self.get_locale_text("actions.touchbar-info.widget.stacked", "Stacked Date and Time"),
+            self.get_locale_text("actions.touchbar-info.widget.stacked", "Stacked Date & Time"),
             self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
             self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
             self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock")
         ]
+
+        # Alphabetical Split Subsection Widget List
         self.split_widget_options = [
-            self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
+            self.get_locale_text("actions.touchbar-info.widget.blank", "Blank / None"),
             self.get_locale_text("actions.touchbar-info.widget.cpu", "CPU Usage"),
             self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
             self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage"),
             self.get_locale_text("actions.touchbar-info.widget.media", "Media Player"),
-            self.get_locale_text("actions.touchbar-info.widget.net", "Network Activity"),
+            self.get_locale_text("actions.touchbar-info.widget.network", "Network Activity"),
             self.get_locale_text("actions.touchbar-info.widget.ram", "RAM Usage"),
             self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
             self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
             self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock")
         ]
-        self.available_media_players = self.get_available_media_players()
-        self.media_player_options = [label for (pid, label) in self.available_media_players]
-        self.media_player_ids = [pid for (pid, label) in self.available_media_players]
-        self.media_vis_options = [
-            self.get_locale_text("actions.touchbar-info.media-vis.stepped-bars", "Wave Stepped Bars"),
-            self.get_locale_text("actions.touchbar-info.media-vis.wave-curves", "Wave Curves")
+
+        self.section_mode_options = [
+            self.get_locale_text("actions.touchbar-info.mode.full", "Full Section (100px)"),
+            self.get_locale_text("actions.touchbar-info.mode.split", "Split Top / Bottom (2x 50px)")
         ]
-        self.media_color_mode_options = [
-            self.get_locale_text("actions.touchbar-info.media-color-mode.solid", "Solid Color"),
-            self.get_locale_text("actions.touchbar-info.media-color-mode.gradient", "Gradient")
+
+        self.date_format_options = [
+            ("%a, %b %d", "Mon, Oct 24"),
+            ("%A, %b %d", "Monday, Oct 24"),
+            ("%b %d, %Y", "Oct 24, 2026"),
+            ("%m/%d/%Y", "10/24/2026"),
+            ("%d/%m/%Y", "24/10/2026"),
+            ("%Y-%m-%d", "2026-10-24")
         ]
-        self.worldclock_cities = [
-            ("London", "Europe/London"),
-            ("New York", "America/New_York"),
-            ("Los Angeles", "America/Los_Angeles"),
-            ("Chicago", "America/Chicago"),
-            ("Paris", "Europe/Paris"),
-            ("Berlin", "Europe/Berlin"),
-            ("Tokyo", "Asia/Tokyo"),
-            ("Hong Kong", "Asia/Hong_Kong"),
-            ("Sydney", "Australia/Sydney"),
-            ("Dubai", "Asia/Dubai"),
-            ("UTC", "UTC"),
-            ("Custom Timezone", "custom")
+
+        self.weather_units = [
+            self.get_locale_text("actions.touchbar-info.weather-unit.f", "Fahrenheit (°F)"),
+            self.get_locale_text("actions.touchbar-info.weather-unit.c", "Celsius (°C)")
         ]
+
+        self.weather_intervals = [
+            self.get_locale_text("actions.touchbar-info.weather-ref.5m", "Every 5 minutes"),
+            self.get_locale_text("actions.touchbar-info.weather-ref.10m", "Every 10 minutes"),
+            self.get_locale_text("actions.touchbar-info.weather-ref.15m", "Every 15 minutes"),
+            self.get_locale_text("actions.touchbar-info.weather-ref.30m", "Every 30 minutes"),
+            self.get_locale_text("actions.touchbar-info.weather-ref.1h", "Every 1 hour")
+        ]
+
         self.cpu_mode_options = [
             self.get_locale_text("actions.touchbar-info.cpu-mode.pct", "Percentage (%)"),
-            self.get_locale_text("actions.touchbar-info.cpu-mode.pct-procs", "Percentage and Process Count"),
-            self.get_locale_text("actions.touchbar-info.cpu-mode.graph", "Live CPU Graph")
+            self.get_locale_text("actions.touchbar-info.cpu-mode.procs", "Percentage & Process Count"),
+            self.get_locale_text("actions.touchbar-info.cpu-mode.graph", "Live Activity Graph")
         ]
+
         self.net_mode_options = [
             self.get_locale_text("actions.touchbar-info.net-mode.rates", "Download / Upload Rates"),
-            self.get_locale_text("actions.touchbar-info.net-mode.graph", "Live Network Graph")
+            self.get_locale_text("actions.touchbar-info.net-mode.graph", "Live Bandwidth Graph")
         ]
+
         self.net_unit_options = [
-            "Bytes (KB/s, MB/s)",
-            "Bits (Kbit/s, Mbit/s)"
+            self.get_locale_text("actions.touchbar-info.net-unit.bytes", "Bytes/s (KB/s, MB/s)"),
+            self.get_locale_text("actions.touchbar-info.net-unit.bits", "Bits/s (Kbps, Mbps)")
         ]
+
         self.ram_mode_options = [
             self.get_locale_text("actions.touchbar-info.ram-mode.pct", "Percentage (%)"),
-            self.get_locale_text("actions.touchbar-info.ram-mode.used-total", "Used / Total Memory (GB)"),
-            self.get_locale_text("actions.touchbar-info.ram-mode.graph", "Live RAM Graph")
+            self.get_locale_text("actions.touchbar-info.ram-mode.gb", "Used / Total GB"),
+            self.get_locale_text("actions.touchbar-info.ram-mode.graph", "Live Memory Graph")
         ]
+
         self.disk_mode_options = [
-            self.get_locale_text("actions.touchbar-info.disk-mode.pct", "Percentage (%)"),
-            self.get_locale_text("actions.touchbar-info.disk-mode.used-total", "Used / Total Space (GB)"),
-            self.get_locale_text("actions.touchbar-info.disk-mode.graph", "Disk Usage Graph")
+            self.get_locale_text("actions.touchbar-info.disk-mode.pct", "Percentage (%) Used"),
+            self.get_locale_text("actions.touchbar-info.disk-mode.gb", "Used / Total GB"),
+            self.get_locale_text("actions.touchbar-info.disk-mode.graph", "Mini Space Bar Graph")
         ]
+
+        self.worldclock_cities = [
+            ("London (UTC+0/+1)", "Europe/London"),
+            ("New York (UTC-5/-4)", "America/New_York"),
+            ("Los Angeles (UTC-8/-7)", "America/Los_Angeles"),
+            ("Chicago (UTC-6/-5)", "America/Chicago"),
+            ("Denver (UTC-7/-6)", "America/Denver"),
+            ("Tokyo (UTC+9)", "Asia/Tokyo"),
+            ("Paris (UTC+1/+2)", "Europe/Paris"),
+            ("Berlin (UTC+1/+2)", "Europe/Berlin"),
+            ("Sydney (UTC+10/+11)", "Australia/Sydney"),
+            ("Auckland (UTC+12/+13)", "Pacific/Auckland"),
+            ("Hong Kong (UTC+8)", "Asia/Hong_Kong"),
+            ("Singapore (UTC+8)", "Asia/Singapore"),
+            ("Dubai (UTC+4)", "Asia/Dubai"),
+            ("Honolulu (UTC-10)", "Pacific/Honolulu"),
+            ("UTC (Universal Time)", "UTC"),
+            ("Custom Timezone...", "custom")
+        ]
+
+        self.worldclock_view_options = [
+            self.get_locale_text("actions.touchbar-info.worldclock-view.digital", "Digital Clock Face"),
+            self.get_locale_text("actions.touchbar-info.worldclock-view.analog", "Analog Clock Dial")
+        ]
+
+        self.media_vis_options = [
+            self.get_locale_text("actions.touchbar-info.media-vis.bars", "Stepped Equalizer Bars"),
+            self.get_locale_text("actions.touchbar-info.media-vis.waves", "Flowing Wave Curves")
+        ]
+
+        self.media_color_mode_options = [
+            self.get_locale_text("actions.touchbar-info.media-colormode.solid", "Solid Color"),
+            self.get_locale_text("actions.touchbar-info.media-colormode.gradient", "Dynamic Gradient (3 Colors)")
+        ]
+
+        media_players_list = self.get_available_media_players()
+        self.media_player_options = [label for _, label in media_players_list]
+        self.media_player_ids = [pid for pid, _ in media_players_list]
+
         self.disk_mounts = self.get_system_disk_mounts()
-        self.weather_units = ["Fahrenheit (°F)", "Celsius (°C)"]
-        self.weather_intervals = ["5 Minutes", "10 Minutes", "15 Minutes", "30 Minutes", "60 Minutes"]
-        self.worldclock_view_options = ["Digital Clock", "Analog Clock"]
-        self.all_worldclock_view_combos = []
-        self.all_worldclock_sec_switches = []
-        self.search_results_data = []
-
-    def get_locale_text(self, key: str, default: str) -> str:
-        if hasattr(self.plugin_base, "lm") and self.plugin_base.lm is not None:
-            try:
-                val = self.plugin_base.lm.get(key)
-                if val and val != key: return val
-            except Exception:
-                pass
-        if hasattr(self.plugin_base, "locale_manager") and self.plugin_base.locale_manager is not None:
-            try:
-                val = self.plugin_base.locale_manager.get(key)
-                if val and val != key: return val
-            except Exception:
-                pass
-        return default
-
-    def is_locked_or_hidden(self) -> bool:
-        if getattr(gl, "screen_locked", False):
-            return True
-        if hasattr(self, "get_is_present") and callable(self.get_is_present):
-            try:
-                if not self.get_is_present():
-                    return True
-            except Exception:
-                pass
-        return False
-
-    def handle_lock_blanking(self) -> bool:
-        if self.is_locked_or_hidden():
-            if not getattr(self, "_was_locked", False):
-                self._was_locked = True
-            return True
-        else:
-            if getattr(self, "_was_locked", False):
-                self._was_locked = False
-                self.last_rendered_key = ""
-                GLib.idle_add(self.update_display)
-            return False
-
-    def is_media_active_and_playing(self) -> bool:
-        settings = self.get_settings() or {}
-        sec_a_mode = settings.get("sec_a_mode", 0)
-        sec_a_full = settings.get("sec_a_full_widget", 0)
-        sec_a_top = settings.get("sec_a_top_widget", 0)
-        sec_a_bot = settings.get("sec_a_bottom_widget", 0)
-
-        sec_b_mode = settings.get("sec_b_mode", 0)
-        sec_b_full = settings.get("sec_b_full_widget", 0)
-        sec_b_top = settings.get("sec_b_top_widget", 0)
-        sec_b_bot = settings.get("sec_b_bottom_widget", 0)
-
-        sec_c_mode = settings.get("sec_c_mode", 0)
-        sec_c_full = settings.get("sec_c_full_widget", 0)
-        sec_c_top = settings.get("sec_c_top_widget", 0)
-        sec_c_bot = settings.get("sec_c_bottom_widget", 0)
-
-        is_active = (sec_a_mode == 0 and sec_a_full == 4) or (sec_a_mode == 1 and (sec_a_top == 4 or sec_a_bot == 4)) or \
-                    (sec_b_mode == 0 and sec_b_full == 4) or (sec_b_mode == 1 and (sec_b_top == 4 or sec_b_bot == 4)) or \
-                    (sec_c_mode == 0 and sec_c_full == 4) or (sec_c_mode == 1 and (sec_c_top == 4 or sec_c_bot == 4))
-
-        return is_active and self.media_state.get("status") == "Playing"
-
-    def start_anim_timer(self):
-        if self._anim_timer_id is None:
-            self._anim_timer_id = GLib.timeout_add(40, self._anim_tick)
-
-    def stop_anim_timer(self):
-        if self._anim_timer_id is not None:
-            try:
-                GLib.source_remove(self._anim_timer_id)
-            except Exception:
-                pass
-            self._anim_timer_id = None
-
-    def _anim_tick(self) -> bool:
-        if self._was_locked:
-            self._anim_timer_id = None
-            return False
-        if not self.is_media_active_and_playing():
-            self._anim_timer_id = None
-            self.vis_heights = [0.04] * len(self.vis_heights)
-            self.last_rendered_key = ""
-            self.update_display()
-            return False
-
-        self.update_media_state(poll_dbus=False)
-        self.update_display()
-        return True
-
-    def on_ready(self) -> None:
-        if self.handle_lock_blanking():
-            return
-        self.collect_system_stats()
-        self.fetch_weather_async(force=True)
-        self.update_media_state(poll_dbus=True)
-        self.update_display()
-        if self.is_media_active_and_playing():
-            self.start_anim_timer()
-
-    def on_tick(self) -> None:
-        if self.handle_lock_blanking():
-            self.stop_anim_timer()
-            return
-        self.collect_system_stats()
-        self.fetch_weather_async(force=False)
-        self.update_media_state(poll_dbus=True)
-        if self.is_media_active_and_playing():
-            self.start_anim_timer()
-        else:
-            self.stop_anim_timer()
-            self.vis_heights = [0.04] * len(self.vis_heights)
-            self.update_display()
-
-    def on_remove(self) -> None:
-        self.stop_anim_timer()
-        self.clear_background()
-
-    def on_removed_from_cache(self) -> None:
-        self.stop_anim_timer()
-        self.clear_background()
-
-    def clear_background(self) -> None:
-        if hasattr(self, "page") and self.page is not None:
-            try:
-                self.page.set_background_image(self.input_ident, self.state, "", update=False)
-                render_path = os.path.join(self.plugin_base.PATH, "assets", f"touchbar_render_{self.state}.png")
-                if os.path.exists(render_path):
-                    os.remove(render_path)
-            except Exception as e:
-                log.error(f"TouchBarInfo: Error clearing background on removal: {e}")
-
-        if hasattr(self, "deck_controller") and self.deck_controller is not None:
-            try:
-                c_input = self.deck_controller.get_input(self.input_ident)
-                if c_input is not None:
-                    empty_img = Image.new("RGBA", (800, 100), (0, 0, 0, 0))
-                    if hasattr(c_input, "set_ui_image"):
-                        c_input.set_ui_image(empty_img)
-                    if hasattr(c_input, "update"):
-                        c_input.update()
-            except Exception as e:
-                log.error(f"TouchBarInfo: Error resetting touchscreen display on removal: {e}")
-
-    def trigger_redraw(self):
-        if self.handle_lock_blanking():
-            return
-        self.last_rendered_key = ""
-        self.update_display()
-
-    # --- System Stats Collection ---
-    def collect_system_stats(self):
-        try:
-            # CPU
-            cpu_pct = psutil.cpu_percent(interval=None)
-            self.cpu_history.append(float(cpu_pct))
-            if len(self.cpu_history) > 20: self.cpu_history.pop(0)
-
-            # RAM
-            ram_info = psutil.virtual_memory()
-            self.ram_history.append(float(ram_info.percent))
-            if len(self.ram_history) > 20: self.ram_history.pop(0)
-
-            # Network
-            net_io = psutil.net_io_counters()
-            now_ts = datetime.datetime.now().timestamp()
-            if hasattr(self, "last_net_io") and self.last_net_io is not None:
-                old_sent, old_recv, old_ts = self.last_net_io
-                dt = max(0.1, now_ts - old_ts)
-                self.net_tx_rate = max(0.0, (net_io.bytes_sent - old_sent) / dt)
-                self.net_rx_rate = max(0.0, (net_io.bytes_recv - old_recv) / dt)
-            else:
-                self.net_tx_rate = 0.0
-                self.net_rx_rate = 0.0
-            self.last_net_io = (net_io.bytes_sent, net_io.bytes_recv, now_ts)
-
-            tot_rate = self.net_tx_rate + self.net_rx_rate
-            self.net_history.append(float(tot_rate))
-            if len(self.net_history) > 20: self.net_history.pop(0)
-
-            # Processes
-            self.process_count = len(psutil.pids())
-        except Exception as e:
-            log.error(f"TouchBarInfo: Error updating system stats: {e}")
 
     def get_system_disk_mounts(self) -> list[tuple[str, str]]:
         disks = []
         seen = set()
 
-        ignored_prefixes = ("/boot", "/sys", "/proc", "/dev", "/run/user", "/var/lib/flatpak", "/var/lib/docker")
-        ignored_fstypes = ["swap", "squashfs", "iso9660", "tmpfs", "devtmpfs", "overlay", "ramfs"]
+        def add_target(mount_path, dev_name="", src=""):
+            if not mount_path or mount_path in seen:
+                return
+            cleaned = os.path.normpath(mount_path)
+            if cleaned != "/" and (cleaned.startswith(('/proc', '/sys', '/dev', '/run/user', '/var/lib/flatpak', '/app')) or '.flatpak' in cleaned):
+                return
+            seen.add(mount_path)
+
+            if mount_path == "/":
+                disp = "System Root (/)"
+            elif mount_path.startswith("/home"):
+                base = os.path.basename(mount_path.rstrip("/"))
+                disp = f"Home ({base})" if base and base != "home" else "Home (/home)"
+            else:
+                base = os.path.basename(mount_path.rstrip("/"))
+                disp = f"{base.capitalize()} ({mount_path})" if base else mount_path
+
+            if dev_name and not dev_name.startswith('/dev/loop'):
+                dev_base = os.path.basename(dev_name)
+                disp += f" [{dev_base}]"
+
+            disks.append((mount_path, disp))
+
+        ignored_fstypes = {'tmpfs', 'devtmpfs', 'squashfs', 'overlay', 'proc', 'sysfs', 'securityfs', 'cgroup', 'cgroup2', 'pstore', 'bpf', 'autofs', 'ramfs', 'hugetlbfs', 'mqueue', 'debugfs', 'tracefs', 'fuse.portal', 'fuse.gvfsd-fuse'}
 
         host_env = dict(os.environ)
         uid = os.getuid() if hasattr(os, "getuid") else 1000
@@ -435,19 +322,8 @@ class TouchBarInfoAction(ActionBase):
         if "XDG_RUNTIME_DIR" not in host_env or not host_env["XDG_RUNTIME_DIR"]:
             host_env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
 
-        def add_target(m: str, dev: str = "", source: str = ""):
-            if not m or m in seen or m.startswith(ignored_prefixes):
-                return
-            seen.add(m)
-            name = "System Root" if m == "/" else (m.rstrip("/").split("/")[-1].capitalize() or m)
-            disp = name
-            disks.append((m, disp))
-            log.info(f"TouchBarInfo: Added disk mount [{source}]: {m} -> {disp}")
-
-        # 1. Host /proc/mounts
         try:
             p = subprocess.run(['flatpak-spawn', '--host', '--directory=/', 'cat', '/proc/mounts'], capture_output=True, text=True, timeout=3, env=host_env)
-            log.info(f"TouchBarInfo: Strategy 1 /proc/mounts exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines():
                     parts = line.split()
@@ -455,13 +331,11 @@ class TouchBarInfoAction(ActionBase):
                         dev, m, fs = parts[0], parts[1], parts[2]
                         if dev.startswith('/dev/') and fs not in ignored_fstypes:
                             add_target(m, dev, "proc_mounts")
-        except Exception as e:
-            log.error(f"TouchBarInfo: Strategy 1 cat /proc/mounts error: {e}")
+        except Exception:
+            pass
 
-        # 2. Host df -k
         try:
             p = subprocess.run(['flatpak-spawn', '--host', '--directory=/', 'df', '-k'], capture_output=True, text=True, timeout=3, env=host_env)
-            log.info(f"TouchBarInfo: Strategy 2 df -k exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines()[1:]:
                     parts = line.split()
@@ -470,13 +344,11 @@ class TouchBarInfoAction(ActionBase):
                         m = parts[-1]
                         if dev.startswith('/dev/'):
                             add_target(m, dev, "df")
-        except Exception as e:
-            log.error(f"TouchBarInfo: Strategy 2 df error: {e}")
+        except Exception:
+            pass
 
-        # 3. Host lsblk -r
         try:
             p = subprocess.run(['flatpak-spawn', '--host', '--directory=/', 'lsblk', '-r', '-o', 'NAME,MOUNTPOINT,FSTYPE'], capture_output=True, text=True, timeout=3, env=host_env)
-            log.info(f"TouchBarInfo: Strategy 3 lsblk exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines()[1:]:
                     parts = line.split()
@@ -485,22 +357,19 @@ class TouchBarInfoAction(ActionBase):
                         fs = parts[2] if len(parts) >= 3 else 'ext4'
                         if fs not in ignored_fstypes:
                             add_target(m, f'/dev/{dev_name}', "lsblk")
-        except Exception as e:
-            log.error(f"TouchBarInfo: Strategy 3 lsblk error: {e}")
+        except Exception:
+            pass
 
-        # 4. Host Directory Scan (/mnt, /media, /run/media)
         try:
             p = subprocess.run(['flatpak-spawn', '--host', '--directory=/', 'ls', '-d', '/mnt/*', '/media/*', '/run/media/*/*'], capture_output=True, text=True, timeout=3, env=host_env)
-            log.info(f"TouchBarInfo: Strategy 4 ls exit={p.returncode}, len={len(p.stdout) if p.stdout else 0}")
             if p.stdout:
                 for line in p.stdout.splitlines():
                     path = line.strip()
                     if path and not path.startswith(('/proc', '/sys', '/dev')) and '*' not in path:
                         add_target(path, "", "dir_scan")
-        except Exception as e:
-            log.error(f"TouchBarInfo: Strategy 4 directory scan error: {e}")
+        except Exception:
+            pass
 
-        # 5. Direct disk / label / path fallback (if host execution restricted)
         if len(disks) <= 1:
             try:
                 label_dir = "/dev/disk/by-label"
@@ -510,21 +379,17 @@ class TouchBarInfoAction(ActionBase):
                         for candidate in [f"/mnt/{lbl}", f"/media/{lbl}", f"/run/media/{lbl}", f"/media/{os.environ.get('USER', 'oscar')}/{lbl}"]:
                             if os.path.exists(candidate):
                                 add_target(candidate, dev, "by_label_fallback")
-                
-                # Check known host mount paths directly
                 for known_path in ["/mnt/Games", "/mnt/Stuff", "/home"]:
-                    if not known_path in seen and os.path.exists(known_path):
+                    if known_path not in seen and os.path.exists(known_path):
                         add_target(known_path, "", "known_fallback")
-            except Exception as e:
-                log.error(f"TouchBarInfo: Strategy 5 fallback error: {e}")
+            except Exception:
+                pass
 
         if "/" not in seen:
             add_target("/", "", "default_root")
 
-        log.info(f"TouchBarInfo: get_system_disk_mounts final discovered {len(disks)} mounts: {disks}")
         return disks
 
-    # --- Weather Fetcher & WMO Mapping ---
     def get_weather_icon_filename(self, wmo_code: int, is_day: int = 1) -> str:
         if wmo_code in [0, 1]:
             return "sunny.png" if is_day == 1 else "clear_night.png"
@@ -548,54 +413,106 @@ class TouchBarInfoAction(ActionBase):
             return "thunderstorm.png"
         return "sunny.png" if is_day == 1 else "clear_night.png"
 
+    def get_slot_setting(self, settings: dict, slot_key: str, sub_key: str, default):
+        if settings is None:
+            return default
+        full_k = f"{slot_key}_{sub_key}"
+        if full_k in settings:
+            return settings[full_k]
+        if sub_key in settings:
+            return settings[sub_key]
+        return default
+
+    def set_slot_setting(self, slot_key: str, sub_key: str, val):
+        settings = self.get_settings()
+        if settings is not None:
+            settings[f"{slot_key}_{sub_key}"] = val
+            self.set_settings(settings)
+            if hasattr(self, "_font_cache"):
+                self._font_cache.clear()
+            self.trigger_redraw()
+
     def fetch_weather_async(self, force: bool = False):
         if self.handle_lock_blanking():
             return
         now_ts = datetime.datetime.now().timestamp()
         refresh_intervals = [300, 600, 900, 1800, 3600]
         settings = self.get_settings() or {}
-        ref_idx = settings.get("weather_refresh_idx", 2)
-        interval_sec = refresh_intervals[min(ref_idx, len(refresh_intervals)-1)]
 
-        if not force and hasattr(self, "weather_cache") and self.weather_cache:
-            last_ts = self.weather_cache.get("last_fetch", 0)
-            if (now_ts - last_ts) < interval_sec:
-                return
+        slots_to_check = [
+            ("sec_a_full", True), ("sec_a_top", False), ("sec_a_bot", False),
+            ("sec_b_full", True), ("sec_b_top", False), ("sec_b_bot", False),
+            ("sec_c_full", True), ("sec_c_top", False), ("sec_c_bot", False)
+        ]
 
-        def task():
-            try:
-                lat = settings.get("weather_lat", "25.7617")
-                lon = settings.get("weather_lon", "-80.1918")
-                unit_idx = settings.get("weather_unit_idx", 0)
-                temp_unit = "fahrenheit" if unit_idx == 0 else "celsius"
+        weather_targets = []
+        for slot_key, is_full in slots_to_check:
+            prefix = slot_key[:5] # "sec_a", "sec_b", "sec_c"
+            sec_mode = self.get_slot_setting(settings, prefix, "mode", 0)
+            if is_full and sec_mode != 0:
+                continue
+            if not is_full and sec_mode == 0:
+                continue
 
-                url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,weather_code,is_day&temperature_unit={temp_unit}"
-                resp = requests.get(url, timeout=5)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    curr = data.get("current", {})
-                    temp = curr.get("temperature_2m", None)
-                    code = curr.get("weather_code", 0)
-                    is_day = curr.get("is_day", 1)
+            w_choice = self.get_slot_setting(settings, slot_key, "widget", 0)
+            if (is_full and w_choice == 9) or (not is_full and w_choice == 8):
+                lat = self.get_slot_setting(settings, slot_key, "weather_lat", "25.7617")
+                lon = self.get_slot_setting(settings, slot_key, "weather_lon", "-80.1918")
+                unit_idx = self.get_slot_setting(settings, slot_key, "weather_unit_idx", 0)
+                ref_idx = self.get_slot_setting(settings, slot_key, "weather_refresh_idx", 2)
+                loc_name = self.get_slot_setting(settings, slot_key, "weather_location_name", "Miami")
+                interval_sec = refresh_intervals[min(ref_idx, len(refresh_intervals) - 1)]
+                weather_targets.append((lat, lon, unit_idx, interval_sec, loc_name))
 
-                    temp_str = f"{round(temp)}°" if temp is not None else "--°"
-                    location_name = settings.get("weather_location_name", "Miami")
+        if not weather_targets:
+            lat = settings.get("weather_lat", "25.7617")
+            lon = settings.get("weather_lon", "-80.1918")
+            unit_idx = settings.get("weather_unit_idx", 0)
+            ref_idx = settings.get("weather_refresh_idx", 2)
+            loc_name = settings.get("weather_location_name", "Miami")
+            interval_sec = refresh_intervals[min(ref_idx, len(refresh_intervals) - 1)]
+            weather_targets.append((lat, lon, unit_idx, interval_sec, loc_name))
 
-                    self.weather_cache = {
-                        "last_fetch": datetime.datetime.now().timestamp(),
-                        "temp_str": temp_str,
-                        "wmo_code": code,
-                        "is_day": is_day,
-                        "location": location_name
-                    }
-                    GLib.idle_add(self.trigger_redraw)
-            except Exception as e:
-                log.error(f"TouchBarInfo: Failed to fetch weather data: {e}")
+        for lat, lon, unit_idx, interval_sec, loc_name in weather_targets:
+            temp_unit = "fahrenheit" if unit_idx == 0 else "celsius"
+            cache_key = f"{lat}_{lon}_{temp_unit}"
+            cached = self.weather_caches.get(cache_key)
+            if not force and cached:
+                last_ts = cached.get("last_fetch", 0)
+                if (now_ts - last_ts) < interval_sec:
+                    continue
 
-        Thread(target=task, daemon=True).start()
+            def make_task(t_lat=lat, t_lon=lon, t_unit=temp_unit, t_name=loc_name, c_key=cache_key):
+                def task():
+                    try:
+                        url = f"https://api.open-meteo.com/v1/forecast?latitude={t_lat}&longitude={t_lon}&current=temperature_2m,weather_code,is_day&temperature_unit={t_unit}"
+                        resp = requests.get(url, timeout=5)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            curr = data.get("current", {})
+                            temp = curr.get("temperature_2m", None)
+                            code = curr.get("weather_code", 0)
+                            is_day = curr.get("is_day", 1)
+                            temp_str = f"{round(temp)}°" if temp is not None else "--°"
+                            res_dict = {
+                                "last_fetch": datetime.datetime.now().timestamp(),
+                                "temp_str": temp_str,
+                                "wmo_code": code,
+                                "is_day": is_day,
+                                "location": t_name
+                            }
+                            self.weather_caches[c_key] = res_dict
+                            self.weather_cache = res_dict
+                            GLib.idle_add(self.trigger_redraw)
+                    except Exception as e:
+                        log.error(f"TouchBarInfo: Failed to fetch weather for {t_name}: {e}")
+                return task
+
+            Thread(target=make_task(), daemon=True).start()
 
     def get_config_rows(self) -> "list[Adw.PreferencesRow]":
         self.update_vis_callbacks = []
+        self.slot_controls = {}
         self.init_options()
 
         try:
@@ -616,85 +533,8 @@ class TouchBarInfoAction(ActionBase):
         except Exception:
             pass
 
-        # Control Widget trackers for global syncing
-        self.all_date_fmt_combos = []
-        self.all_date_font_btns = []
-        self.all_date_fill_switches = []
-        self.all_date_fill_color_btns = []
-        self.all_date_out_switches = []
-        self.all_date_out_color_btns = []
-        self.all_date_out_size_spins = []
-
-        self.all_time_24h_switches = []
-        self.all_time_sec_switches = []
-        self.all_time_font_btns = []
-        self.all_time_fill_switches = []
-        self.all_time_fill_color_btns = []
-        self.all_time_out_switches = []
-        self.all_time_out_color_btns = []
-        self.all_time_out_size_spins = []
-
-        self.all_weather_loc_entries = []
-        self.all_weather_res_combos = []
-        self.all_weather_unit_combos = []
-        self.all_weather_ref_combos = []
-        self.all_weather_font_btns = []
-        self.all_weather_fill_switches = []
-        self.all_weather_fill_color_btns = []
-        self.all_weather_out_switches = []
-        self.all_weather_out_color_btns = []
-        self.all_weather_out_size_spins = []
-
-        # World Clock Trackers
-        self.all_worldclock_city_combos = []
-        self.all_worldclock_view_combos = []
-        self.all_worldclock_label_entries = []
-        self.all_worldclock_tz_entries = []
-        self.all_worldclock_sec_switches = []
-        self.all_worldclock_offset_switches = []
-        self.all_worldclock_font_btns = []
-        self.all_worldclock_fill_switches = []
-        self.all_worldclock_fill_color_btns = []
-        self.all_worldclock_out_switches = []
-        self.all_worldclock_out_color_btns = []
-        self.all_worldclock_out_size_spins = []
-
-        # System Monitor Global Trackers
-        self.all_cpu_mode_combos = []
-        self.all_net_mode_combos = []
-        self.all_net_unit_combos = []
-        self.all_ram_mode_combos = []
-        self.all_disk_mode_combos = []
-        self.all_disk_mount_combos = []
-        self.all_disk_browse_rows = []
-
-        # Media Player Global Trackers
-        self.all_media_player_combos = []
-        self.all_media_vis_combos = []
-        self.all_media_color_mode_combos = []
-        self.all_media_solid_color_btns = []
-        self.all_media_grad_start_btns = []
-        self.all_media_grad_mid_btns = []
-        self.all_media_grad_end_btns = []
-        self.all_media_artist_font_btns = []
-        self.all_media_artist_fill_switches = []
-        self.all_media_artist_fill_color_btns = []
-        self.all_media_artist_out_switches = []
-        self.all_media_artist_out_color_btns = []
-        self.all_media_artist_out_size_spins = []
-        self.all_media_song_font_btns = []
-        self.all_media_song_fill_switches = []
-        self.all_media_song_fill_color_btns = []
-        self.all_media_song_out_switches = []
-        self.all_media_song_out_color_btns = []
-        self.all_media_song_out_size_spins = []
-
-        self.search_results_data = []
-
-
-
-        # Helper to create Date controls
-        def build_date_controls():
+        # Helper to create Date controls with ExpanderRow
+        def build_date_controls(slot_key: str):
             date_expander = Adw.ExpanderRow(
                 title=self.get_locale_text("actions.touchbar-info.hdr-date.label", "Date Settings"),
                 subtitle=self.get_locale_text("actions.touchbar-info.hdr-date.subtitle", "Format and typography configuration for date display")
@@ -708,22 +548,28 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.date-format.label", "Date Format"),
                 subtitle=self.get_locale_text("actions.touchbar-info.date-format.subtitle", "Format style for date text")
             )
+            fmt_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "date_format_idx", combo.get_selected()))
 
             font_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
                 subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
             )
             font_btn = Gtk.FontButton.new()
-            font_btn.set_use_font(False)
+            font_btn.set_use_font(True)
             font_btn.set_use_size(False)
             font_btn.set_valign(Gtk.Align.CENTER)
             font_btn.set_hexpand(False)
+            font_btn.connect("font-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "date_font_str", btn.get_font()))
             font_row.add_suffix(font_btn)
 
             fill_sw = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
                 subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
             )
+            fill_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                self.set_slot_setting(sk, "date_fill_enabled", sw.get_active()),
+                fill_color_row.set_sensitive(sw.get_active())
+            ))
 
             fill_color_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
@@ -731,12 +577,18 @@ class TouchBarInfoAction(ActionBase):
             )
             fill_color_btn = Gtk.ColorButton()
             fill_color_btn.set_valign(Gtk.Align.CENTER)
+            fill_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "date_font_color", self.gdk_to_hex(btn.get_rgba())))
             fill_color_row.add_suffix(fill_color_btn)
 
             out_sw = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
                 subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
             )
+            out_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                self.set_slot_setting(sk, "date_outline_enabled", sw.get_active()),
+                out_color_row.set_sensitive(sw.get_active()),
+                out_size_spin.set_sensitive(sw.get_active())
+            ))
 
             out_color_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
@@ -744,11 +596,13 @@ class TouchBarInfoAction(ActionBase):
             )
             out_color_btn = Gtk.ColorButton()
             out_color_btn.set_valign(Gtk.Align.CENTER)
+            out_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "date_outline_color", self.gdk_to_hex(btn.get_rgba())))
             out_color_row.add_suffix(out_color_btn)
 
             out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
             out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
             out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+            out_size_spin.connect("notify::value", lambda spin, pspec, sk=slot_key: self.set_slot_setting(sk, "date_outline_size", int(spin.get_value())))
 
             date_expander.add_row(fmt_combo)
             date_expander.add_row(font_row)
@@ -758,23 +612,15 @@ class TouchBarInfoAction(ActionBase):
             date_expander.add_row(out_color_row)
             date_expander.add_row(out_size_spin)
 
-            self.all_date_fmt_combos.append(fmt_combo)
-            self.all_date_font_btns.append(font_btn)
-            self.all_date_fill_switches.append(fill_sw)
-            self.all_date_fill_color_btns.append(fill_color_btn)
-            self.all_date_out_switches.append(out_sw)
-            self.all_date_out_color_btns.append(out_color_btn)
-            self.all_date_out_size_spins.append(out_size_spin)
-
             return {
-                "date_expander": date_expander, "fmt_combo": fmt_combo, "font_row": font_row, "fill_sw": fill_sw,
-                "fill_color_row": fill_color_row, "out_sw": out_sw,
-                "out_color_row": out_color_row, "out_size_spin": out_size_spin,
-                "all_rows": [date_expander]
+                "date_expander": date_expander, "fmt_combo": fmt_combo, "font_btn": font_btn,
+                "fill_sw": fill_sw, "fill_color_btn": fill_color_btn, "fill_color_row": fill_color_row,
+                "out_sw": out_sw, "out_color_btn": out_color_btn, "out_color_row": out_color_row,
+                "out_size_spin": out_size_spin, "all_rows": [date_expander]
             }
 
-        # Helper to create Time controls
-        def build_time_controls():
+        # Helper to create Time controls with ExpanderRow
+        def build_time_controls(slot_key: str):
             time_expander = Adw.ExpanderRow(
                 title=self.get_locale_text("actions.touchbar-info.hdr-time.label", "Time Settings"),
                 subtitle=self.get_locale_text("actions.touchbar-info.hdr-time.subtitle", "Format and typography configuration for clock display")
@@ -785,27 +631,34 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.use-24h.label", "Use 24-Hour Clock"),
                 subtitle=self.get_locale_text("actions.touchbar-info.use-24h.subtitle", "Switch between 12-hour (AM/PM) and 24-hour time format")
             )
+            sw_24h.connect("notify::active", lambda sw, pspec, sk=slot_key: self.set_slot_setting(sk, "use_24h", sw.get_active()))
 
             sw_sec = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.show-seconds.label", "Show Seconds"),
                 subtitle=self.get_locale_text("actions.touchbar-info.show-seconds.subtitle", "Include seconds in the displayed time")
             )
+            sw_sec.connect("notify::active", lambda sw, pspec, sk=slot_key: self.set_slot_setting(sk, "show_seconds", sw.get_active()))
 
             font_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
                 subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
             )
             font_btn = Gtk.FontButton.new()
-            font_btn.set_use_font(False)
+            font_btn.set_use_font(True)
             font_btn.set_use_size(False)
             font_btn.set_valign(Gtk.Align.CENTER)
             font_btn.set_hexpand(False)
+            font_btn.connect("font-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "time_font_str", btn.get_font()))
             font_row.add_suffix(font_btn)
 
             fill_sw = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
                 subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
             )
+            fill_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                self.set_slot_setting(sk, "time_fill_enabled", sw.get_active()),
+                fill_color_row.set_sensitive(sw.get_active())
+            ))
 
             fill_color_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
@@ -813,12 +666,18 @@ class TouchBarInfoAction(ActionBase):
             )
             fill_color_btn = Gtk.ColorButton()
             fill_color_btn.set_valign(Gtk.Align.CENTER)
+            fill_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "time_font_color", self.gdk_to_hex(btn.get_rgba())))
             fill_color_row.add_suffix(fill_color_btn)
 
             out_sw = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
                 subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
             )
+            out_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                self.set_slot_setting(sk, "time_outline_enabled", sw.get_active()),
+                out_color_row.set_sensitive(sw.get_active()),
+                out_size_spin.set_sensitive(sw.get_active())
+            ))
 
             out_color_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
@@ -826,11 +685,13 @@ class TouchBarInfoAction(ActionBase):
             )
             out_color_btn = Gtk.ColorButton()
             out_color_btn.set_valign(Gtk.Align.CENTER)
+            out_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "time_outline_color", self.gdk_to_hex(btn.get_rgba())))
             out_color_row.add_suffix(out_color_btn)
 
             out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
             out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
             out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+            out_size_spin.connect("notify::value", lambda spin, pspec, sk=slot_key: self.set_slot_setting(sk, "time_outline_size", int(spin.get_value())))
 
             time_expander.add_row(sw_24h)
             time_expander.add_row(sw_sec)
@@ -841,27 +702,21 @@ class TouchBarInfoAction(ActionBase):
             time_expander.add_row(out_color_row)
             time_expander.add_row(out_size_spin)
 
-            self.all_time_24h_switches.append(sw_24h)
-            self.all_time_sec_switches.append(sw_sec)
-            self.all_time_font_btns.append(font_btn)
-            self.all_time_fill_switches.append(fill_sw)
-            self.all_time_fill_color_btns.append(fill_color_btn)
-            self.all_time_out_switches.append(out_sw)
-            self.all_time_out_color_btns.append(out_color_btn)
-            self.all_time_out_size_spins.append(out_size_spin)
-
             return {
-                "time_expander": time_expander, "sw_24h": sw_24h, "sw_sec": sw_sec, "font_row": font_row, "fill_sw": fill_sw,
-                "fill_color_row": fill_color_row, "out_sw": out_sw,
-                "out_color_row": out_color_row, "out_size_spin": out_size_spin,
-                "all_rows": [time_expander]
+                "time_expander": time_expander, "sw_24h": sw_24h, "sw_sec": sw_sec, "font_btn": font_btn,
+                "fill_sw": fill_sw, "fill_color_btn": fill_color_btn, "fill_color_row": fill_color_row,
+                "out_sw": out_sw, "out_color_btn": out_color_btn, "out_color_row": out_color_row,
+                "out_size_spin": out_size_spin, "all_rows": [time_expander]
             }
 
         # Helper to create Weather controls
-        def build_weather_controls():
+        def build_weather_controls(slot_key: str):
             loc_entry = Adw.EntryRow(
                 title=self.get_locale_text("actions.touchbar-info.weather-location.label", "City / Location Search")
             )
+            search_btn = Gtk.Button(label=self.get_locale_text("actions.touchbar-info.weather-search.button", "Search"))
+            search_btn.set_valign(Gtk.Align.CENTER)
+            loc_entry.add_suffix(search_btn)
 
             res_model = Gtk.StringList()
             res_combo = Adw.ComboRow(
@@ -871,6 +726,60 @@ class TouchBarInfoAction(ActionBase):
             )
             res_combo.set_visible(False)
 
+            slot_search_data = []
+
+            def on_search_clicked(btn):
+                query = loc_entry.get_text().strip()
+                if not query:
+                    return
+                def search_task():
+                    try:
+                        url = f"https://geocoding-api.open-meteo.com/v1/search?name={quote(query)}&count=5&language=en&format=json"
+                        resp = requests.get(url, timeout=5)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            results = data.get("results", [])
+                            def update_ui():
+                                slot_search_data.clear()
+                                while res_model.get_n_items() > 0:
+                                    res_model.remove(0)
+                                if results:
+                                    for item in results:
+                                        c_name = item.get("name", "")
+                                        admin = item.get("admin1", "")
+                                        country = item.get("country", "")
+                                        lat = str(item.get("latitude", ""))
+                                        lon = str(item.get("longitude", ""))
+                                        parts = [p for p in [c_name, admin, country] if p]
+                                        label = ", ".join(parts)
+                                        res_model.append(label)
+                                        slot_search_data.append((c_name, lat, lon))
+                                    res_combo.set_visible(True)
+                                else:
+                                    res_combo.set_visible(False)
+                            GLib.idle_add(update_ui)
+                    except Exception as e:
+                        log.error(f"TouchBarInfo: Location search error: {e}")
+                Thread(target=search_task, daemon=True).start()
+
+            search_btn.connect("clicked", on_search_clicked)
+
+            def on_res_selected(combo, pspec):
+                sel = combo.get_selected()
+                if 0 <= sel < len(slot_search_data):
+                    c_name, lat, lon = slot_search_data[sel]
+                    loc_entry.set_text(c_name)
+                    settings = self.get_settings()
+                    if settings is not None:
+                        settings[f"{slot_key}_weather_location_name"] = c_name
+                        settings[f"{slot_key}_weather_lat"] = lat
+                        settings[f"{slot_key}_weather_lon"] = lon
+                        self.set_settings(settings)
+                        self.fetch_weather_async(force=True)
+                        self.trigger_redraw()
+
+            res_combo.connect("notify::selected", on_res_selected)
+
             unit_model = Gtk.StringList()
             for u in self.weather_units: unit_model.append(u)
             unit_combo = Adw.ComboRow(
@@ -878,6 +787,10 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.weather-unit.label", "Temperature Unit"),
                 subtitle=self.get_locale_text("actions.touchbar-info.weather-unit.subtitle", "Select Fahrenheit (°F) or Celsius (°C)")
             )
+            unit_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: (
+                self.set_slot_setting(sk, "weather_unit_idx", combo.get_selected()),
+                self.fetch_weather_async(force=True)
+            ))
 
             ref_model = Gtk.StringList()
             for r in self.weather_intervals: ref_model.append(r)
@@ -886,22 +799,28 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.weather-refresh.label", "Refresh Interval"),
                 subtitle=self.get_locale_text("actions.touchbar-info.weather-refresh.subtitle", "Automatic weather update frequency")
             )
+            ref_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "weather_refresh_idx", combo.get_selected()))
 
             font_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
                 subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
             )
             font_btn = Gtk.FontButton.new()
-            font_btn.set_use_font(False)
+            font_btn.set_use_font(True)
             font_btn.set_use_size(False)
             font_btn.set_valign(Gtk.Align.CENTER)
             font_btn.set_hexpand(False)
+            font_btn.connect("font-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "weather_font_str", btn.get_font()))
             font_row.add_suffix(font_btn)
 
             fill_sw = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
                 subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
             )
+            fill_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                self.set_slot_setting(sk, "weather_fill_enabled", sw.get_active()),
+                fill_color_row.set_sensitive(sw.get_active())
+            ))
 
             fill_color_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
@@ -909,12 +828,18 @@ class TouchBarInfoAction(ActionBase):
             )
             fill_color_btn = Gtk.ColorButton()
             fill_color_btn.set_valign(Gtk.Align.CENTER)
+            fill_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "weather_font_color", self.gdk_to_hex(btn.get_rgba())))
             fill_color_row.add_suffix(fill_color_btn)
 
             out_sw = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
                 subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
             )
+            out_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                self.set_slot_setting(sk, "weather_outline_enabled", sw.get_active()),
+                out_color_row.set_sensitive(sw.get_active()),
+                out_size_spin.set_sensitive(sw.get_active())
+            ))
 
             out_color_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
@@ -922,33 +847,24 @@ class TouchBarInfoAction(ActionBase):
             )
             out_color_btn = Gtk.ColorButton()
             out_color_btn.set_valign(Gtk.Align.CENTER)
+            out_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "weather_outline_color", self.gdk_to_hex(btn.get_rgba())))
             out_color_row.add_suffix(out_color_btn)
 
             out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
             out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
             out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
-
-            self.all_weather_loc_entries.append(loc_entry)
-            self.all_weather_res_combos.append(res_combo)
-            self.all_weather_unit_combos.append(unit_combo)
-            self.all_weather_ref_combos.append(ref_combo)
-            self.all_weather_font_btns.append(font_btn)
-            self.all_weather_fill_switches.append(fill_sw)
-            self.all_weather_fill_color_btns.append(fill_color_btn)
-            self.all_weather_out_switches.append(out_sw)
-            self.all_weather_out_color_btns.append(out_color_btn)
-            self.all_weather_out_size_spins.append(out_size_spin)
+            out_size_spin.connect("notify::value", lambda spin, pspec, sk=slot_key: self.set_slot_setting(sk, "weather_outline_size", int(spin.get_value())))
 
             return {
                 "loc_entry": loc_entry, "res_combo": res_combo, "unit_combo": unit_combo,
-                "ref_combo": ref_combo, "font_row": font_row, "fill_sw": fill_sw,
-                "fill_color_row": fill_color_row, "out_sw": out_sw,
-                "out_color_row": out_color_row, "out_size_spin": out_size_spin,
+                "ref_combo": ref_combo, "font_btn": font_btn, "fill_sw": fill_sw,
+                "fill_color_btn": fill_color_btn, "fill_color_row": fill_color_row, "out_sw": out_sw,
+                "out_color_btn": out_color_btn, "out_color_row": out_color_row, "out_size_spin": out_size_spin,
                 "all_rows": [loc_entry, res_combo, unit_combo, ref_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
             }
 
         # Helper to create CPU controls
-        def build_cpu_controls():
+        def build_cpu_controls(slot_key: str):
             mode_model = Gtk.StringList()
             for opt in self.cpu_mode_options: mode_model.append(opt)
             mode_combo = Adw.ComboRow(
@@ -956,11 +872,11 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.cpu-mode.label", "CPU Display Mode"),
                 subtitle=self.get_locale_text("actions.touchbar-info.cpu-mode.subtitle", "Choose percentage, processes, or live graph")
             )
-            self.all_cpu_mode_combos.append(mode_combo)
+            mode_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "cpu_mode_idx", combo.get_selected()))
             return {"mode_combo": mode_combo, "all_rows": [mode_combo]}
 
         # Helper to create Network controls
-        def build_net_controls():
+        def build_net_controls(slot_key: str):
             mode_model = Gtk.StringList()
             for opt in self.net_mode_options: mode_model.append(opt)
             mode_combo = Adw.ComboRow(
@@ -968,6 +884,7 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.net-mode.label", "Network Display Mode"),
                 subtitle=self.get_locale_text("actions.touchbar-info.net-mode.subtitle", "Choose download/upload rates or live graph")
             )
+            mode_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "net_mode_idx", combo.get_selected()))
 
             unit_model = Gtk.StringList()
             for opt in self.net_unit_options: unit_model.append(opt)
@@ -976,13 +893,12 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.net-unit.label", "Network Speed Unit"),
                 subtitle=self.get_locale_text("actions.touchbar-info.net-unit.subtitle", "Choose Bytes (KB/s, MB/s) or Bits (Kbit/s, Mbit/s)")
             )
+            unit_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "net_unit_idx", combo.get_selected()))
 
-            self.all_net_mode_combos.append(mode_combo)
-            self.all_net_unit_combos.append(unit_combo)
             return {"mode_combo": mode_combo, "unit_combo": unit_combo, "all_rows": [mode_combo, unit_combo]}
 
         # Helper to create RAM controls
-        def build_ram_controls():
+        def build_ram_controls(slot_key: str):
             mode_model = Gtk.StringList()
             for opt in self.ram_mode_options: mode_model.append(opt)
             mode_combo = Adw.ComboRow(
@@ -990,11 +906,11 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.ram-mode.label", "RAM Display Mode"),
                 subtitle=self.get_locale_text("actions.touchbar-info.ram-mode.subtitle", "Choose percentage, GB used/total, or live graph")
             )
-            self.all_ram_mode_combos.append(mode_combo)
+            mode_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "ram_mode_idx", combo.get_selected()))
             return {"mode_combo": mode_combo, "all_rows": [mode_combo]}
 
-        # Helper to create Disk controls (Mount Dropdown + Refresh Button Row)
-        def build_disk_controls():
+        # Helper to create Disk controls
+        def build_disk_controls(slot_key: str):
             mount_model = Gtk.StringList()
             for _, d_name in self.disk_mounts: mount_model.append(d_name)
             mount_combo = Adw.ComboRow(
@@ -1004,9 +920,21 @@ class TouchBarInfoAction(ActionBase):
             )
             refresh_btn = Gtk.Button(label=self.get_locale_text("actions.touchbar-info.disk-refresh.choose", "Refresh"))
             refresh_btn.set_valign(Gtk.Align.CENTER)
-            refresh_btn.connect("clicked", self.on_refresh_disks_clicked)
+            refresh_btn.connect("clicked", lambda btn: self.refresh_all_disk_combos())
             mount_combo.add_suffix(refresh_btn)
-            mount_combo.connect("notify::selected", self.on_disk_mount_changed)
+
+            def on_mount_changed(combo, pspec):
+                sel = combo.get_selected()
+                if 0 <= sel < len(self.disk_mounts):
+                    m_path = self.disk_mounts[sel][0]
+                    settings = self.get_settings()
+                    if settings is not None:
+                        settings[f"{slot_key}_disk_mount_idx"] = sel
+                        settings[f"{slot_key}_disk_mount_path"] = m_path
+                        self.set_settings(settings)
+                        self.trigger_redraw()
+
+            mount_combo.connect("notify::selected", on_mount_changed)
 
             mode_model = Gtk.StringList()
             for opt in self.disk_mode_options: mode_model.append(opt)
@@ -1015,17 +943,48 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.disk-mode.label", "Disk Display Mode"),
                 subtitle=self.get_locale_text("actions.touchbar-info.disk-mode.subtitle", "Choose percentage, GB used/free, or mini graph")
             )
+            mode_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "disk_mode_idx", combo.get_selected()))
 
-            self.all_disk_mount_combos.append(mount_combo)
-            self.all_disk_mode_combos.append(mode_combo)
+            browse_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.disk-custom.label", "Custom Folder / Partition"),
+                subtitle=self.get_locale_text("actions.touchbar-info.disk-custom.subtitle", "Select custom folder or drive mount using native folder picker")
+            )
+            browse_btn = Gtk.Button(label=self.get_locale_text("actions.touchbar-info.disk-custom.choose", "Browse Folder..."))
+            browse_btn.set_valign(Gtk.Align.CENTER)
+
+            def on_browse_clicked(btn):
+                def _file_dialog_callback(dialog, result):
+                    try:
+                        folder = dialog.select_folder_finish(result)
+                        if folder is not None:
+                            folder_path = folder.get_path()
+                            if folder_path:
+                                settings = self.get_settings()
+                                if settings is not None:
+                                    settings[f"{slot_key}_disk_mount_path"] = folder_path
+                                    self.set_settings(settings)
+                                    browse_row.set_subtitle(f"Selected: {folder_path}")
+                                    self.trigger_redraw()
+                    except Exception as e:
+                        log.error(f"TouchBarInfo: Folder selection error: {e}")
+
+                try:
+                    native_dialog = Gtk.FileDialog.new()
+                    native_dialog.set_title(self.get_locale_text("actions.touchbar-info.disk-dialog.title", "Select Folder / Partition to Monitor"))
+                    native_dialog.select_folder(None, None, _file_dialog_callback)
+                except Exception as e:
+                    log.error(f"TouchBarInfo: Failed to open FileDialog: {e}")
+
+            browse_btn.connect("clicked", on_browse_clicked)
+            browse_row.add_suffix(browse_btn)
+
             return {
-                "mount_combo": mount_combo,
-                "mode_combo": mode_combo,
-                "all_rows": [mount_combo, mode_combo]
+                "mount_combo": mount_combo, "mode_combo": mode_combo, "browse_row": browse_row,
+                "all_rows": [mount_combo, mode_combo, browse_row]
             }
 
         # Helper to create World Clock controls
-        def build_worldclock_controls():
+        def build_worldclock_controls(slot_key: str):
             city_model = Gtk.StringList()
             for c_name, _ in self.worldclock_cities: city_model.append(c_name)
             city_combo = Adw.ComboRow(
@@ -1033,6 +992,10 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.worldclock-city.label", "Target City"),
                 subtitle=self.get_locale_text("actions.touchbar-info.worldclock-city.subtitle", "Select a world city for this clock")
             )
+            city_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: (
+                self.set_slot_setting(sk, "worldclock_city_idx", combo.get_selected()),
+                self.notify_visibility_change()
+            ))
 
             view_model = Gtk.StringList()
             for opt in self.worldclock_view_options: view_model.append(opt)
@@ -1041,40 +1004,50 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.worldclock-view.label", "Clock View Mode"),
                 subtitle=self.get_locale_text("actions.touchbar-info.worldclock-view.subtitle", "Choose Digital text or Analog round clock face")
             )
+            view_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "worldclock_view", combo.get_selected()))
 
             label_entry = Adw.EntryRow(
                 title=self.get_locale_text("actions.touchbar-info.worldclock-custom-label.label", "Custom City Label")
             )
+            label_entry.connect("changed", lambda entry, sk=slot_key: self.set_slot_setting(sk, "worldclock_custom_label", entry.get_text()))
 
             tz_entry = Adw.EntryRow(
                 title=self.get_locale_text("actions.touchbar-info.worldclock-custom-tz.label", "Custom IANA Timezone")
             )
+            tz_entry.connect("changed", lambda entry, sk=slot_key: self.set_slot_setting(sk, "worldclock_custom_tz", entry.get_text()))
 
             sec_sw = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.worldclock-show-seconds.label", "Show Seconds"),
                 subtitle=self.get_locale_text("actions.touchbar-info.worldclock-show-seconds.subtitle", "Include seconds in the world clock display")
             )
+            sec_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: self.set_slot_setting(sk, "worldclock_show_seconds", sw.get_active()))
 
             offset_sw = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.worldclock-show-offset.label", "Show Time Offset and Day"),
                 subtitle=self.get_locale_text("actions.touchbar-info.worldclock-show-offset.subtitle", "Display time difference relative to local time (e.g. +5h, Tomorrow)")
             )
+            offset_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: self.set_slot_setting(sk, "worldclock_show_offset", sw.get_active()))
 
             font_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
                 subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
             )
             font_btn = Gtk.FontButton.new()
-            font_btn.set_use_font(False)
+            font_btn.set_use_font(True)
             font_btn.set_use_size(False)
             font_btn.set_valign(Gtk.Align.CENTER)
             font_btn.set_hexpand(False)
+            font_btn.connect("font-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "worldclock_font_str", btn.get_font()))
             font_row.add_suffix(font_btn)
 
             fill_sw = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
                 subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
             )
+            fill_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                self.set_slot_setting(sk, "worldclock_fill_enabled", sw.get_active()),
+                fill_color_row.set_sensitive(sw.get_active())
+            ))
 
             fill_color_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
@@ -1082,12 +1055,18 @@ class TouchBarInfoAction(ActionBase):
             )
             fill_color_btn = Gtk.ColorButton()
             fill_color_btn.set_valign(Gtk.Align.CENTER)
+            fill_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "worldclock_font_color", self.gdk_to_hex(btn.get_rgba())))
             fill_color_row.add_suffix(fill_color_btn)
 
             out_sw = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
                 subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
             )
+            out_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                self.set_slot_setting(sk, "worldclock_outline_enabled", sw.get_active()),
+                out_color_row.set_sensitive(sw.get_active()),
+                out_size_spin.set_sensitive(sw.get_active())
+            ))
 
             out_color_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
@@ -1095,256 +1074,313 @@ class TouchBarInfoAction(ActionBase):
             )
             out_color_btn = Gtk.ColorButton()
             out_color_btn.set_valign(Gtk.Align.CENTER)
+            out_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "worldclock_outline_color", self.gdk_to_hex(btn.get_rgba())))
             out_color_row.add_suffix(out_color_btn)
 
             out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
             out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
             out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
-
-            self.all_worldclock_city_combos.append(city_combo)
-            self.all_worldclock_view_combos.append(view_combo)
-            self.all_worldclock_label_entries.append(label_entry)
-            self.all_worldclock_tz_entries.append(tz_entry)
-            self.all_worldclock_sec_switches.append(sec_sw)
-            self.all_worldclock_offset_switches.append(offset_sw)
-            self.all_worldclock_font_btns.append(font_btn)
-            self.all_worldclock_fill_switches.append(fill_sw)
-            self.all_worldclock_fill_color_btns.append(fill_color_btn)
-            self.all_worldclock_out_switches.append(out_sw)
-            self.all_worldclock_out_color_btns.append(out_color_btn)
-            self.all_worldclock_out_size_spins.append(out_size_spin)
+            out_size_spin.connect("notify::value", lambda spin, pspec, sk=slot_key: self.set_slot_setting(sk, "worldclock_outline_size", int(spin.get_value())))
 
             return {
                 "city_combo": city_combo, "view_combo": view_combo, "label_entry": label_entry, "tz_entry": tz_entry,
-                "sec_sw": sec_sw, "offset_sw": offset_sw, "font_row": font_row, "font_btn": font_btn,
-                "fill_sw": fill_sw, "fill_color_row": fill_color_row, "fill_color_btn": fill_color_btn,
-                "out_sw": out_sw, "out_color_row": out_color_row, "out_color_btn": out_color_btn,
+                "sec_sw": sec_sw, "offset_sw": offset_sw, "font_btn": font_btn,
+                "fill_sw": fill_sw, "fill_color_btn": fill_color_btn, "fill_color_row": fill_color_row,
+                "out_sw": out_sw, "out_color_btn": out_color_btn, "out_color_row": out_color_row,
                 "out_size_spin": out_size_spin,
                 "all_rows": [city_combo, view_combo, label_entry, tz_entry, sec_sw, offset_sw, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
             }
 
-        # Helper to create Media controls
-        def build_media_controls(is_full_mode=True):
+        # Helper to create Media controls with Expanders for Song & Artist
+        def build_media_controls(slot_key: str, is_full_mode: bool = True):
             media_hdr = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.media-settings.label", "Media Player Settings"),
-                subtitle=self.get_locale_text("actions.touchbar-info.media-settings.subtitle", "Player source, visualizer style, colors, gradient, and font styling")
+                title=self.get_locale_text("actions.touchbar-info.hdr-media.label", "Media Player & Visualizer"),
+                subtitle=self.get_locale_text("actions.touchbar-info.hdr-media.subtitle", "Universal MPRIS player display, album artwork, and real-time audio visualizers")
             )
             media_hdr.add_css_class("touchbar-subhdr-row")
 
+            media_players = self.get_available_media_players()
+            player_ids = [pid for pid, _ in media_players]
             player_model = Gtk.StringList()
-            for opt in self.media_player_options: player_model.append(opt)
+            for _, label in media_players:
+                player_model.append(label)
             player_combo = Adw.ComboRow(
                 model=player_model,
-                title=self.get_locale_text("actions.touchbar-info.media-player-source.label", "Media Player Source"),
-                subtitle=self.get_locale_text("actions.touchbar-info.media-player-source.subtitle", "Choose specific player or auto-detect active playing player")
+                title=self.get_locale_text("actions.touchbar-info.media-player-src.label", "Media Player Source"),
+                subtitle=self.get_locale_text("actions.touchbar-info.media-player-src.subtitle", "Choose automatic MPRIS detection or lock to a specific player")
             )
+            player_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key, pids=player_ids: (
+                self.set_slot_setting(sk, "media_player_id", pids[combo.get_selected()] if combo.get_selected() < len(pids) else "auto"),
+                self.update_media_state(pids[combo.get_selected()] if combo.get_selected() < len(pids) else "auto"),
+                self.trigger_redraw()
+            ))
 
             vis_model = Gtk.StringList()
             for opt in self.media_vis_options: vis_model.append(opt)
             vis_combo = Adw.ComboRow(
                 model=vis_model,
-                title=self.get_locale_text("actions.touchbar-info.media-vis-style.label", "Visualizer Style"),
-                subtitle=self.get_locale_text("actions.touchbar-info.media-vis-style.subtitle", "Select visualizer animation type")
+                title=self.get_locale_text("actions.touchbar-info.media-vis-style.label", "Visualizer Animation Style"),
+                subtitle=self.get_locale_text("actions.touchbar-info.media-vis-style.subtitle", "Choose between Stepped Equalizer Bars or Flowing Wave Curves")
             )
+            vis_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "media_vis_style_idx", combo.get_selected()))
 
             color_mode_model = Gtk.StringList()
             for opt in self.media_color_mode_options: color_mode_model.append(opt)
             color_mode_combo = Adw.ComboRow(
                 model=color_mode_model,
                 title=self.get_locale_text("actions.touchbar-info.media-color-mode.label", "Visualizer Color Mode"),
-                subtitle=self.get_locale_text("actions.touchbar-info.media-color-mode.subtitle", "Choose solid color or gradient coloring")
+                subtitle=self.get_locale_text("actions.touchbar-info.media-color-mode.subtitle", "Choose Solid Color or 3-Color Dynamic Gradient")
             )
+            color_mode_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: (
+                self.set_slot_setting(sk, "media_color_mode_idx", combo.get_selected()),
+                self.notify_visibility_change()
+            ))
 
-            # Solid Color
             solid_color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.media-solid-color.label", "Visualizer Color"),
+                title=self.get_locale_text("actions.touchbar-info.media-solid-color.label", "Solid Color"),
                 subtitle=self.get_locale_text("actions.touchbar-info.media-solid-color.subtitle", "Color for visualizer bars or waves")
             )
             solid_color_btn = Gtk.ColorButton()
             solid_color_btn.set_valign(Gtk.Align.CENTER)
+            solid_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "media_solid_color", self.gdk_to_hex(btn.get_rgba())))
             solid_color_row.add_suffix(solid_color_btn)
 
-            # Gradient Start Color
             grad_start_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.media-grad-start.label", "Gradient Start Color"),
                 subtitle=self.get_locale_text("actions.touchbar-info.media-grad-start.subtitle", "Bottom for Stepped Bars / Left for Wave Curves")
             )
             grad_start_btn = Gtk.ColorButton()
             grad_start_btn.set_valign(Gtk.Align.CENTER)
+            grad_start_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "media_grad_start", self.gdk_to_hex(btn.get_rgba())))
             grad_start_row.add_suffix(grad_start_btn)
 
-            # Gradient Middle Color
             grad_mid_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.media-grad-mid.label", "Gradient Middle Color"),
                 subtitle=self.get_locale_text("actions.touchbar-info.media-grad-mid.subtitle", "Middle color of the 3-color visualizer gradient")
             )
             grad_mid_btn = Gtk.ColorButton()
             grad_mid_btn.set_valign(Gtk.Align.CENTER)
+            grad_mid_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "media_grad_mid", self.gdk_to_hex(btn.get_rgba())))
             grad_mid_row.add_suffix(grad_mid_btn)
 
-            # Gradient End Color
             grad_end_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.media-grad-end.label", "Gradient End Color"),
                 subtitle=self.get_locale_text("actions.touchbar-info.media-grad-end.subtitle", "Top for Stepped Bars / Right for Wave Curves")
             )
             grad_end_btn = Gtk.ColorButton()
             grad_end_btn.set_valign(Gtk.Align.CENTER)
+            grad_end_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "media_grad_end", self.gdk_to_hex(btn.get_rgba())))
             grad_end_row.add_suffix(grad_end_btn)
 
-            # Artist typography (only in full mode)
-            artist_font_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.media-artist-font.label", "Artist Font and Size"),
-                subtitle=self.get_locale_text("actions.touchbar-info.media-artist-font.subtitle", "Choose font family, style, and size for artist text")
-            )
-            artist_font_btn = Gtk.FontButton.new()
-            artist_font_btn.set_use_font(False)
-            artist_font_btn.set_use_size(False)
-            artist_font_btn.set_valign(Gtk.Align.CENTER)
-            artist_font_btn.set_hexpand(False)
-            artist_font_row.add_suffix(artist_font_btn)
+            song_expander = None
+            artist_expander = None
+            song_font_btn = None
+            song_fill_sw = None
+            song_fill_color_btn = None
+            song_out_sw = None
+            song_out_color_btn = None
+            song_out_size_spin = None
+            artist_font_btn = None
+            artist_fill_sw = None
+            artist_fill_color_btn = None
+            artist_out_sw = None
+            artist_out_color_btn = None
+            artist_out_size_spin = None
 
-            artist_fill_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Artist Text Fill"),
-                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill for artist")
-            )
-            artist_fill_color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Artist Fill Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for artist text interior fill")
-            )
-            artist_fill_color_btn = Gtk.ColorButton()
-            artist_fill_color_btn.set_valign(Gtk.Align.CENTER)
-            artist_fill_color_row.add_suffix(artist_fill_color_btn)
+            if is_full_mode:
+                song_expander = Adw.ExpanderRow(
+                    title=self.get_locale_text("actions.touchbar-info.hdr-song.label", "Song Title Settings"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.hdr-song.subtitle", "Typography and styling configuration for song title")
+                )
+                song_font_row = Adw.ActionRow(
+                    title=self.get_locale_text("actions.touchbar-info.media-song-font.label", "Song Title Font and Size"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.media-song-font.subtitle", "Choose font family, style, and size for song title")
+                )
+                song_font_btn = Gtk.FontButton.new()
+                song_font_btn.set_use_font(True)
+                song_font_btn.set_use_size(False)
+                song_font_btn.set_valign(Gtk.Align.CENTER)
+                song_font_btn.set_hexpand(False)
+                song_font_btn.connect("font-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "media_song_font_str", btn.get_font()))
+                song_font_row.add_suffix(song_font_btn)
 
-            artist_out_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Artist Text Outline"),
-                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around artist text")
-            )
-            artist_out_color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Artist Outline Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for artist text outline")
-            )
-            artist_out_color_btn = Gtk.ColorButton()
-            artist_out_color_btn.set_valign(Gtk.Align.CENTER)
-            artist_out_color_row.add_suffix(artist_out_color_btn)
+                song_fill_sw = Adw.SwitchRow(
+                    title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Song Title Fill"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill for song title")
+                )
+                song_fill_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                    self.set_slot_setting(sk, "media_song_fill_enabled", sw.get_active()),
+                    song_fill_color_row.set_sensitive(sw.get_active())
+                ))
 
-            artist_out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
-            artist_out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Artist Outline Thickness"))
-            artist_out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+                song_fill_color_row = Adw.ActionRow(
+                    title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Song Title Fill Color"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for song title interior fill")
+                )
+                song_fill_color_btn = Gtk.ColorButton()
+                song_fill_color_btn.set_valign(Gtk.Align.CENTER)
+                song_fill_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "media_song_font_color", self.gdk_to_hex(btn.get_rgba())))
+                song_fill_color_row.add_suffix(song_fill_color_btn)
 
-            # Song typography (only in full mode)
-            song_font_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.media-song-font.label", "Song Title Font and Size"),
-                subtitle=self.get_locale_text("actions.touchbar-info.media-song-font.subtitle", "Choose font family, style, and size for song title")
-            )
-            song_font_btn = Gtk.FontButton.new()
-            song_font_btn.set_use_font(False)
-            song_font_btn.set_use_size(False)
-            song_font_btn.set_valign(Gtk.Align.CENTER)
-            song_font_btn.set_hexpand(False)
-            song_font_row.add_suffix(song_font_btn)
+                song_out_sw = Adw.SwitchRow(
+                    title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Song Title Outline"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around song title")
+                )
+                song_out_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                    self.set_slot_setting(sk, "media_song_outline_enabled", sw.get_active()),
+                    song_out_color_row.set_sensitive(sw.get_active()),
+                    song_out_size_spin.set_sensitive(sw.get_active())
+                ))
 
-            song_fill_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Song Title Fill"),
-                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill for song title")
-            )
-            song_fill_color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Song Title Fill Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for song title interior fill")
-            )
-            song_fill_color_btn = Gtk.ColorButton()
-            song_fill_color_btn.set_valign(Gtk.Align.CENTER)
-            song_fill_color_row.add_suffix(song_fill_color_btn)
+                song_out_color_row = Adw.ActionRow(
+                    title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Song Title Outline Color"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for song title outline")
+                )
+                song_out_color_btn = Gtk.ColorButton()
+                song_out_color_btn.set_valign(Gtk.Align.CENTER)
+                song_out_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "media_song_outline_color", self.gdk_to_hex(btn.get_rgba())))
+                song_out_color_row.add_suffix(song_out_color_btn)
 
-            song_out_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Song Title Outline"),
-                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around song title")
-            )
-            song_out_color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Song Title Outline Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for song title outline")
-            )
-            song_out_color_btn = Gtk.ColorButton()
-            song_out_color_btn.set_valign(Gtk.Align.CENTER)
-            song_out_color_row.add_suffix(song_out_color_btn)
+                song_out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
+                song_out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Song Title Outline Thickness"))
+                song_out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+                song_out_size_spin.connect("notify::value", lambda spin, pspec, sk=slot_key: self.set_slot_setting(sk, "media_song_outline_size", int(spin.get_value())))
 
-            song_out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
-            song_out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Song Title Outline Thickness"))
-            song_out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+                song_expander.add_row(song_font_row)
+                song_expander.add_row(song_fill_sw)
+                song_expander.add_row(song_fill_color_row)
+                song_expander.add_row(song_out_sw)
+                song_expander.add_row(song_out_color_row)
+                song_expander.add_row(song_out_size_spin)
 
-            self.all_media_player_combos.append(player_combo)
-            self.all_media_vis_combos.append(vis_combo)
-            self.all_media_color_mode_combos.append(color_mode_combo)
-            self.all_media_solid_color_btns.append(solid_color_btn)
-            self.all_media_grad_start_btns.append(grad_start_btn)
-            self.all_media_grad_mid_btns.append(grad_mid_btn)
-            self.all_media_grad_end_btns.append(grad_end_btn)
-            self.all_media_artist_font_btns.append(artist_font_btn)
-            self.all_media_artist_fill_switches.append(artist_fill_sw)
-            self.all_media_artist_fill_color_btns.append(artist_fill_color_btn)
-            self.all_media_artist_out_switches.append(artist_out_sw)
-            self.all_media_artist_out_color_btns.append(artist_out_color_btn)
-            self.all_media_artist_out_size_spins.append(artist_out_size_spin)
-            self.all_media_song_font_btns.append(song_font_btn)
-            self.all_media_song_fill_switches.append(song_fill_sw)
-            self.all_media_song_fill_color_btns.append(song_fill_color_btn)
-            self.all_media_song_out_switches.append(song_out_sw)
-            self.all_media_song_out_color_btns.append(song_out_color_btn)
-            self.all_media_song_out_size_spins.append(song_out_size_spin)
+                artist_expander = Adw.ExpanderRow(
+                    title=self.get_locale_text("actions.touchbar-info.hdr-artist.label", "Artist Name Settings"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.hdr-artist.subtitle", "Typography and styling configuration for artist name")
+                )
+                artist_font_row = Adw.ActionRow(
+                    title=self.get_locale_text("actions.touchbar-info.media-artist-font.label", "Artist Font and Size"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.media-artist-font.subtitle", "Choose font family, style, and size for artist text")
+                )
+                artist_font_btn = Gtk.FontButton.new()
+                artist_font_btn.set_use_font(True)
+                artist_font_btn.set_use_size(False)
+                artist_font_btn.set_valign(Gtk.Align.CENTER)
+                artist_font_btn.set_hexpand(False)
+                artist_font_btn.connect("font-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "media_artist_font_str", btn.get_font()))
+                artist_font_row.add_suffix(artist_font_btn)
+
+                artist_fill_sw = Adw.SwitchRow(
+                    title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Artist Text Fill"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill for artist")
+                )
+                artist_fill_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                    self.set_slot_setting(sk, "media_artist_fill_enabled", sw.get_active()),
+                    artist_fill_color_row.set_sensitive(sw.get_active())
+                ))
+
+                artist_fill_color_row = Adw.ActionRow(
+                    title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Artist Fill Color"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for artist text interior fill")
+                )
+                artist_fill_color_btn = Gtk.ColorButton()
+                artist_fill_color_btn.set_valign(Gtk.Align.CENTER)
+                artist_fill_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "media_artist_font_color", self.gdk_to_hex(btn.get_rgba())))
+                artist_fill_color_row.add_suffix(artist_fill_color_btn)
+
+                artist_out_sw = Adw.SwitchRow(
+                    title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Artist Text Outline"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around artist text")
+                )
+                artist_out_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                    self.set_slot_setting(sk, "media_artist_outline_enabled", sw.get_active()),
+                    artist_out_color_row.set_sensitive(sw.get_active()),
+                    artist_out_size_spin.set_sensitive(sw.get_active())
+                ))
+
+                artist_out_color_row = Adw.ActionRow(
+                    title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Artist Outline Color"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for artist text outline")
+                )
+                artist_out_color_btn = Gtk.ColorButton()
+                artist_out_color_btn.set_valign(Gtk.Align.CENTER)
+                artist_out_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "media_artist_outline_color", self.gdk_to_hex(btn.get_rgba())))
+                artist_out_color_row.add_suffix(artist_out_color_btn)
+
+                artist_out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
+                artist_out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Artist Outline Thickness"))
+                artist_out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+                artist_out_size_spin.connect("notify::value", lambda spin, pspec, sk=slot_key: self.set_slot_setting(sk, "media_artist_outline_size", int(spin.get_value())))
+
+                artist_expander.add_row(artist_font_row)
+                artist_expander.add_row(artist_fill_sw)
+                artist_expander.add_row(artist_fill_color_row)
+                artist_expander.add_row(artist_out_sw)
+                artist_expander.add_row(artist_out_color_row)
+                artist_expander.add_row(artist_out_size_spin)
 
             all_rows = [media_hdr, player_combo, vis_combo, color_mode_combo, solid_color_row, grad_start_row, grad_mid_row, grad_end_row]
             if is_full_mode:
-                all_rows.extend([
-                    artist_font_row, artist_fill_sw, artist_fill_color_row, artist_out_sw, artist_out_color_row, artist_out_size_spin,
-                    song_font_row, song_fill_sw, song_fill_color_row, song_out_sw, song_out_color_row, song_out_size_spin
-                ])
+                all_rows.extend([song_expander, artist_expander])
 
             return {
                 "media_hdr": media_hdr, "player_combo": player_combo, "vis_combo": vis_combo,
                 "color_mode_combo": color_mode_combo, "solid_color_row": solid_color_row,
-                "grad_start_row": grad_start_row, "grad_mid_row": grad_mid_row, "grad_end_row": grad_end_row,
-                "artist_font_row": artist_font_row, "artist_fill_sw": artist_fill_sw,
-                "artist_fill_color_row": artist_fill_color_row, "artist_out_sw": artist_out_sw,
-                "artist_out_color_row": artist_out_color_row, "artist_out_size_spin": artist_out_size_spin,
-                "song_font_row": song_font_row, "song_fill_sw": song_fill_sw,
-                "song_fill_color_row": song_fill_color_row, "song_out_sw": song_out_sw,
-                "song_out_color_row": song_out_color_row, "song_out_size_spin": song_out_size_spin,
+                "solid_color_btn": solid_color_btn, "grad_start_row": grad_start_row,
+                "grad_start_btn": grad_start_btn, "grad_mid_row": grad_mid_row, "grad_mid_btn": grad_mid_btn,
+                "grad_end_row": grad_end_row, "grad_end_btn": grad_end_btn,
+                "song_expander": song_expander, "song_font_btn": song_font_btn,
+                "song_fill_sw": song_fill_sw, "song_fill_color_btn": song_fill_color_btn,
+                "song_out_sw": song_out_sw, "song_out_color_btn": song_out_color_btn,
+                "song_out_size_spin": song_out_size_spin,
+                "artist_expander": artist_expander, "artist_font_btn": artist_font_btn,
+                "artist_fill_sw": artist_fill_sw, "artist_fill_color_btn": artist_fill_color_btn,
+                "artist_out_sw": artist_out_sw, "artist_out_color_btn": artist_out_color_btn,
+                "artist_out_size_spin": artist_out_size_spin,
                 "all_rows": all_rows, "is_full_mode": is_full_mode
             }
 
-        # Helper to create Section Expander with clean subsection expanders for split mode
-        def create_section_expander(title_key, default_title, subtitle_key, default_sub, prefix_key):
+        # Helper to assemble a complete Section Expander
+        def create_section_expander(title_key: str, default_title: str, subtitle_key: str, default_sub: str, prefix_key: str):
             expander = Adw.ExpanderRow(
                 title=self.get_locale_text(title_key, default_title),
                 subtitle=self.get_locale_text(subtitle_key, default_sub)
             )
 
             mode_model = Gtk.StringList()
-            for opt in self.mode_options: mode_model.append(opt)
+            for opt in self.section_mode_options: mode_model.append(opt)
             mode_combo = Adw.ComboRow(
                 model=mode_model,
-                title=self.get_locale_text("actions.touchbar-info.widget-mode.label", "Number of Widgets"),
-                subtitle=self.get_locale_text("actions.touchbar-info.widget-mode.subtitle", "Choose full section height or split top/bottom subsections")
+                title=self.get_locale_text("actions.touchbar-info.section-layout.label", "Section Layout"),
+                subtitle=self.get_locale_text("actions.touchbar-info.section-layout.subtitle", "Choose single full widget or stacked split widgets")
             )
 
-            # --- 1. Full Section Group ---
+            # 1. Full Mode Controls
             full_model = Gtk.StringList()
             for opt in self.full_widget_options: full_model.append(opt)
             full_combo = Adw.ComboRow(
                 model=full_model,
-                title=self.get_locale_text("actions.touchbar-info.full-widget.label", "Full Section Widget"),
-                subtitle=self.get_locale_text("actions.touchbar-info.full-widget.subtitle", "Widget assigned to full section area")
+                title=self.get_locale_text("actions.touchbar-info.widget-selector.label", "Select Widget"),
+                subtitle=self.get_locale_text("actions.touchbar-info.widget-selector.subtitle", "Choose widget to display in this section")
             )
-            full_date_ctrls = build_date_controls()
-            full_time_ctrls = build_time_controls()
-            full_weather_ctrls = build_weather_controls()
-            full_cpu_ctrls = build_cpu_controls()
-            full_net_ctrls = build_net_controls()
-            full_ram_ctrls = build_ram_controls()
-            full_disk_ctrls = build_disk_controls()
-            full_worldclock_ctrls = build_worldclock_controls()
-            full_media_ctrls = build_media_controls(is_full_mode=True)
 
-            # --- 2. Top Subsection Expander ---
+            full_slot_key = f"{prefix_key}_full"
+            full_date_ctrls = build_date_controls(full_slot_key)
+            full_time_ctrls = build_time_controls(full_slot_key)
+            full_weather_ctrls = build_weather_controls(full_slot_key)
+            full_cpu_ctrls = build_cpu_controls(full_slot_key)
+            full_net_ctrls = build_net_controls(full_slot_key)
+            full_ram_ctrls = build_ram_controls(full_slot_key)
+            full_disk_ctrls = build_disk_controls(full_slot_key)
+            full_worldclock_ctrls = build_worldclock_controls(full_slot_key)
+            full_media_ctrls = build_media_controls(full_slot_key, is_full_mode=True)
+
+            self.slot_controls[full_slot_key] = {
+                "date": full_date_ctrls, "time": full_time_ctrls, "weather": full_weather_ctrls,
+                "cpu": full_cpu_ctrls, "net": full_net_ctrls, "ram": full_ram_ctrls,
+                "disk": full_disk_ctrls, "worldclock": full_worldclock_ctrls, "media": full_media_ctrls
+            }
+
+            # 2. Top Subsection Expander
             top_expander = Adw.ExpanderRow(
                 title=self.get_locale_text("actions.touchbar-info.top-subsection.label", "Top"),
                 subtitle=self.get_locale_text("actions.touchbar-info.top-subsection.subtitle", "Configure widget for the top 50px slot")
@@ -1356,15 +1392,23 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.widget-selector.label", "Select Widget"),
                 subtitle=self.get_locale_text("actions.touchbar-info.widget-selector.subtitle", "Choose widget to display in this slot")
             )
-            top_date_ctrls = build_date_controls()
-            top_time_ctrls = build_time_controls()
-            top_weather_ctrls = build_weather_controls()
-            top_cpu_ctrls = build_cpu_controls()
-            top_net_ctrls = build_net_controls()
-            top_ram_ctrls = build_ram_controls()
-            top_disk_ctrls = build_disk_controls()
-            top_worldclock_ctrls = build_worldclock_controls()
-            top_media_ctrls = build_media_controls(is_full_mode=False)
+
+            top_slot_key = f"{prefix_key}_top"
+            top_date_ctrls = build_date_controls(top_slot_key)
+            top_time_ctrls = build_time_controls(top_slot_key)
+            top_weather_ctrls = build_weather_controls(top_slot_key)
+            top_cpu_ctrls = build_cpu_controls(top_slot_key)
+            top_net_ctrls = build_net_controls(top_slot_key)
+            top_ram_ctrls = build_ram_controls(top_slot_key)
+            top_disk_ctrls = build_disk_controls(top_slot_key)
+            top_worldclock_ctrls = build_worldclock_controls(top_slot_key)
+            top_media_ctrls = build_media_controls(top_slot_key, is_full_mode=False)
+
+            self.slot_controls[top_slot_key] = {
+                "date": top_date_ctrls, "time": top_time_ctrls, "weather": top_weather_ctrls,
+                "cpu": top_cpu_ctrls, "net": top_net_ctrls, "ram": top_ram_ctrls,
+                "disk": top_disk_ctrls, "worldclock": top_worldclock_ctrls, "media": top_media_ctrls
+            }
 
             top_expander.add_row(top_combo)
             for r in top_date_ctrls["all_rows"]: top_expander.add_row(r)
@@ -1377,7 +1421,7 @@ class TouchBarInfoAction(ActionBase):
             for r in top_worldclock_ctrls["all_rows"]: top_expander.add_row(r)
             for r in top_media_ctrls["all_rows"]: top_expander.add_row(r)
 
-            # --- 3. Bottom Subsection Expander ---
+            # 3. Bottom Subsection Expander
             bot_expander = Adw.ExpanderRow(
                 title=self.get_locale_text("actions.touchbar-info.bottom-subsection.label", "Bottom"),
                 subtitle=self.get_locale_text("actions.touchbar-info.bottom-subsection.subtitle", "Configure widget for the bottom 50px slot")
@@ -1389,15 +1433,23 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.widget-selector.label", "Select Widget"),
                 subtitle=self.get_locale_text("actions.touchbar-info.widget-selector.subtitle", "Choose widget to display in this slot")
             )
-            bot_date_ctrls = build_date_controls()
-            bot_time_ctrls = build_time_controls()
-            bot_weather_ctrls = build_weather_controls()
-            bot_cpu_ctrls = build_cpu_controls()
-            bot_net_ctrls = build_net_controls()
-            bot_ram_ctrls = build_ram_controls()
-            bot_disk_ctrls = build_disk_controls()
-            bot_worldclock_ctrls = build_worldclock_controls()
-            bot_media_ctrls = build_media_controls(is_full_mode=False)
+
+            bot_slot_key = f"{prefix_key}_bot"
+            bot_date_ctrls = build_date_controls(bot_slot_key)
+            bot_time_ctrls = build_time_controls(bot_slot_key)
+            bot_weather_ctrls = build_weather_controls(bot_slot_key)
+            bot_cpu_ctrls = build_cpu_controls(bot_slot_key)
+            bot_net_ctrls = build_net_controls(bot_slot_key)
+            bot_ram_ctrls = build_ram_controls(bot_slot_key)
+            bot_disk_ctrls = build_disk_controls(bot_slot_key)
+            bot_worldclock_ctrls = build_worldclock_controls(bot_slot_key)
+            bot_media_ctrls = build_media_controls(bot_slot_key, is_full_mode=False)
+
+            self.slot_controls[bot_slot_key] = {
+                "date": bot_date_ctrls, "time": bot_time_ctrls, "weather": bot_weather_ctrls,
+                "cpu": bot_cpu_ctrls, "net": bot_net_ctrls, "ram": bot_ram_ctrls,
+                "disk": bot_disk_ctrls, "worldclock": bot_worldclock_ctrls, "media": bot_media_ctrls
+            }
 
             bot_expander.add_row(bot_combo)
             for r in bot_date_ctrls["all_rows"]: bot_expander.add_row(r)
@@ -1410,9 +1462,8 @@ class TouchBarInfoAction(ActionBase):
             for r in bot_worldclock_ctrls["all_rows"]: bot_expander.add_row(r)
             for r in bot_media_ctrls["all_rows"]: bot_expander.add_row(r)
 
-            # Add rows to parent section expander
+            # Add rows to section expander
             expander.add_row(mode_combo)
-
             expander.add_row(full_combo)
             for r in full_date_ctrls["all_rows"]: expander.add_row(r)
             for r in full_time_ctrls["all_rows"]: expander.add_row(r)
@@ -1427,9 +1478,8 @@ class TouchBarInfoAction(ActionBase):
             expander.add_row(top_expander)
             expander.add_row(bot_expander)
 
-            # --- Unified Group Visibility Helper ---
+            # Visibility updater for a group of slot controls
             def update_group_vis(widget_choice, is_active, date_ctrls, time_ctrls, weather_ctrls, cpu_ctrls, net_ctrls, ram_ctrls, disk_ctrls, worldclock_ctrls, media_ctrls, is_full_mode=True):
-                # Hide all if group is not active
                 if not is_active:
                     for r in date_ctrls["all_rows"]: r.set_visible(False)
                     for r in time_ctrls["all_rows"]: r.set_visible(False)
@@ -1442,317 +1492,137 @@ class TouchBarInfoAction(ActionBase):
                     for r in media_ctrls["all_rows"]: r.set_visible(False)
                     return
 
-                # Date Visibility (Full: 2 [Date], 7 [Stacked] | Split: 2 [Date])
-                show_date = (widget_choice in [2, 7]) if is_full_mode else (widget_choice == 2)
+                # Date Visibility (Full: only 7 [Stacked Date & Time] | Split: only 2 [Date])
+                show_date = (widget_choice == 7) if is_full_mode else (widget_choice == 2)
                 date_ctrls["date_expander"].set_visible(show_date)
-                date_ctrls["fill_color_row"].set_sensitive(date_ctrls["fill_sw"].get_active())
-                date_ctrls["out_color_row"].set_sensitive(date_ctrls["out_sw"].get_active())
-                date_ctrls["out_size_spin"].set_sensitive(date_ctrls["out_sw"].get_active())
 
-                # Time Visibility (Full: 7 [Stacked], 8 [Time] | Split: 7 [Time])
-                show_time = (widget_choice in [7, 8]) if is_full_mode else (widget_choice == 7)
+                # Time Visibility (Full: only 7 [Stacked Date & Time] | Split: only 7 [Time])
+                show_time = (widget_choice == 7) if is_full_mode else (widget_choice == 7)
                 time_ctrls["time_expander"].set_visible(show_time)
-                time_ctrls["fill_color_row"].set_sensitive(time_ctrls["fill_sw"].get_active())
-                time_ctrls["out_color_row"].set_sensitive(time_ctrls["out_sw"].get_active())
-                time_ctrls["out_size_spin"].set_sensitive(time_ctrls["out_sw"].get_active())
 
                 # Weather Visibility (Full: 9 | Split: 8)
                 show_weather = (widget_choice == 9) if is_full_mode else (widget_choice == 8)
-                weather_ctrls["loc_entry"].set_visible(show_weather)
-                weather_ctrls["res_combo"].set_visible(show_weather and len(self.search_results_data) > 0)
-                weather_ctrls["unit_combo"].set_visible(show_weather)
-                weather_ctrls["ref_combo"].set_visible(show_weather)
-                weather_ctrls["font_row"].set_visible(show_weather)
-                weather_ctrls["fill_sw"].set_visible(show_weather)
-                weather_ctrls["fill_color_row"].set_visible(show_weather)
-                weather_ctrls["fill_color_row"].set_sensitive(show_weather and weather_ctrls["fill_sw"].get_active())
-                weather_ctrls["out_sw"].set_visible(show_weather)
-                weather_ctrls["out_color_row"].set_visible(show_weather)
-                weather_ctrls["out_color_row"].set_sensitive(show_weather and weather_ctrls["out_sw"].get_active())
-                weather_ctrls["out_size_spin"].set_visible(show_weather)
-                weather_ctrls["out_size_spin"].set_sensitive(show_weather and weather_ctrls["out_sw"].get_active())
+                for r in weather_ctrls["all_rows"]:
+                    if r == weather_ctrls["res_combo"]:
+                        r.set_visible(show_weather and r.get_model().get_n_items() > 0)
+                    else:
+                        r.set_visible(show_weather)
 
-                # CPU Visibility (Full: 1 | Split: 1)
-                show_cpu = (widget_choice == 1) if is_full_mode else (widget_choice == 1)
+                # CPU Visibility (Choice 1)
+                show_cpu = (widget_choice == 1)
                 for r in cpu_ctrls["all_rows"]: r.set_visible(show_cpu)
 
-                # Disk Visibility (Full: 3 | Split: 3)
-                show_disk = (widget_choice == 3) if is_full_mode else (widget_choice == 3)
+                # Network Visibility (Choice 5)
+                show_net = (widget_choice == 5)
+                for r in net_ctrls["all_rows"]: r.set_visible(show_net)
+
+                # RAM Visibility (Choice 6)
+                show_ram = (widget_choice == 6)
+                for r in ram_ctrls["all_rows"]: r.set_visible(show_ram)
+
+                # Disk Visibility (Choice 3)
+                show_disk = (widget_choice == 3)
                 for r in disk_ctrls["all_rows"]: r.set_visible(show_disk)
 
-                # Media Player Visibility (Full: 4 | Split: 4)
-                show_media = (widget_choice == 4) if is_full_mode else (widget_choice == 4)
-                is_gradient = (media_ctrls["color_mode_combo"].get_selected() == 1)
+                # World Clock Visibility (Full: 10 | Split: 9)
+                show_worldclock = (widget_choice == 10) if is_full_mode else (widget_choice == 9)
+                city_sel = worldclock_ctrls["city_combo"].get_selected()
+                is_custom_tz = (city_sel == len(self.worldclock_cities) - 1)
+                for r in worldclock_ctrls["all_rows"]:
+                    if r in (worldclock_ctrls["label_entry"], worldclock_ctrls["tz_entry"]):
+                        r.set_visible(show_worldclock and is_custom_tz)
+                    else:
+                        r.set_visible(show_worldclock)
+
+                # Media Player Visibility (Choice 4)
+                show_media = (widget_choice == 4)
+                color_mode = media_ctrls["color_mode_combo"].get_selected()
+                is_grad = (color_mode == 1)
 
                 media_ctrls["media_hdr"].set_visible(show_media)
                 media_ctrls["player_combo"].set_visible(show_media)
                 media_ctrls["vis_combo"].set_visible(show_media)
                 media_ctrls["color_mode_combo"].set_visible(show_media)
-                media_ctrls["solid_color_row"].set_visible(show_media and not is_gradient)
-                media_ctrls["grad_start_row"].set_visible(show_media and is_gradient)
-                media_ctrls["grad_mid_row"].set_visible(show_media and is_gradient)
-                media_ctrls["grad_end_row"].set_visible(show_media and is_gradient)
-
-                # Network Visibility (Full: 5 | Split: 5)
-                show_net = (widget_choice == 5) if is_full_mode else (widget_choice == 5)
-                for r in net_ctrls["all_rows"]: r.set_visible(show_net)
-
-                # RAM Visibility (Full: 6 | Split: 6)
-                show_ram = (widget_choice == 6) if is_full_mode else (widget_choice == 6)
-                for r in ram_ctrls["all_rows"]: r.set_visible(show_ram)
-
-                # World Clock Visibility (Full: 10 | Split: 9)
-                show_wc = (widget_choice == 10) if is_full_mode else (widget_choice == 9)
-                worldclock_ctrls["city_combo"].set_visible(show_wc)
-                is_custom_city = (worldclock_ctrls["city_combo"].get_selected() == len(self.worldclock_cities) - 1)
-                worldclock_ctrls["view_combo"].set_visible(show_wc)
-                worldclock_ctrls["label_entry"].set_visible(show_wc)
-                worldclock_ctrls["tz_entry"].set_visible(show_wc and is_custom_city)
-                worldclock_ctrls["sec_sw"].set_visible(show_wc)
-                worldclock_ctrls["offset_sw"].set_visible(show_wc)
-                worldclock_ctrls["font_row"].set_visible(show_wc)
-                worldclock_ctrls["fill_sw"].set_visible(show_wc)
-                worldclock_ctrls["fill_color_row"].set_visible(show_wc)
-                worldclock_ctrls["fill_color_row"].set_sensitive(show_wc and worldclock_ctrls["fill_sw"].get_active())
-                worldclock_ctrls["out_sw"].set_visible(show_wc)
-                worldclock_ctrls["out_color_row"].set_visible(show_wc)
-                worldclock_ctrls["out_color_row"].set_sensitive(show_wc and worldclock_ctrls["out_sw"].get_active())
-                worldclock_ctrls["out_size_spin"].set_visible(show_wc)
-                worldclock_ctrls["out_size_spin"].set_sensitive(show_wc and worldclock_ctrls["out_sw"].get_active())
+                media_ctrls["solid_color_row"].set_visible(show_media and not is_grad)
+                media_ctrls["grad_start_row"].set_visible(show_media and is_grad)
+                media_ctrls["grad_mid_row"].set_visible(show_media and is_grad)
+                media_ctrls["grad_end_row"].set_visible(show_media and is_grad)
 
                 if is_full_mode:
-                    media_ctrls["artist_font_row"].set_visible(show_media)
-                    media_ctrls["artist_fill_sw"].set_visible(show_media)
-                    media_ctrls["artist_fill_color_row"].set_visible(show_media)
-                    media_ctrls["artist_fill_color_row"].set_sensitive(show_media and media_ctrls["artist_fill_sw"].get_active())
-                    media_ctrls["artist_out_sw"].set_visible(show_media)
-                    media_ctrls["artist_out_color_row"].set_visible(show_media)
-                    media_ctrls["artist_out_color_row"].set_sensitive(show_media and media_ctrls["artist_out_sw"].get_active())
-                    media_ctrls["artist_out_size_spin"].set_visible(show_media)
-                    media_ctrls["artist_out_size_spin"].set_sensitive(show_media and media_ctrls["artist_out_sw"].get_active())
+                    media_ctrls["song_expander"].set_visible(show_media)
+                    media_ctrls["artist_expander"].set_visible(show_media)
 
-                    media_ctrls["song_font_row"].set_visible(show_media)
-                    media_ctrls["song_fill_sw"].set_visible(show_media)
-                    media_ctrls["song_fill_color_row"].set_visible(show_media)
-                    media_ctrls["song_fill_color_row"].set_sensitive(show_media and media_ctrls["song_fill_sw"].get_active())
-                    media_ctrls["song_out_sw"].set_visible(show_media)
-                    media_ctrls["song_out_color_row"].set_visible(show_media)
-                    media_ctrls["song_out_color_row"].set_sensitive(show_media and media_ctrls["song_out_sw"].get_active())
-                    media_ctrls["song_out_size_spin"].set_visible(show_media)
-                    media_ctrls["song_out_size_spin"].set_sensitive(show_media and media_ctrls["song_out_sw"].get_active())
+            def update_section_vis():
+                is_split = (mode_combo.get_selected() == 1)
+                full_combo.set_visible(not is_split)
+                top_expander.set_visible(is_split)
+                bot_expander.set_visible(is_split)
 
-            # Main Section Visibility Controller
-            def update_visibility():
-                is_full = (mode_combo.get_selected() == 0)
-                full_combo.set_visible(is_full)
-                top_expander.set_visible(not is_full)
-                bot_expander.set_visible(not is_full)
-
-                # 1. Update Full Section Controls Visibility
                 update_group_vis(
-                    full_combo.get_selected(),
-                    is_active=is_full,
-                    date_ctrls=full_date_ctrls,
-                    time_ctrls=full_time_ctrls,
-                    weather_ctrls=full_weather_ctrls,
-                    cpu_ctrls=full_cpu_ctrls,
-                    net_ctrls=full_net_ctrls,
-                    ram_ctrls=full_ram_ctrls,
-                    disk_ctrls=full_disk_ctrls,
-                    worldclock_ctrls=full_worldclock_ctrls,
-                    media_ctrls=full_media_ctrls,
+                    full_combo.get_selected(), not is_split,
+                    full_date_ctrls, full_time_ctrls, full_weather_ctrls,
+                    full_cpu_ctrls, full_net_ctrls, full_ram_ctrls,
+                    full_disk_ctrls, full_worldclock_ctrls, full_media_ctrls,
                     is_full_mode=True
                 )
-
-                # 2. Update Top Subsection Controls Visibility
                 update_group_vis(
-                    top_combo.get_selected(),
-                    is_active=(not is_full),
-                    date_ctrls=top_date_ctrls,
-                    time_ctrls=top_time_ctrls,
-                    weather_ctrls=top_weather_ctrls,
-                    cpu_ctrls=top_cpu_ctrls,
-                    net_ctrls=top_net_ctrls,
-                    ram_ctrls=top_ram_ctrls,
-                    disk_ctrls=top_disk_ctrls,
-                    worldclock_ctrls=top_worldclock_ctrls,
-                    media_ctrls=top_media_ctrls,
+                    top_combo.get_selected(), is_split,
+                    top_date_ctrls, top_time_ctrls, top_weather_ctrls,
+                    top_cpu_ctrls, top_net_ctrls, top_ram_ctrls,
+                    top_disk_ctrls, top_worldclock_ctrls, top_media_ctrls,
+                    is_full_mode=False
+                )
+                update_group_vis(
+                    bot_combo.get_selected(), is_split,
+                    bot_date_ctrls, bot_time_ctrls, bot_weather_ctrls,
+                    bot_cpu_ctrls, bot_net_ctrls, bot_ram_ctrls,
+                    bot_disk_ctrls, bot_worldclock_ctrls, bot_media_ctrls,
                     is_full_mode=False
                 )
 
-                # 3. Update Bottom Subsection Controls Visibility
-                update_group_vis(
-                    bot_combo.get_selected(),
-                    is_active=(not is_full),
-                    date_ctrls=bot_date_ctrls,
-                    time_ctrls=bot_time_ctrls,
-                    weather_ctrls=bot_weather_ctrls,
-                    cpu_ctrls=bot_cpu_ctrls,
-                    net_ctrls=bot_net_ctrls,
-                    ram_ctrls=bot_ram_ctrls,
-                    disk_ctrls=bot_disk_ctrls,
-                    worldclock_ctrls=bot_worldclock_ctrls,
-                    media_ctrls=bot_media_ctrls,
-                    is_full_mode=False
-                )
+            mode_combo.connect("notify::selected", lambda combo, pspec: (
+                self.set_slot_setting(prefix_key, "mode", combo.get_selected()),
+                update_section_vis(),
+                self.fetch_weather_async()
+            ))
+            full_combo.connect("notify::selected", lambda combo, pspec: (
+                self.set_slot_setting(prefix_key, "full_widget", combo.get_selected()),
+                update_section_vis(),
+                self.fetch_weather_async()
+            ))
+            top_combo.connect("notify::selected", lambda combo, pspec: (
+                self.set_slot_setting(prefix_key, "top_widget", combo.get_selected()),
+                update_section_vis(),
+                self.fetch_weather_async()
+            ))
+            bot_combo.connect("notify::selected", lambda combo, pspec: (
+                self.set_slot_setting(prefix_key, "bottom_widget", combo.get_selected()),
+                update_section_vis(),
+                self.fetch_weather_async()
+            ))
 
-            # Connect Mode & Widget Combo Signals
-            mode_combo.connect("notify::selected", lambda *a: update_visibility())
-            full_combo.connect("notify::selected", lambda *a: update_visibility())
-            top_combo.connect("notify::selected", lambda *a: update_visibility())
-            bot_combo.connect("notify::selected", lambda *a: update_visibility())
-
-            # Connect Sub-switch Signals to update_visibility
-            for ctrls in [full_date_ctrls, full_time_ctrls, full_weather_ctrls, full_worldclock_ctrls, full_media_ctrls, top_date_ctrls, top_time_ctrls, top_weather_ctrls, top_worldclock_ctrls, top_media_ctrls, bot_date_ctrls, bot_time_ctrls, bot_weather_ctrls, bot_worldclock_ctrls, bot_media_ctrls]:
-                if "city_combo" in ctrls:
-                    ctrls["city_combo"].connect("notify::selected", lambda *a: update_visibility())
-                if "view_combo" in ctrls:
-                    ctrls["view_combo"].connect("notify::selected", lambda *a: update_visibility())
-                if "color_mode_combo" in ctrls:
-                    ctrls["color_mode_combo"].connect("notify::selected", lambda *a: update_visibility())
-                if "sec_sw" in ctrls:
-                    ctrls["sec_sw"].connect("notify::active", lambda *a: update_visibility())
-                if "fill_sw" in ctrls:
-                    ctrls["fill_sw"].connect("notify::active", lambda *a: update_visibility())
-                if "out_sw" in ctrls:
-                    ctrls["out_sw"].connect("notify::active", lambda *a: update_visibility())
-                if "artist_fill_sw" in ctrls:
-                    ctrls["artist_fill_sw"].connect("notify::active", lambda *a: update_visibility())
-                if "artist_out_sw" in ctrls:
-                    ctrls["artist_out_sw"].connect("notify::active", lambda *a: update_visibility())
-                if "song_fill_sw" in ctrls:
-                    ctrls["song_fill_sw"].connect("notify::active", lambda *a: update_visibility())
-                if "song_out_sw" in ctrls:
-                    ctrls["song_out_sw"].connect("notify::active", lambda *a: update_visibility())
-
-            self.update_vis_callbacks.append(update_visibility)
-            update_visibility()
+            self.update_vis_callbacks.append(update_section_vis)
+            update_section_vis()
 
             return expander, mode_combo, full_combo, top_combo, bot_combo
 
-        # Create Section Expanders
         self.sec_a_expander, self.sec_a_mode_combo, self.sec_a_full_combo, self.sec_a_top_combo, self.sec_a_bot_combo = create_section_expander(
-            "actions.touchbar-info.section-a.label", "Left",
-            "actions.touchbar-info.section-a.subtitle", "Configure widgets for the left Touch Bar section", "sec_a"
+            "actions.touchbar-info.sec-a.label", "Section A",
+            "actions.touchbar-info.sec-a.subtitle", "Left section widget layout and configuration",
+            "sec_a"
         )
-
         self.sec_b_expander, self.sec_b_mode_combo, self.sec_b_full_combo, self.sec_b_top_combo, self.sec_b_bot_combo = create_section_expander(
-            "actions.touchbar-info.section-b.label", "Center",
-            "actions.touchbar-info.section-b.subtitle", "Configure widgets for the center Touch Bar section", "sec_b"
+            "actions.touchbar-info.sec-b.label", "Section B",
+            "actions.touchbar-info.sec-b.subtitle", "Center section widget layout and configuration",
+            "sec_b"
         )
-
         self.sec_c_expander, self.sec_c_mode_combo, self.sec_c_full_combo, self.sec_c_top_combo, self.sec_c_bot_combo = create_section_expander(
-            "actions.touchbar-info.section-c.label", "Right",
-            "actions.touchbar-info.section-c.subtitle", "Configure widgets for the right Touch Bar section", "sec_c"
+            "actions.touchbar-info.sec-c.label", "Section C",
+            "actions.touchbar-info.sec-c.subtitle", "Right section widget layout and configuration",
+            "sec_c"
         )
 
-        self.load_config_defaults()
-
-        # Mode Change Listeners
-        def bind_mode(combo, key_prefix):
-            combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed(f"{key_prefix}_mode", c.get_selected()))
-
-        bind_mode(self.sec_a_mode_combo, "sec_a")
-        bind_mode(self.sec_b_mode_combo, "sec_b")
-        bind_mode(self.sec_c_mode_combo, "sec_c")
-
-        # Widget Combo Listeners
-        def bind_combo(combo, setting_name):
-            combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed(setting_name, c.get_selected()))
-
-        bind_combo(self.sec_a_full_combo, "sec_a_full_widget")
-        bind_combo(self.sec_a_top_combo, "sec_a_top_widget")
-        bind_combo(self.sec_a_bot_combo, "sec_a_bottom_widget")
-
-        bind_combo(self.sec_b_full_combo, "sec_b_full_widget")
-        bind_combo(self.sec_b_top_combo, "sec_b_top_widget")
-        bind_combo(self.sec_b_bot_combo, "sec_b_bottom_widget")
-
-        bind_combo(self.sec_c_full_combo, "sec_c_full_widget")
-        bind_combo(self.sec_c_top_combo, "sec_c_top_widget")
-        bind_combo(self.sec_c_bot_combo, "sec_c_bottom_widget")
-
-        # Global Option Signals synced across all instances
-        for sw in self.all_time_24h_switches: sw.connect("notify::active", self.on_use_24h_toggled)
-        for sw in self.all_time_sec_switches: sw.connect("notify::active", self.on_show_seconds_toggled)
-        for combo in self.all_date_fmt_combos: combo.connect("notify::selected", self.on_date_format_changed)
-
-        # Date Font Signals
-        for fb in self.all_date_font_btns: fb.connect("font-set", self.on_date_font_set)
-        for sw in self.all_date_fill_switches: sw.connect("notify::active", self.on_date_fill_toggled)
-        for btn in self.all_date_fill_color_btns: btn.connect("color-set", self.on_date_fill_color_set)
-        for sw in self.all_date_out_switches: sw.connect("notify::active", self.on_date_out_toggled)
-        for btn in self.all_date_out_color_btns: btn.connect("color-set", self.on_date_out_color_set)
-        for spin in self.all_date_out_size_spins: spin.connect("notify::value", self.on_date_out_size_changed)
-
-        # Time Font Signals
-        for fb in self.all_time_font_btns: fb.connect("font-set", self.on_time_font_set)
-        for sw in self.all_time_fill_switches: sw.connect("notify::active", self.on_time_fill_toggled)
-        for btn in self.all_time_fill_color_btns: btn.connect("color-set", self.on_time_fill_color_set)
-        for sw in self.all_time_out_switches: sw.connect("notify::active", self.on_time_out_toggled)
-        for btn in self.all_time_out_color_btns: btn.connect("color-set", self.on_time_out_color_set)
-        for spin in self.all_time_out_size_spins: spin.connect("notify::value", self.on_time_out_size_changed)
-
-        # Weather Signals
-        for entry in self.all_weather_loc_entries: entry.connect("changed", self.on_weather_location_entry_changed)
-        for combo in self.all_weather_res_combos: combo.connect("notify::selected", self.on_weather_result_selected)
-        for combo in self.all_weather_unit_combos: combo.connect("notify::selected", self.on_weather_unit_changed)
-        for combo in self.all_weather_ref_combos: combo.connect("notify::selected", self.on_weather_refresh_changed)
-
-        for fb in self.all_weather_font_btns: fb.connect("font-set", self.on_weather_font_set)
-        for sw in self.all_weather_fill_switches: sw.connect("notify::active", self.on_weather_fill_toggled)
-        for btn in self.all_weather_fill_color_btns: btn.connect("color-set", self.on_weather_fill_color_set)
-        for sw in self.all_weather_out_switches: sw.connect("notify::active", self.on_weather_out_toggled)
-        for btn in self.all_weather_out_color_btns: btn.connect("color-set", self.on_weather_out_color_set)
-        for spin in self.all_weather_out_size_spins: spin.connect("notify::value", self.on_weather_out_size_changed)
-
-        # System Monitor Signals
-        for combo in self.all_cpu_mode_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("cpu_mode_idx", c.get_selected()))
-        for combo in self.all_net_mode_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("net_mode_idx", c.get_selected()))
-        for combo in self.all_net_unit_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("net_unit_idx", c.get_selected()))
-        for combo in self.all_ram_mode_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("ram_mode_idx", c.get_selected()))
-        for combo in self.all_disk_mode_combos: combo.connect("notify::selected", lambda c, *a: self.on_setting_combo_changed("disk_mode_idx", c.get_selected()))
-        for combo in self.all_disk_mount_combos: combo.connect("notify::selected", self.on_disk_mount_changed)
-
-        # World Clock Signals
-        for combo in self.all_worldclock_city_combos: combo.connect("notify::selected", self.on_worldclock_city_changed)
-        for combo in self.all_worldclock_view_combos: combo.connect("notify::selected", self.on_worldclock_view_changed)
-        for entry in self.all_worldclock_label_entries: entry.connect("changed", self.on_worldclock_label_changed)
-        for entry in self.all_worldclock_tz_entries: entry.connect("changed", self.on_worldclock_tz_changed)
-        for sw in self.all_worldclock_sec_switches: sw.connect("notify::active", self.on_worldclock_show_seconds_toggled)
-        for sw in self.all_worldclock_offset_switches: sw.connect("notify::active", self.on_worldclock_offset_toggled)
-
-        for fb in self.all_worldclock_font_btns: fb.connect("font-set", self.on_worldclock_font_set)
-        for sw in self.all_worldclock_fill_switches: sw.connect("notify::active", self.on_worldclock_fill_toggled)
-        for btn in self.all_worldclock_fill_color_btns: btn.connect("color-set", self.on_worldclock_fill_color_set)
-        for sw in self.all_worldclock_out_switches: sw.connect("notify::active", self.on_worldclock_out_toggled)
-        for btn in self.all_worldclock_out_color_btns: btn.connect("color-set", self.on_worldclock_out_color_set)
-        for spin in self.all_worldclock_out_size_spins: spin.connect("notify::value", self.on_worldclock_out_size_changed)
-
-        # Media Player Signals
-        for combo in self.all_media_player_combos: combo.connect("notify::selected", self.on_media_player_changed)
-        for combo in self.all_media_vis_combos: combo.connect("notify::selected", self.on_media_vis_changed)
-        for combo in self.all_media_color_mode_combos: combo.connect("notify::selected", self.on_media_color_mode_changed)
-        for btn in self.all_media_solid_color_btns: btn.connect("color-set", self.on_media_solid_color_set)
-        for btn in self.all_media_grad_start_btns: btn.connect("color-set", self.on_media_grad_start_set)
-        for btn in self.all_media_grad_mid_btns: btn.connect("color-set", self.on_media_grad_mid_set)
-        for btn in self.all_media_grad_end_btns: btn.connect("color-set", self.on_media_grad_end_set)
-
-        for fb in self.all_media_artist_font_btns: fb.connect("font-set", self.on_media_artist_font_set)
-        for sw in self.all_media_artist_fill_switches: sw.connect("notify::active", self.on_media_artist_fill_toggled)
-        for btn in self.all_media_artist_fill_color_btns: btn.connect("color-set", self.on_media_artist_fill_color_set)
-        for sw in self.all_media_artist_out_switches: sw.connect("notify::active", self.on_media_artist_out_toggled)
-        for btn in self.all_media_artist_out_color_btns: btn.connect("color-set", self.on_media_artist_out_color_set)
-        for spin in self.all_media_artist_out_size_spins: spin.connect("notify::value", self.on_media_artist_out_size_changed)
-
-        for fb in self.all_media_song_font_btns: fb.connect("font-set", self.on_media_song_font_set)
-        for sw in self.all_media_song_fill_switches: sw.connect("notify::active", self.on_media_song_fill_toggled)
-        for btn in self.all_media_song_fill_color_btns: btn.connect("color-set", self.on_media_song_fill_color_set)
-        for sw in self.all_media_song_out_switches: sw.connect("notify::active", self.on_media_song_out_toggled)
-        for btn in self.all_media_song_out_color_btns: btn.connect("color-set", self.on_media_song_out_color_set)
-        for spin in self.all_media_song_out_size_spins: spin.connect("notify::value", self.on_media_song_out_size_changed)
-
-        # Custom Touch Bar Background Row
+        # Custom Wallpaper Row
         self.bg_image_row = Adw.ActionRow(
             title=self.get_locale_text("actions.touchbar-info.bg-image.label", "Custom Touch Bar Background Wallpaper"),
             subtitle=self.get_locale_text("actions.touchbar-info.bg-image.subtitle", "Select custom wallpaper image (PNG/JPG) to render behind all Touch Bar widgets")
@@ -1775,230 +1645,161 @@ class TouchBarInfoAction(ActionBase):
             self.sec_c_expander
         ]
 
+    def notify_visibility_change(self):
+        for cb in getattr(self, "update_vis_callbacks", []):
+            try:
+                cb()
+            except Exception:
+                pass
+
     def load_config_defaults(self):
         settings = self.get_settings()
         if settings is None:
             return
 
-        use_24h = settings.setdefault("use_24h", False)
-        show_seconds = settings.setdefault("show_seconds", False)
-        date_format_idx = settings.setdefault("date_format_idx", 0)
-
-        sec_a_mode = settings.setdefault("sec_a_mode", 0)
-        sec_a_full = settings.setdefault("sec_a_full_widget", 0)
-        sec_a_top = settings.setdefault("sec_a_top_widget", 0)
-        sec_a_bot = settings.setdefault("sec_a_bottom_widget", 0)
-
-        sec_b_mode = settings.setdefault("sec_b_mode", 0)
-        sec_b_full = settings.setdefault("sec_b_full_widget", 0)
-        sec_b_top = settings.setdefault("sec_b_top_widget", 0)
-        sec_b_bot = settings.setdefault("sec_b_bottom_widget", 0)
-
-        sec_c_mode = settings.setdefault("sec_c_mode", 0)
-        sec_c_full = settings.setdefault("sec_c_full_widget", 0)
-        sec_c_top = settings.setdefault("sec_c_top_widget", 0)
-        sec_c_bot = settings.setdefault("sec_c_bottom_widget", 0)
-
-        # System Monitor Defaults
-        cpu_mode_idx = settings.setdefault("cpu_mode_idx", 0)
-        net_mode_idx = settings.setdefault("net_mode_idx", 0)
-        net_unit_idx = settings.setdefault("net_unit_idx", 0)
-        ram_mode_idx = settings.setdefault("ram_mode_idx", 0)
-        disk_mode_idx = settings.setdefault("disk_mode_idx", 0)
-        disk_mount_idx = settings.setdefault("disk_mount_idx", 0)
-
-        # Date Font & Fill/Outline Defaults
-        date_font_str = settings.setdefault("date_font_str", "DejaVu Sans Bold 25")
-        date_fill_enabled = settings.setdefault("date_fill_enabled", True)
-        date_font_color = settings.setdefault("date_font_color", "#AAC8E6FF")
-        date_outline_enabled = settings.setdefault("date_outline_enabled", False)
-        date_outline_color = settings.setdefault("date_outline_color", "#000000FF")
-        date_outline_size = settings.setdefault("date_outline_size", 2)
-
-        # Time Font & Fill/Outline Defaults
-        time_font_str = settings.setdefault("time_font_str", "DejaVu Sans Bold 45")
-        time_fill_enabled = settings.setdefault("time_fill_enabled", True)
-        time_font_color = settings.setdefault("time_font_color", "#FFFFFFFF")
-        time_outline_enabled = settings.setdefault("time_outline_enabled", False)
-        time_outline_color = settings.setdefault("time_outline_color", "#000000FF")
-        time_outline_size = settings.setdefault("time_outline_size", 2)
-
-        # Weather Location & Units
-        weather_location_name = settings.setdefault("weather_location_name", "Miami")
-        weather_unit_idx = settings.setdefault("weather_unit_idx", 0)
-        weather_refresh_idx = settings.setdefault("weather_refresh_idx", 2)
-
-        # Weather Font & Fill/Outline Defaults
-        weather_font_str = settings.setdefault("weather_font_str", "DejaVu Sans Bold 22")
-        weather_fill_enabled = settings.setdefault("weather_fill_enabled", True)
-        weather_font_color = settings.setdefault("weather_font_color", "#FFFFFFFF")
-        weather_outline_enabled = settings.setdefault("weather_outline_enabled", False)
-        weather_outline_color = settings.setdefault("weather_outline_color", "#000000FF")
-        weather_outline_size = settings.setdefault("weather_outline_size", 2)
-
-        # World Clock Defaults
-        worldclock_city_idx = settings.setdefault("worldclock_city_idx", 0)
-        worldclock_view = settings.setdefault("worldclock_view", 0)
-        worldclock_custom_label = settings.setdefault("worldclock_custom_label", "")
-        worldclock_custom_tz = settings.setdefault("worldclock_custom_tz", "America/New_York")
-        worldclock_show_seconds = settings.setdefault("worldclock_show_seconds", False)
-        worldclock_show_offset = settings.setdefault("worldclock_show_offset", True)
-        worldclock_font_str = settings.setdefault("worldclock_font_str", "DejaVu Sans Bold 25")
-        worldclock_fill_enabled = settings.setdefault("worldclock_fill_enabled", True)
-        worldclock_font_color = settings.setdefault("worldclock_font_color", "#FFFFFFFF")
-        worldclock_outline_enabled = settings.setdefault("worldclock_outline_enabled", False)
-        worldclock_outline_color = settings.setdefault("worldclock_outline_color", "#000000FF")
-        worldclock_outline_size = settings.setdefault("worldclock_outline_size", 2)
-
-        # Media Player Defaults
-        media_player_id = settings.setdefault("media_player_id", "auto")
-        if media_player_id in self.media_player_ids:
-            media_player_idx = self.media_player_ids.index(media_player_id)
-        else:
-            media_player_idx = settings.setdefault("media_player_idx", 0)
-            if media_player_idx >= len(self.media_player_options):
-                media_player_idx = 0
-            if media_player_idx < len(self.media_player_ids):
-                settings["media_player_id"] = self.media_player_ids[media_player_idx]
-
-        media_vis_style_idx = settings.setdefault("media_vis_style_idx", 0)
-        media_color_mode_idx = settings.setdefault("media_color_mode_idx", 0)
-        media_solid_color = settings.setdefault("media_solid_color", "#FFFFFFFF")
-        media_grad_start = settings.setdefault("media_grad_start", "#00D2FFFF")
-        media_grad_mid = settings.setdefault("media_grad_mid", "#7B2CBFFF")
-        media_grad_end = settings.setdefault("media_grad_end", "#FF2A6DFF")
-
-        media_artist_font_str = settings.setdefault("media_artist_font_str", "DejaVu Sans Bold 18")
-        media_artist_fill_enabled = settings.setdefault("media_artist_fill_enabled", True)
-        media_artist_font_color = settings.setdefault("media_artist_font_color", "#FFFFFFFF")
-        media_artist_outline_enabled = settings.setdefault("media_artist_outline_enabled", False)
-        media_artist_outline_color = settings.setdefault("media_artist_outline_color", "#000000FF")
-        media_artist_outline_size = settings.setdefault("media_artist_outline_size", 2)
-
-        media_song_font_str = settings.setdefault("media_song_font_str", "DejaVu Sans Bold 18")
-        media_song_fill_enabled = settings.setdefault("media_song_fill_enabled", True)
-        media_song_font_color = settings.setdefault("media_song_font_color", "#FFFFFFFF")
-        media_song_outline_enabled = settings.setdefault("media_song_outline_enabled", False)
-        media_song_outline_color = settings.setdefault("media_song_outline_color", "#000000FF")
-        media_song_outline_size = settings.setdefault("media_song_outline_size", 2)
-
-        # Sync Date/Time basic controls
-        for sw in self.all_time_24h_switches: sw.set_active(use_24h)
-        for sw in self.all_time_sec_switches: sw.set_active(show_seconds)
-        for combo in self.all_date_fmt_combos:
-            if 0 <= date_format_idx < len(self.date_format_options): combo.set_selected(date_format_idx)
-
         # Section selections
-        self.sec_a_mode_combo.set_selected(sec_a_mode)
-        self.sec_a_full_combo.set_selected(sec_a_full)
-        self.sec_a_top_combo.set_selected(sec_a_top)
-        self.sec_a_bot_combo.set_selected(sec_a_bot)
+        self.sec_a_mode_combo.set_selected(self.get_slot_setting(settings, "sec_a", "mode", 0))
+        self.sec_a_full_combo.set_selected(self.get_slot_setting(settings, "sec_a", "full_widget", 0))
+        self.sec_a_top_combo.set_selected(self.get_slot_setting(settings, "sec_a", "top_widget", 0))
+        self.sec_a_bot_combo.set_selected(self.get_slot_setting(settings, "sec_a", "bottom_widget", 0))
 
-        self.sec_b_mode_combo.set_selected(sec_b_mode)
-        self.sec_b_full_combo.set_selected(sec_b_full)
-        self.sec_b_top_combo.set_selected(sec_b_top)
-        self.sec_b_bot_combo.set_selected(sec_b_bot)
+        self.sec_b_mode_combo.set_selected(self.get_slot_setting(settings, "sec_b", "mode", 0))
+        self.sec_b_full_combo.set_selected(self.get_slot_setting(settings, "sec_b", "full_widget", 0))
+        self.sec_b_top_combo.set_selected(self.get_slot_setting(settings, "sec_b", "top_widget", 0))
+        self.sec_b_bot_combo.set_selected(self.get_slot_setting(settings, "sec_b", "bottom_widget", 0))
 
-        self.sec_c_mode_combo.set_selected(sec_c_mode)
-        self.sec_c_full_combo.set_selected(sec_c_full)
-        self.sec_c_top_combo.set_selected(sec_c_top)
-        self.sec_c_bot_combo.set_selected(sec_c_bot)
+        self.sec_c_mode_combo.set_selected(self.get_slot_setting(settings, "sec_c", "mode", 0))
+        self.sec_c_full_combo.set_selected(self.get_slot_setting(settings, "sec_c", "full_widget", 0))
+        self.sec_c_top_combo.set_selected(self.get_slot_setting(settings, "sec_c", "top_widget", 0))
+        self.sec_c_bot_combo.set_selected(self.get_slot_setting(settings, "sec_c", "bottom_widget", 0))
 
-        # Sync System Monitor Combos
-        for combo in self.all_cpu_mode_combos:
-            if 0 <= cpu_mode_idx < len(self.cpu_mode_options): combo.set_selected(cpu_mode_idx)
-        for combo in self.all_net_mode_combos:
-            if 0 <= net_mode_idx < len(self.net_mode_options): combo.set_selected(net_mode_idx)
-        for combo in self.all_net_unit_combos:
-            if 0 <= net_unit_idx < len(self.net_unit_options): combo.set_selected(net_unit_idx)
-        for combo in self.all_ram_mode_combos:
-            if 0 <= ram_mode_idx < len(self.ram_mode_options): combo.set_selected(ram_mode_idx)
-        for combo in self.all_disk_mode_combos:
-            if 0 <= disk_mode_idx < len(self.disk_mode_options): combo.set_selected(disk_mode_idx)
-        disk_mount_path = settings.get("disk_mount_path", "")
-        if hasattr(self, "disk_mounts") and self.disk_mounts:
+        # Populate all 9 slots' controls independently
+        for slot_key, ctrls in self.slot_controls.items():
+            # Date
+            d = ctrls["date"]
+            d["fmt_combo"].set_selected(self.get_slot_setting(settings, slot_key, "date_format_idx", 0))
+            d["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "date_font_str", "DejaVu Sans Bold 25"))
+            date_fill_en = self.get_slot_setting(settings, slot_key, "date_fill_enabled", True)
+            d["fill_sw"].set_active(date_fill_en)
+            d["fill_color_row"].set_sensitive(date_fill_en)
+            self.set_color_button_rgba(d["fill_color_btn"], self.get_slot_setting(settings, slot_key, "date_font_color", "#AAC8E6FF"))
+            date_out_en = self.get_slot_setting(settings, slot_key, "date_outline_enabled", False)
+            d["out_sw"].set_active(date_out_en)
+            d["out_color_row"].set_sensitive(date_out_en)
+            d["out_size_spin"].set_sensitive(date_out_en)
+            self.set_color_button_rgba(d["out_color_btn"], self.get_slot_setting(settings, slot_key, "date_outline_color", "#000000FF"))
+            d["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "date_outline_size", 2))
+
+            # Time
+            t = ctrls["time"]
+            t["sw_24h"].set_active(self.get_slot_setting(settings, slot_key, "use_24h", False))
+            t["sw_sec"].set_active(self.get_slot_setting(settings, slot_key, "show_seconds", False))
+            t["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "time_font_str", "DejaVu Sans Bold 45"))
+            time_fill_en = self.get_slot_setting(settings, slot_key, "time_fill_enabled", True)
+            t["fill_sw"].set_active(time_fill_en)
+            t["fill_color_row"].set_sensitive(time_fill_en)
+            self.set_color_button_rgba(t["fill_color_btn"], self.get_slot_setting(settings, slot_key, "time_font_color", "#FFFFFFFF"))
+            time_out_en = self.get_slot_setting(settings, slot_key, "time_outline_enabled", False)
+            t["out_sw"].set_active(time_out_en)
+            t["out_color_row"].set_sensitive(time_out_en)
+            t["out_size_spin"].set_sensitive(time_out_en)
+            self.set_color_button_rgba(t["out_color_btn"], self.get_slot_setting(settings, slot_key, "time_outline_color", "#000000FF"))
+            t["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "time_outline_size", 2))
+
+            # Weather
+            w = ctrls["weather"]
+            w["loc_entry"].set_text(self.get_slot_setting(settings, slot_key, "weather_location_name", "Miami"))
+            w["unit_combo"].set_selected(self.get_slot_setting(settings, slot_key, "weather_unit_idx", 0))
+            w["ref_combo"].set_selected(self.get_slot_setting(settings, slot_key, "weather_refresh_idx", 2))
+            w["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "weather_font_str", "DejaVu Sans Bold 22"))
+            w_fill_en = self.get_slot_setting(settings, slot_key, "weather_fill_enabled", True)
+            w["fill_sw"].set_active(w_fill_en)
+            w["fill_color_row"].set_sensitive(w_fill_en)
+            self.set_color_button_rgba(w["fill_color_btn"], self.get_slot_setting(settings, slot_key, "weather_font_color", "#FFFFFFFF"))
+            w_out_en = self.get_slot_setting(settings, slot_key, "weather_outline_enabled", False)
+            w["out_sw"].set_active(w_out_en)
+            w["out_color_row"].set_sensitive(w_out_en)
+            w["out_size_spin"].set_sensitive(w_out_en)
+            self.set_color_button_rgba(w["out_color_btn"], self.get_slot_setting(settings, slot_key, "weather_outline_color", "#000000FF"))
+            w["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "weather_outline_size", 2))
+
+            # CPU
+            ctrls["cpu"]["mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "cpu_mode_idx", 0))
+
+            # Net
+            ctrls["net"]["mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "net_mode_idx", 0))
+            ctrls["net"]["unit_combo"].set_selected(self.get_slot_setting(settings, slot_key, "net_unit_idx", 0))
+
+            # RAM
+            ctrls["ram"]["mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "ram_mode_idx", 0))
+
+            # Disk
+            ctrls["disk"]["mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "disk_mode_idx", 0))
+            d_mount_path = self.get_slot_setting(settings, slot_key, "disk_mount_path", "/")
+            d_idx = 0
             for idx, (m_path, _) in enumerate(self.disk_mounts):
-                if m_path == disk_mount_path:
-                    disk_mount_idx = idx
+                if m_path == d_mount_path:
+                    d_idx = idx
                     break
+            ctrls["disk"]["mount_combo"].set_selected(d_idx)
+            if isinstance(d_mount_path, str):
+                ctrls["disk"]["browse_row"].set_subtitle(f"Selected: {d_mount_path}")
 
-        for combo in self.all_disk_mount_combos:
-            if 0 <= disk_mount_idx < len(self.disk_mounts): combo.set_selected(disk_mount_idx)
+            # World Clock
+            wc = ctrls["worldclock"]
+            wc["city_combo"].set_selected(self.get_slot_setting(settings, slot_key, "worldclock_city_idx", 0))
+            wc["view_combo"].set_selected(self.get_slot_setting(settings, slot_key, "worldclock_view", 0))
+            wc["label_entry"].set_text(self.get_slot_setting(settings, slot_key, "worldclock_custom_label", ""))
+            wc["tz_entry"].set_text(self.get_slot_setting(settings, slot_key, "worldclock_custom_tz", "America/New_York"))
+            wc["sec_sw"].set_active(self.get_slot_setting(settings, slot_key, "worldclock_show_seconds", False))
+            wc["offset_sw"].set_active(self.get_slot_setting(settings, slot_key, "worldclock_show_offset", True))
+            wc["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "worldclock_font_str", "DejaVu Sans Bold 25"))
+            wc_fill_en = self.get_slot_setting(settings, slot_key, "worldclock_fill_enabled", True)
+            wc["fill_sw"].set_active(wc_fill_en)
+            wc["fill_color_row"].set_sensitive(wc_fill_en)
+            self.set_color_button_rgba(wc["fill_color_btn"], self.get_slot_setting(settings, slot_key, "worldclock_font_color", "#FFFFFFFF"))
+            wc_out_en = self.get_slot_setting(settings, slot_key, "worldclock_outline_enabled", False)
+            wc["out_sw"].set_active(wc_out_en)
+            wc["out_color_row"].set_sensitive(wc_out_en)
+            wc["out_size_spin"].set_sensitive(wc_out_en)
+            self.set_color_button_rgba(wc["out_color_btn"], self.get_slot_setting(settings, slot_key, "worldclock_outline_color", "#000000FF"))
+            wc["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "worldclock_outline_size", 2))
+
+            # Media
+            m = ctrls["media"]
+            p_id = self.get_slot_setting(settings, slot_key, "media_player_id", "auto")
+            p_ids = [pid for pid, _ in self.get_available_media_players()]
+            p_idx = p_ids.index(p_id) if p_id in p_ids else 0
+            m["player_combo"].set_selected(p_idx)
+            m["vis_combo"].set_selected(self.get_slot_setting(settings, slot_key, "media_vis_style_idx", 0))
+            m["color_mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "media_color_mode_idx", 0))
+            self.set_color_button_rgba(m["solid_color_btn"], self.get_slot_setting(settings, slot_key, "media_solid_color", "#FFFFFFFF"))
+            self.set_color_button_rgba(m["grad_start_btn"], self.get_slot_setting(settings, slot_key, "media_grad_start", "#00D2FFFF"))
+            self.set_color_button_rgba(m["grad_mid_btn"], self.get_slot_setting(settings, slot_key, "media_grad_mid", "#7B2CBFFF"))
+            self.set_color_button_rgba(m["grad_end_btn"], self.get_slot_setting(settings, slot_key, "media_grad_end", "#FF2A6DFF"))
+
+            if m["is_full_mode"]:
+                m["song_font_btn"].set_font(self.get_slot_setting(settings, slot_key, "media_song_font_str", "DejaVu Sans Bold 18"))
+                s_fill_en = self.get_slot_setting(settings, slot_key, "media_song_fill_enabled", True)
+                m["song_fill_sw"].set_active(s_fill_en)
+                self.set_color_button_rgba(m["song_fill_color_btn"], self.get_slot_setting(settings, slot_key, "media_song_font_color", "#FFFFFFFF"))
+                s_out_en = self.get_slot_setting(settings, slot_key, "media_song_outline_enabled", False)
+                m["song_out_sw"].set_active(s_out_en)
+                self.set_color_button_rgba(m["song_out_color_btn"], self.get_slot_setting(settings, slot_key, "media_song_outline_color", "#000000FF"))
+                m["song_out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "media_song_outline_size", 2))
+
+                m["artist_font_btn"].set_font(self.get_slot_setting(settings, slot_key, "media_artist_font_str", "DejaVu Sans Bold 18"))
+                a_fill_en = self.get_slot_setting(settings, slot_key, "media_artist_fill_enabled", True)
+                m["artist_fill_sw"].set_active(a_fill_en)
+                self.set_color_button_rgba(m["artist_fill_color_btn"], self.get_slot_setting(settings, slot_key, "media_artist_font_color", "#FFFFFFFF"))
+                a_out_en = self.get_slot_setting(settings, slot_key, "media_artist_outline_enabled", False)
+                m["artist_out_sw"].set_active(a_out_en)
+                self.set_color_button_rgba(m["artist_out_color_btn"], self.get_slot_setting(settings, slot_key, "media_artist_outline_color", "#000000FF"))
+                m["artist_out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "media_artist_outline_size", 2))
 
         custom_bg_path = settings.get("custom_bg_path", "")
         self.update_bg_row_subtitle(custom_bg_path)
-        self.update_disk_browse_subtitles(disk_mount_path)
-
-        # Sync Date Font & Fill/Outline Controls
-        for fb in self.all_date_font_btns: fb.set_font(date_font_str)
-        for sw in self.all_date_fill_switches: sw.set_active(date_fill_enabled)
-        for btn in self.all_date_fill_color_btns: self.set_color_button_rgba(btn, date_font_color)
-        for sw in self.all_date_out_switches: sw.set_active(date_outline_enabled)
-        for btn in self.all_date_out_color_btns: self.set_color_button_rgba(btn, date_outline_color)
-        for spin in self.all_date_out_size_spins: spin.set_value(date_outline_size)
-
-        # Sync Time Font & Fill/Outline Controls
-        for fb in self.all_time_font_btns: fb.set_font(time_font_str)
-        for sw in self.all_time_fill_switches: sw.set_active(time_fill_enabled)
-        for btn in self.all_time_fill_color_btns: self.set_color_button_rgba(btn, time_font_color)
-        for sw in self.all_time_out_switches: sw.set_active(time_outline_enabled)
-        for btn in self.all_time_out_color_btns: self.set_color_button_rgba(btn, time_outline_color)
-        for spin in self.all_time_out_size_spins: spin.set_value(time_outline_size)
-
-        # Sync Weather Controls
-        for entry in self.all_weather_loc_entries: entry.set_text(weather_location_name)
-        for combo in self.all_weather_unit_combos:
-            if 0 <= weather_unit_idx < len(self.weather_units): combo.set_selected(weather_unit_idx)
-        for combo in self.all_weather_ref_combos:
-            if 0 <= weather_refresh_idx < len(self.weather_intervals): combo.set_selected(weather_refresh_idx)
-        for fb in self.all_weather_font_btns: fb.set_font(weather_font_str)
-        for sw in self.all_weather_fill_switches: sw.set_active(weather_fill_enabled)
-        for btn in self.all_weather_fill_color_btns: self.set_color_button_rgba(btn, weather_font_color)
-        for sw in self.all_weather_out_switches: sw.set_active(weather_outline_enabled)
-        for btn in self.all_weather_out_color_btns: self.set_color_button_rgba(btn, weather_outline_color)
-        for spin in self.all_weather_out_size_spins: spin.set_value(weather_outline_size)
-
-        # Sync World Clock Controls
-        for combo in self.all_worldclock_city_combos:
-            if 0 <= worldclock_city_idx < len(self.worldclock_cities): combo.set_selected(worldclock_city_idx)
-        for combo in self.all_worldclock_view_combos:
-            if 0 <= worldclock_view < len(self.worldclock_view_options): combo.set_selected(worldclock_view)
-        for entry in self.all_worldclock_label_entries: entry.set_text(worldclock_custom_label)
-        for entry in self.all_worldclock_tz_entries: entry.set_text(worldclock_custom_tz)
-        for sw in self.all_worldclock_sec_switches: sw.set_active(worldclock_show_seconds)
-        for sw in self.all_worldclock_offset_switches: sw.set_active(worldclock_show_offset)
-        for fb in self.all_worldclock_font_btns: fb.set_font(worldclock_font_str)
-        for sw in self.all_worldclock_fill_switches: sw.set_active(worldclock_fill_enabled)
-        for btn in self.all_worldclock_fill_color_btns: self.set_color_button_rgba(btn, worldclock_font_color)
-        for sw in self.all_worldclock_out_switches: sw.set_active(worldclock_outline_enabled)
-        for btn in self.all_worldclock_out_color_btns: self.set_color_button_rgba(btn, worldclock_outline_color)
-        for spin in self.all_worldclock_out_size_spins: spin.set_value(worldclock_outline_size)
-
-        # Sync Media Player Controls
-        for combo in self.all_media_player_combos:
-            if 0 <= media_player_idx < len(self.media_player_options): combo.set_selected(media_player_idx)
-        for combo in self.all_media_vis_combos:
-            if 0 <= media_vis_style_idx < len(self.media_vis_options): combo.set_selected(media_vis_style_idx)
-        for combo in self.all_media_color_mode_combos:
-            if 0 <= media_color_mode_idx < len(self.media_color_mode_options): combo.set_selected(media_color_mode_idx)
-        for btn in self.all_media_solid_color_btns: self.set_color_button_rgba(btn, media_solid_color)
-        for btn in self.all_media_grad_start_btns: self.set_color_button_rgba(btn, media_grad_start)
-        for btn in self.all_media_grad_mid_btns: self.set_color_button_rgba(btn, media_grad_mid)
-        for btn in self.all_media_grad_end_btns: self.set_color_button_rgba(btn, media_grad_end)
-
-        for fb in self.all_media_artist_font_btns: fb.set_font(media_artist_font_str)
-        for sw in self.all_media_artist_fill_switches: sw.set_active(media_artist_fill_enabled)
-        for btn in self.all_media_artist_fill_color_btns: self.set_color_button_rgba(btn, media_artist_font_color)
-        for sw in self.all_media_artist_out_switches: sw.set_active(media_artist_outline_enabled)
-        for btn in self.all_media_artist_out_color_btns: self.set_color_button_rgba(btn, media_artist_outline_color)
-        for spin in self.all_media_artist_out_size_spins: spin.set_value(media_artist_outline_size)
-
-        for fb in self.all_media_song_font_btns: fb.set_font(media_song_font_str)
-        for sw in self.all_media_song_fill_switches: sw.set_active(media_song_fill_enabled)
-        for btn in self.all_media_song_fill_color_btns: self.set_color_button_rgba(btn, media_song_font_color)
-        for sw in self.all_media_song_out_switches: sw.set_active(media_song_outline_enabled)
-        for btn in self.all_media_song_out_color_btns: self.set_color_button_rgba(btn, media_song_outline_color)
-        for spin in self.all_media_song_out_size_spins: spin.set_value(media_song_outline_size)
+        self.notify_visibility_change()
 
     def set_color_button_rgba(self, button: Gtk.ColorButton, hex_str: str):
         try:
@@ -2026,1103 +1827,60 @@ class TouchBarInfoAction(ActionBase):
             pass
         return default
 
-    def on_setting_combo_changed(self, setting_name: str, value: int):
-        settings = self.get_settings()
-        if settings is not None:
-            settings[setting_name] = value
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
-
-    def on_refresh_disks_clicked(self, button, *args):
-        log.info("TouchBarInfo: 🔄 Refresh Disks button clicked")
+    def refresh_all_disk_combos(self):
         self.disk_mounts = self.get_system_disk_mounts()
-        settings = self.get_settings() or {}
-        curr_path = settings.get("disk_mount_path", "/")
-
         display_names = [d_name for _, d_name in self.disk_mounts]
-        log.info(f"TouchBarInfo: Updating {len(self.all_disk_mount_combos)} mount combos with display names: {display_names}")
-
-        matched_idx = 0
-        for idx, (m_path, _) in enumerate(self.disk_mounts):
-            if m_path == curr_path:
-                matched_idx = idx
-                break
-
-        self._updating_combos = True
-        try:
-            for combo in self.all_disk_mount_combos:
-                new_model = Gtk.StringList.new(display_names)
-                combo.set_model(new_model)
-                if 0 <= matched_idx < len(self.disk_mounts):
-                    combo.set_selected(matched_idx)
-                disp_sub = self.disk_mounts[matched_idx][1] if 0 <= matched_idx < len(self.disk_mounts) else "System Disks"
-                combo.set_subtitle(f"Selected: {disp_sub} (Refreshed {len(self.disk_mounts)} disks)")
-        finally:
-            self._updating_combos = False
-
-        self.last_rendered_key = ""
-        self.update_display()
-
-    def on_disk_mount_changed(self, combo, *args):
-        if getattr(self, "_updating_combos", False):
-            return
-        self._updating_combos = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = combo.get_selected()
-                log.info(f"TouchBarInfo: Disk mount combo selection changed to index {val}")
-                if 0 <= val < len(self.disk_mounts):
-                    m_path, m_disp = self.disk_mounts[val]
-                    log.info(f"TouchBarInfo: Selected disk mount path: {m_path} ({m_disp})")
-                    settings["disk_mount_path"] = m_path
-                    settings["disk_mount_idx"] = val
-                    for c in self.all_disk_mount_combos:
-                        if c != combo and c.get_selected() != val:
-                            c.set_selected(val)
-                        c.set_subtitle(f"Selected: {m_disp}")
-                    self.set_settings(settings)
-                    self.update_disk_browse_subtitles(m_path)
-                    self.last_rendered_key = ""
-                    self.update_display()
-        finally:
-            self._updating_combos = False
-
-    def on_browse_disk_mount_clicked(self, button):
-        dialog = Gtk.FileChooserNative.new(
-            title=self.get_locale_text("actions.touchbar-info.disk-browse.dialog-title", "Select Mount Directory or Disk Folder"),
-            parent=None,
-            action=Gtk.FileChooserAction.SELECT_FOLDER,
-            accept_label=self.get_locale_text("actions.touchbar-info.disk-browse.open", "Select Folder"),
-            cancel_label=self.get_locale_text("actions.touchbar-info.disk-browse.cancel", "Cancel")
-        )
-
-        def on_response(dialog_obj, response_id):
-            if response_id == Gtk.ResponseType.ACCEPT:
-                file_obj = dialog_obj.get_file()
-                if file_obj:
-                    path = file_obj.get_path()
-                    st = self.get_settings()
-                    if st is not None:
-                        st["disk_mount_path"] = path
-                        self.set_settings(st)
-                        self.update_disk_browse_subtitles(path)
-                        self.last_rendered_key = ""
-                        self.update_display()
-            dialog_obj.destroy()
-
-        dialog.connect("response", on_response)
-        dialog.show()
-
-    def update_disk_browse_subtitles(self, path: str):
-        if hasattr(self, "all_disk_browse_rows"):
-            for row in self.all_disk_browse_rows:
-                if path:
-                    base = os.path.basename(path.rstrip("/"))
-                    clean_name = "System Root" if not base or path == "/" else base.capitalize()
-                    row.set_subtitle(f"Selected Disk: {clean_name} ({path})")
-                else:
-                    row.set_subtitle(self.get_locale_text("actions.touchbar-info.disk-browse.subtitle", "Visually choose any partition or folder path to monitor"))
-
-    def update_bg_row_subtitle(self, path: str):
-        if hasattr(self, "bg_image_row") and self.bg_image_row is not None:
-            if path:
-                fname = os.path.basename(path)
-                self.bg_image_row.set_subtitle(f"Active Wallpaper: {fname}")
-            else:
-                self.bg_image_row.set_subtitle(self.get_locale_text("actions.touchbar-info.bg-image.subtitle", "Select custom wallpaper image (PNG/JPG) to render behind all Touch Bar widgets"))
+        for slot_key, ctrls in self.slot_controls.items():
+            if "disk" in ctrls:
+                combo = ctrls["disk"]["mount_combo"]
+                combo.set_model(Gtk.StringList.new(display_names))
+        self.trigger_redraw()
 
     def on_select_custom_bg_clicked(self, button):
         settings = self.get_settings() or {}
         curr_path = settings.get("custom_bg_path", "")
-
-        def on_asset_selected(path: str):
-            if path:
-                st = self.get_settings()
-                if st is not None:
-                    st["custom_bg_path"] = path
-                    self.set_settings(st)
-                    self.update_bg_row_subtitle(path)
-                    self.last_rendered_key = ""
-                    self.update_display()
-
         if hasattr(gl, "app") and gl.app is not None and hasattr(gl.app, "let_user_select_asset"):
-            try:
-                gl.app.let_user_select_asset(default_path=curr_path, callback_func=on_asset_selected)
-                return
-            except Exception as e:
-                log.error(f"TouchBarInfo: Error launching StreamController Asset Manager: {e}")
+            GLib.idle_add(gl.app.let_user_select_asset, curr_path, self.on_custom_bg_asset_selected)
+        elif hasattr(gl, "asset_manager") and gl.asset_manager is not None and hasattr(gl.asset_manager, "show_for_path"):
+            GLib.idle_add(gl.asset_manager.show_for_path, curr_path, self.on_custom_bg_asset_selected)
+        else:
+            log.warning("TouchBarInfo: gl.app.let_user_select_asset is not available")
 
-        # Fallback to GTK FileChooserNative if gl.app is unavailable
-        dialog = Gtk.FileChooserNative.new(
-            title=self.get_locale_text("actions.touchbar-info.bg-image.dialog-title", "Select Touch Bar Background Image"),
-            parent=None,
-            action=Gtk.FileChooserAction.OPEN,
-            accept_label=self.get_locale_text("actions.touchbar-info.bg-image.open", "Open"),
-            cancel_label=self.get_locale_text("actions.touchbar-info.bg-image.cancel", "Cancel")
-        )
-        filter_img = Gtk.FileFilter()
-        filter_img.set_name("Images (*.png, *.jpg, *.jpeg)")
-        filter_img.add_mime_type("image/png")
-        filter_img.add_mime_type("image/jpeg")
-        dialog.add_filter(filter_img)
-
-        def on_response(dialog_obj, response_id):
-            if response_id == Gtk.ResponseType.ACCEPT:
-                file_obj = dialog_obj.get_file()
-                if file_obj:
-                    path = file_obj.get_path()
-                    st = self.get_settings()
-                    if st is not None:
-                        st["custom_bg_path"] = path
-                        self.set_settings(st)
-                        self.update_bg_row_subtitle(path)
-                        self.last_rendered_key = ""
-                        self.update_display()
-            dialog_obj.destroy()
-
-        dialog.connect("response", on_response)
-        dialog.show()
+    def on_custom_bg_asset_selected(self, file_path: str):
+        if not file_path:
+            return
+        settings = self.get_settings()
+        if settings is not None:
+            settings["custom_bg_path"] = file_path
+            self.set_settings(settings)
+            self._cached_bg_path = None
+            self._cached_bg_image = None
+            self.update_bg_row_subtitle(file_path)
+            self.trigger_redraw()
 
     def on_clear_custom_bg_clicked(self, button):
         settings = self.get_settings()
         if settings is not None:
             settings["custom_bg_path"] = ""
             self.set_settings(settings)
+            self._cached_bg_path = None
+            self._cached_bg_image = None
             self.update_bg_row_subtitle("")
-            self.last_rendered_key = ""
-            self.update_display()
-
-    # --- Date Font / Fill / Outline Callbacks ---
-    def on_date_font_set(self, font_btn):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = font_btn.get_font()
-                settings["date_font_str"] = val
-                for fb in self.all_date_font_btns:
-                    if fb != font_btn: fb.set_font(val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_date_fill_toggled(self, switch, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = switch.get_active()
-                settings["date_fill_enabled"] = val
-                for sw in self.all_date_fill_switches:
-                    if sw != switch and sw.get_active() != val: sw.set_active(val)
-                self.set_settings(settings)
-                self.notify_visibility_change()
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_date_fill_color_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["date_font_color"] = hex_val
-                for btn in self.all_date_fill_color_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_date_out_toggled(self, switch, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = switch.get_active()
-                settings["date_outline_enabled"] = val
-                for sw in self.all_date_out_switches:
-                    if sw != switch and sw.get_active() != val: sw.set_active(val)
-                self.set_settings(settings)
-                self.notify_visibility_change()
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_date_out_color_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["date_outline_color"] = hex_val
-                for btn in self.all_date_out_color_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_date_out_size_changed(self, spin, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = int(spin.get_value())
-                settings["date_outline_size"] = val
-                for s in self.all_date_out_size_spins:
-                    if s != spin and int(s.get_value()) != val: s.set_value(val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    # --- Time Font / Fill / Outline Callbacks ---
-    def on_time_font_set(self, font_btn):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = font_btn.get_font()
-                settings["time_font_str"] = val
-                for fb in self.all_time_font_btns:
-                    if fb != font_btn: fb.set_font(val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_time_fill_toggled(self, switch, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = switch.get_active()
-                settings["time_fill_enabled"] = val
-                for sw in self.all_time_fill_switches:
-                    if sw != switch and sw.get_active() != val: sw.set_active(val)
-                self.set_settings(settings)
-                self.notify_visibility_change()
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_time_fill_color_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["time_font_color"] = hex_val
-                for btn in self.all_time_fill_color_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_time_out_toggled(self, switch, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = switch.get_active()
-                settings["time_outline_enabled"] = val
-                for sw in self.all_time_out_switches:
-                    if sw != switch and sw.get_active() != val: sw.set_active(val)
-                self.set_settings(settings)
-                self.notify_visibility_change()
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_time_out_color_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["time_outline_color"] = hex_val
-                for btn in self.all_time_out_color_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_time_out_size_changed(self, spin, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = int(spin.get_value())
-                settings["time_outline_size"] = val
-                for s in self.all_time_out_size_spins:
-                    if s != spin and int(s.get_value()) != val: s.set_value(val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    # --- Weather Callbacks & Font Signals ---
-    def on_weather_location_entry_changed(self, entry, *args):
-        text = entry.get_text().strip()
-        if len(text) < 3:
-            for combo in self.all_weather_res_combos: combo.set_visible(False)
-            return
-
-        if hasattr(self, "city_search_timer") and self.city_search_timer is not None:
-            self.city_search_timer.cancel()
-
-        self.city_search_timer = Timer(0.6, self.perform_open_meteo_search, args=(text,))
-        self.city_search_timer.start()
-
-    def perform_open_meteo_search(self, query: str):
-        url = "https://geocoding-api.open-meteo.com/v1/search"
-        params = {"name": query, "count": 5, "language": "en", "format": "json"}
-        try:
-            resp = requests.get(url, params=params, timeout=5)
-            if resp.status_code == 200:
-                data = resp.json()
-                results = data.get("results", [])
-                def update_ui():
-                    self.search_results_data = []
-                    string_list = Gtk.StringList()
-                    for item in results:
-                        name = item.get("name", "")
-                        country = item.get("country", "")
-                        admin1 = item.get("admin1", "")
-                        lat = float(item.get("latitude", 0.0))
-                        lon = float(item.get("longitude", 0.0))
-
-                        parts = [name]
-                        if admin1: parts.append(admin1)
-                        if country: parts.append(country)
-                        disp_str = f"{', '.join(parts)}"
-                        string_list.append(disp_str)
-                        self.search_results_data.append((disp_str, str(lat), str(lon), name))
-
-                    for combo in self.all_weather_res_combos:
-                        combo.set_model(string_list)
-
-                    self.notify_visibility_change()
-
-                GLib.idle_add(update_ui)
-        except Exception as e:
-            log.error(f"TouchBarInfo: City search failed: {e}")
-
-    def on_weather_result_selected(self, combo, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            sel = combo.get_selected()
-            if 0 <= sel < len(self.search_results_data):
-                disp_str, lat_str, lon_str, city_name = self.search_results_data[sel]
-                settings = self.get_settings()
-                if settings is not None:
-                    settings["weather_lat"] = lat_str
-                    settings["weather_lon"] = lon_str
-                    settings["weather_location_name"] = city_name
-                    self.set_settings(settings)
-
-                    for entry in self.all_weather_loc_entries:
-                        if entry.get_text() != city_name:
-                            entry.set_text(city_name)
-
-                    self.fetch_weather_async(force=True)
-        finally:
-            self._syncing_controls = False
-
-    def on_weather_unit_changed(self, combo, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = combo.get_selected()
-                settings["weather_unit_idx"] = val
-                for c in self.all_weather_unit_combos:
-                    if c != combo and c.get_selected() != val:
-                        c.set_selected(val)
-                self.set_settings(settings)
-                self.fetch_weather_async(force=True)
-        finally:
-            self._syncing_controls = False
-
-    def on_weather_refresh_changed(self, combo, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = combo.get_selected()
-                settings["weather_refresh_idx"] = val
-                for c in self.all_weather_ref_combos:
-                    if c != combo and c.get_selected() != val:
-                        c.set_selected(val)
-                self.set_settings(settings)
-        finally:
-            self._syncing_controls = False
-
-    def on_weather_font_set(self, font_btn):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = font_btn.get_font()
-                settings["weather_font_str"] = val
-                for fb in self.all_weather_font_btns:
-                    if fb != font_btn: fb.set_font(val)
-                self.set_settings(settings)
-                self.trigger_redraw()
-        finally:
-            self._syncing_controls = False
-
-    def on_weather_fill_toggled(self, switch, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = switch.get_active()
-                settings["weather_fill_enabled"] = val
-                for sw in self.all_weather_fill_switches:
-                    if sw != switch and sw.get_active() != val: sw.set_active(val)
-                self.set_settings(settings)
-                self.notify_visibility_change()
-                self.trigger_redraw()
-        finally:
-            self._syncing_controls = False
-
-    def on_weather_fill_color_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["weather_font_color"] = hex_val
-                for btn in self.all_weather_fill_color_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.trigger_redraw()
-        finally:
-            self._syncing_controls = False
-
-    def on_weather_out_toggled(self, switch, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = switch.get_active()
-                settings["weather_outline_enabled"] = val
-                for sw in self.all_weather_out_switches:
-                    if sw != switch and sw.get_active() != val: sw.set_active(val)
-                self.set_settings(settings)
-                self.notify_visibility_change()
-                self.trigger_redraw()
-        finally:
-            self._syncing_controls = False
-
-    def on_weather_out_color_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["weather_outline_color"] = hex_val
-                for btn in self.all_weather_out_color_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.trigger_redraw()
-        finally:
-            self._syncing_controls = False
-
-    def on_weather_out_size_changed(self, spin, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = int(spin.get_value())
-                settings["weather_outline_size"] = val
-                for s in self.all_weather_out_size_spins:
-                    if s != spin and int(s.get_value()) != val: s.set_value(val)
-                self.set_settings(settings)
-                self.trigger_redraw()
-        finally:
-            self._syncing_controls = False
-
-    # --- World Clock Callbacks ---
-    def on_worldclock_city_changed(self, combo, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = combo.get_selected()
-                settings["worldclock_city_idx"] = val
-                for c in self.all_worldclock_city_combos:
-                    if c != combo and c.get_selected() != val: c.set_selected(val)
-                self.set_settings(settings)
-                self.notify_visibility_change()
-                self.trigger_redraw()
-        finally:
-            self._syncing_controls = False
-
-    def on_worldclock_view_changed(self, combo, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = combo.get_selected()
-                settings["worldclock_view"] = val
-                for c in self.all_worldclock_view_combos:
-                    if c != combo and c.get_selected() != val: c.set_selected(val)
-                self.set_settings(settings)
-                self.notify_visibility_change()
-                self.trigger_redraw()
-        finally:
-            self._syncing_controls = False
-
-    def on_worldclock_show_seconds_toggled(self, switch, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = switch.get_active()
-                settings["worldclock_show_seconds"] = val
-                for sw in self.all_worldclock_sec_switches:
-                    if sw != switch and sw.get_active() != val: sw.set_active(val)
-                self.set_settings(settings)
-                self.trigger_redraw()
-        finally:
-            self._syncing_controls = False
-
-    def on_worldclock_label_changed(self, entry):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = entry.get_text()
-                settings["worldclock_custom_label"] = val
-                for e in self.all_worldclock_label_entries:
-                    if e != entry and e.get_text() != val: e.set_text(val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_worldclock_tz_changed(self, entry):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = entry.get_text()
-                settings["worldclock_custom_tz"] = val
-                for e in self.all_worldclock_tz_entries:
-                    if e != entry and e.get_text() != val: e.set_text(val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_worldclock_offset_toggled(self, switch, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = switch.get_active()
-                settings["worldclock_show_offset"] = val
-                for sw in self.all_worldclock_offset_switches:
-                    if sw != switch and sw.get_active() != val: sw.set_active(val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_worldclock_font_set(self, font_btn):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = font_btn.get_font()
-                settings["worldclock_font_str"] = val
-                for fb in self.all_worldclock_font_btns:
-                    if fb != font_btn: fb.set_font(val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_worldclock_fill_toggled(self, switch, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = switch.get_active()
-                settings["worldclock_fill_enabled"] = val
-                for sw in self.all_worldclock_fill_switches:
-                    if sw != switch and sw.get_active() != val: sw.set_active(val)
-                self.set_settings(settings)
-                self.notify_visibility_change()
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_worldclock_fill_color_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["worldclock_font_color"] = hex_val
-                for btn in self.all_worldclock_fill_color_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_worldclock_out_toggled(self, switch, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = switch.get_active()
-                settings["worldclock_outline_enabled"] = val
-                for sw in self.all_worldclock_out_switches:
-                    if sw != switch and sw.get_active() != val: sw.set_active(val)
-                self.set_settings(settings)
-                self.notify_visibility_change()
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_worldclock_out_color_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["worldclock_outline_color"] = hex_val
-                for btn in self.all_worldclock_out_color_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_worldclock_out_size_changed(self, spin, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = int(spin.get_value())
-                settings["worldclock_outline_size"] = val
-                for s in self.all_worldclock_out_size_spins:
-                    if s != spin and int(s.get_value()) != val: s.set_value(val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    # --- Media Player Callbacks ---
-    def on_media_player_changed(self, combo, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = combo.get_selected()
-                pid = self.media_player_ids[val] if hasattr(self, "media_player_ids") and val < len(self.media_player_ids) else "auto"
-                settings["media_player_idx"] = val
-                settings["media_player_id"] = pid
-                for c in self.all_media_player_combos:
-                    if c != combo and c.get_selected() != val: c.set_selected(val)
-                self.set_settings(settings)
-                self.trigger_redraw()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_vis_changed(self, combo, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = combo.get_selected()
-                settings["media_vis_style_idx"] = val
-                for c in self.all_media_vis_combos:
-                    if c != combo and c.get_selected() != val: c.set_selected(val)
-                self.set_settings(settings)
-                self.trigger_redraw()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_color_mode_changed(self, combo, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = combo.get_selected()
-                settings["media_color_mode_idx"] = val
-                for c in self.all_media_color_mode_combos:
-                    if c != combo and c.get_selected() != val: c.set_selected(val)
-                self.set_settings(settings)
-                self.notify_visibility_change()
-                self.trigger_redraw()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_solid_color_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["media_solid_color"] = hex_val
-                for btn in self.all_media_solid_color_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_grad_start_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["media_grad_start"] = hex_val
-                for btn in self.all_media_grad_start_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_grad_mid_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["media_grad_mid"] = hex_val
-                for btn in self.all_media_grad_mid_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_grad_end_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["media_grad_end"] = hex_val
-                for btn in self.all_media_grad_end_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_artist_font_set(self, font_btn):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = font_btn.get_font()
-                settings["media_artist_font_str"] = val
-                for fb in self.all_media_artist_font_btns:
-                    if fb != font_btn: fb.set_font(val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_artist_fill_toggled(self, switch, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = switch.get_active()
-                settings["media_artist_fill_enabled"] = val
-                for sw in self.all_media_artist_fill_switches:
-                    if sw != switch and sw.get_active() != val: sw.set_active(val)
-                self.set_settings(settings)
-                self.notify_visibility_change()
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_artist_fill_color_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["media_artist_font_color"] = hex_val
-                for btn in self.all_media_artist_fill_color_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_artist_out_toggled(self, switch, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = switch.get_active()
-                settings["media_artist_outline_enabled"] = val
-                for sw in self.all_media_artist_out_switches:
-                    if sw != switch and sw.get_active() != val: sw.set_active(val)
-                self.set_settings(settings)
-                self.notify_visibility_change()
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_artist_out_color_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["media_artist_outline_color"] = hex_val
-                for btn in self.all_media_artist_out_color_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_artist_out_size_changed(self, spin, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = int(spin.get_value())
-                settings["media_artist_outline_size"] = val
-                for s in self.all_media_artist_out_size_spins:
-                    if s != spin and int(s.get_value()) != val: s.set_value(val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_song_font_set(self, font_btn):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = font_btn.get_font()
-                settings["media_song_font_str"] = val
-                for fb in self.all_media_song_font_btns:
-                    if fb != font_btn: fb.set_font(val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_song_fill_toggled(self, switch, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = switch.get_active()
-                settings["media_song_fill_enabled"] = val
-                for sw in self.all_media_song_fill_switches:
-                    if sw != switch and sw.get_active() != val: sw.set_active(val)
-                self.set_settings(settings)
-                self.notify_visibility_change()
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_song_fill_color_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["media_song_font_color"] = hex_val
-                for btn in self.all_media_song_fill_color_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_song_out_toggled(self, switch, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = switch.get_active()
-                settings["media_song_outline_enabled"] = val
-                for sw in self.all_media_song_out_switches:
-                    if sw != switch and sw.get_active() != val: sw.set_active(val)
-                self.set_settings(settings)
-                self.notify_visibility_change()
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_song_out_color_set(self, button):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                rgba = button.get_rgba()
-                hex_val = self.gdk_to_hex(rgba)
-                settings["media_song_outline_color"] = hex_val
-                for btn in self.all_media_song_out_color_btns:
-                    if btn != button: self.set_color_button_rgba(btn, hex_val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_media_song_out_size_changed(self, spin, *args):
-        if getattr(self, "_syncing_controls", False): return
-        self._syncing_controls = True
-        try:
-            settings = self.get_settings()
-            if settings is not None:
-                val = int(spin.get_value())
-                settings["media_song_outline_size"] = val
-                for s in self.all_media_song_out_size_spins:
-                    if s != spin and int(s.get_value()) != val: s.set_value(val)
-                self.set_settings(settings)
-                self.schedule_update_display()
-        finally:
-            self._syncing_controls = False
-
-    def on_use_24h_toggled(self, switch, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = switch.get_active()
-            settings["use_24h"] = val
-            for sw in self.all_time_24h_switches:
-                if sw != switch and sw.get_active() != val: sw.set_active(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
-
-    def on_show_seconds_toggled(self, switch, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = switch.get_active()
-            settings["show_seconds"] = val
-            for sw in self.all_time_sec_switches:
-                if sw != switch and sw.get_active() != val: sw.set_active(val)
-            self.set_settings(settings)
-            self.last_rendered_key = ""
-            self.update_display()
-
-    def on_date_format_changed(self, combo, *args):
-        settings = self.get_settings()
-        if settings is not None:
-            val = combo.get_selected()
-            settings["date_format_idx"] = val
-            for c in self.all_date_fmt_combos:
-                if c != combo and c.get_selected() != val: c.set_selected(val)
-            self.set_settings(settings)
-            self.schedule_update_display()
-
-    def notify_visibility_change(self):
-        for cb in list(self.update_vis_callbacks):
-            try:
-                cb()
-            except Exception:
-                pass
-
-    def schedule_update_display(self):
-        if self.handle_lock_blanking():
-            return
-        self.last_rendered_key = ""
-        if not getattr(self, "_update_scheduled", False):
-            self._update_scheduled = True
-            GLib.idle_add(self._do_scheduled_update)
-
-    def _do_scheduled_update(self):
-        self._update_scheduled = False
-        try:
-            self.update_display()
-        except Exception as e:
-            log.warning(f"TouchBarInfo: Scheduled update_display failed: {e}")
-        return GLib.SOURCE_REMOVE
+            self.trigger_redraw()
+
+    def update_bg_row_subtitle(self, file_path: str):
+        if hasattr(self, "bg_image_row"):
+            if file_path and isinstance(file_path, str):
+                disp_name = os.path.basename(file_path) if os.path.isabs(file_path) else file_path
+                self.bg_image_row.set_subtitle(f"Selected: {disp_name}")
+            else:
+                self.bg_image_row.set_subtitle(self.get_locale_text("actions.touchbar-info.bg-image.subtitle", "Select custom wallpaper from StreamController Asset Manager to render behind all Touch Bar widgets"))
 
     # --- Pango Font Resolver for PIL ---
-    def get_font_from_desc(self, font_str: str, default_size: int = 25, scale_factor: float = 1.0):
+    def get_font_from_desc(self, font_str: str, default_size: int = 25, scale_factor: float = 1.0) -> ImageFont.FreeTypeFont:
+        if not font_str or not isinstance(font_str, str):
+            font_str = "DejaVu Sans Bold 25"
+
         if not hasattr(self, "_font_cache"):
             self._font_cache = {}
         cache_key = (font_str, default_size, scale_factor)
@@ -3135,11 +1893,11 @@ class TouchBarInfoAction(ActionBase):
             family = desc.get_family() or "DejaVu Sans"
             size_pango = desc.get_size()
             raw_size = int(size_pango / Pango.SCALE) if size_pango > 0 else default_size
-            size = max(10, int(raw_size * scale_factor))
+            size = max(6, int(round(raw_size * scale_factor)))
 
             weight = desc.get_weight()
-            is_bold = weight >= Pango.Weight.BOLD
-            is_italic = desc.get_style() in [Pango.Style.ITALIC, Pango.Style.OBLIQUE]
+            is_bold = (weight >= Pango.Weight.BOLD)
+            is_italic = (desc.get_style() in [Pango.Style.ITALIC, Pango.Style.OBLIQUE])
 
             style_parts = []
             if is_bold: style_parts.append("Bold")
@@ -3147,12 +1905,40 @@ class TouchBarInfoAction(ActionBase):
             if not style_parts: style_parts.append("Regular")
             style_str = " ".join(style_parts)
 
-            cmd = ["fc-match", "-f", "%{file}", f"{family}:style={style_str}"]
-            res = subprocess.check_output(cmd, text=True).strip()
-            if res and os.path.isfile(res):
-                font_obj = ImageFont.truetype(res, size)
+            # Query fontconfig via fc-match to locate exact font file on disk
+            try:
+                cmd = ["fc-match", "-f", "%{file}", f"{family}:style={style_str}"]
+                res = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL).strip()
+                if res and os.path.isfile(res):
+                    font_obj = ImageFont.truetype(res, size)
+            except Exception:
+                pass
+
+            if font_obj is None:
+                try:
+                    cmd_fam = ["fc-match", "-f", "%{file}", family]
+                    res_fam = subprocess.check_output(cmd_fam, text=True, stderr=subprocess.DEVNULL).strip()
+                    if res_fam and os.path.isfile(res_fam):
+                        font_obj = ImageFont.truetype(res_fam, size)
+                except Exception:
+                    pass
         except Exception as e:
-            log.error(f"TouchBarInfo: Error loading font '{font_str}': {e}")
+            log.error(f"TouchBarInfo: Error resolving font '{font_str}': {e}")
+
+        if font_obj is None:
+            for fallback in [
+                "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+                "/run/host/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/cantarell/Cantarell-VF.otf"
+            ]:
+                if os.path.isfile(fallback):
+                    try:
+                        font_obj = ImageFont.truetype(fallback, default_size)
+                        break
+                    except Exception:
+                        pass
 
         if font_obj is None:
             font_obj = ImageFont.load_default()
@@ -3160,34 +1946,30 @@ class TouchBarInfoAction(ActionBase):
         self._font_cache[cache_key] = font_obj
         return font_obj
 
-    def get_canvas_size(self) -> tuple[int, int]:
-        if hasattr(self, "deck_controller") and self.deck_controller is not None:
-            if hasattr(self.deck_controller, "get_touchscreen_image_size"):
-                size = self.deck_controller.get_touchscreen_image_size()
-                if size is not None:
-                    return size
-        return (800, 100)
+    def render_styled_text(self, draw: ImageDraw.ImageDraw, pos: tuple[float, float], text: str, font_obj, fill_enabled: bool, fill_color: tuple, outline_enabled: bool, outline_color: tuple, outline_size: int, anchor: str = "mm"):
+        x, y = pos
+        if outline_enabled and outline_size > 0:
+            for dx in range(-outline_size, outline_size + 1):
+                for dy in range(-outline_size, outline_size + 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    if dx * dx + dy * dy <= outline_size * outline_size + 1:
+                        draw.text((x + dx, y + dy), text, font=font_obj, fill=outline_color, anchor=anchor)
 
-    # --- PIL Render Helpers ---
-    def render_styled_text(self, draw: ImageDraw.ImageDraw, pos: tuple[float, float], text: str, font, fill_enabled: bool = True, fill_color: tuple = (255, 255, 255, 255), outline_enabled: bool = False, outline_color: tuple = (0, 0, 0, 255), outline_size: int = 2, anchor: str = "mm"):
-        fill = fill_color if fill_enabled else (0, 0, 0, 0)
-        stroke_w = outline_size if outline_enabled else 0
-        stroke_f = outline_color if outline_enabled else None
-        draw.text(pos, text, fill=fill, font=font, stroke_width=stroke_w, stroke_fill=stroke_f, anchor=anchor)
+        if fill_enabled:
+            draw.text((x, y), text, font=font_obj, fill=fill_color, anchor=anchor)
 
-    def fit_font_to_width(self, draw: ImageDraw.ImageDraw, text: str, font_obj, max_width: float, min_size: int = 8):
-        if not text or max_width <= 10 or font_obj is None:
-            return font_obj
+    def fit_font_to_width(self, draw: ImageDraw.ImageDraw, text: str, font_obj, max_width: float, min_size: int = 8) -> ImageFont.FreeTypeFont:
         try:
             bbox = draw.textbbox((0, 0), text, font=font_obj)
-            tw = bbox[2] - bbox[0]
-            if tw <= max_width:
+            if (bbox[2] - bbox[0]) <= max_width:
                 return font_obj
-            font_path = getattr(font_obj, "path", None)
-            curr_size = getattr(font_obj, "size", 16)
-            if not font_path:
+
+            font_path = font_obj.path if hasattr(font_obj, "path") else None
+            size = font_obj.size if hasattr(font_obj, "size") else 20
+            if not font_path or not os.path.exists(font_path):
                 return font_obj
-            size = curr_size
+
             while size > min_size:
                 size -= 1
                 f = ImageFont.truetype(font_path, size)
@@ -3219,7 +2001,7 @@ class TouchBarInfoAction(ActionBase):
             draw.polygon(fill_poly, fill=fill_color)
             draw.line(points, fill=color, width=2)
 
-    def draw_stacked(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], date_str: str, time_str: str, font_date, font_time, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz):
+    def draw_stacked(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], date_str: str, time_str: str, font_date, font_time, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz, align: str = "left"):
         x_min, y_min, x_max, y_max = box
         w = x_max - x_min
         h = y_max - y_min
@@ -3234,18 +2016,34 @@ class TouchBarInfoAction(ActionBase):
         total_h = date_h + spacing + time_h
         start_y = y_min + (h - total_h) / 2
 
-        center_x = x_min + (w / 2)
         date_y = start_y + (date_h / 2)
         time_y = start_y + date_h + spacing + (time_h / 2)
 
-        self.render_styled_text(draw, (center_x, date_y), date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz, anchor="mm")
-        self.render_styled_text(draw, (center_x, time_y), time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz, anchor="mm")
+        if align == "center":
+            center_x = x_min + (w / 2)
+            anchor = "mm"
+        else:
+            margin_x = int(w * 0.08)
+            center_x = x_min + margin_x
+            anchor = "lm"
 
-    def draw_single(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], text: str, font, fill_en=True, fill_col=(255, 255, 255, 255), out_en=False, out_col=(0, 0, 0, 255), out_sz=2):
+        self.render_styled_text(draw, (center_x, date_y), date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz, anchor=anchor)
+        self.render_styled_text(draw, (center_x, time_y), time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz, anchor=anchor)
+
+    def draw_single(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], text: str, font, fill_en=True, fill_col=(255, 255, 255, 255), out_en=False, out_col=(0, 0, 0, 255), out_sz=2, align: str = "left"):
         x_min, y_min, x_max, y_max = box
-        center_x = x_min + (x_max - x_min) / 2
+        box_w = x_max - x_min
         center_y = y_min + (y_max - y_min) / 2
-        self.render_styled_text(draw, (center_x, center_y), text, font, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+
+        if align == "center":
+            center_x = x_min + (box_w / 2)
+            anchor = "mm"
+        else:
+            margin_x = int(box_w * 0.08)
+            center_x = x_min + margin_x
+            anchor = "lm"
+
+        self.render_styled_text(draw, (center_x, center_y), text, font, fill_en, fill_col, out_en, out_col, out_sz, anchor=anchor)
 
     def load_widget_icon(self, icon_filename: str, target_h: int) -> Image.Image | None:
         icon_path = os.path.join(self.plugin_base.PATH, "assets", icon_filename)
@@ -3259,29 +2057,20 @@ class TouchBarInfoAction(ActionBase):
                 log.error(f"TouchBarInfo: Error loading icon {icon_path}: {e}")
         return None
 
-    def draw_weather(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_weather, font_location, fill_en, fill_col, out_en, out_col, out_sz):
+    def draw_weather(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_weather, font_location, fill_en, fill_col, out_en, out_col, out_sz, cache: dict = None, align: str = "left"):
         x_min, y_min, x_max, y_max = box
         box_w = x_max - x_min
         box_h = y_max - y_min
 
-        cache = self.weather_cache or {}
-        temp_str = cache.get("temp_str", "--°")
-        wmo_code = cache.get("wmo_code", 0)
-        is_day = cache.get("is_day", 1)
-        location_str = cache.get("location", "Miami")
+        c = cache or self.weather_cache or {}
+        temp_str = c.get("temp_str", "--°")
+        wmo_code = c.get("wmo_code", 0)
+        is_day = c.get("is_day", 1)
+        location_str = c.get("location", "Miami")
 
         icon_file = self.get_weather_icon_filename(wmo_code, is_day)
         target_icon_h = int(box_h * 0.70)
         icon_img = self.load_widget_icon(os.path.join("weather-icons", icon_file), target_icon_h)
-
-        margin_x = int(box_w * 0.08)
-        if icon_img is not None:
-            icon_x = x_min + margin_x
-            icon_y = y_min + int((box_h - target_icon_h) / 2)
-            image.paste(icon_img, (icon_x, icon_y), icon_img)
-            left_text_x = icon_x + icon_img.width + int(margin_x * 0.8)
-        else:
-            left_text_x = x_min + margin_x
 
         bbox_temp = draw.textbbox((0, 0), temp_str, font=font_weather)
         bbox_loc = draw.textbbox((0, 0), location_str, font=font_location)
@@ -3291,8 +2080,25 @@ class TouchBarInfoAction(ActionBase):
         loc_w = bbox_loc[2] - bbox_loc[0]
         loc_h = bbox_loc[3] - bbox_loc[1]
 
-        text_column_w = max(temp_w, loc_w)
-        center_text_x = left_text_x + (text_column_w / 2)
+        text_col_w = max(temp_w, loc_w)
+        icon_w = icon_img.width if icon_img else 0
+        gap = int(box_w * 0.05) if icon_img else 0
+        content_w = icon_w + (gap if icon_img else 0) + text_col_w
+
+        if align == "center":
+            start_x = x_min + max(0, (box_w - content_w) / 2)
+        else:
+            start_x = x_min + int(box_w * 0.08)
+
+        if icon_img is not None:
+            icon_x = int(start_x)
+            icon_y = y_min + int((box_h - target_icon_h) / 2)
+            image.paste(icon_img, (icon_x, icon_y), icon_img)
+            left_text_x = icon_x + icon_w + gap
+        else:
+            left_text_x = start_x
+
+        center_text_x = left_text_x + (text_col_w / 2)
 
         spacing = max(1, int(box_h * 0.04))
         total_h = temp_h + spacing + loc_h
@@ -3304,28 +2110,37 @@ class TouchBarInfoAction(ActionBase):
         self.render_styled_text(draw, (center_text_x, temp_y), temp_str, font_weather, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
         self.render_styled_text(draw, (center_text_x, loc_y), location_str, font_location, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
-    # --- System Widget Drawers ---
-    def draw_cpu_widget(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_main, font_sub, fill_en, fill_col, out_en, out_col, out_sz, cpu_mode: int):
+    def draw_cpu_widget(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_main, font_sub, fill_en, fill_col, out_en, out_col, out_sz, cpu_mode: int, align: str = "left"):
         x_min, y_min, x_max, y_max = box
         box_w = x_max - x_min
         box_h = y_max - y_min
 
         target_icon_h = int(box_h * 0.65)
         icon_img = self.load_widget_icon("cpu_icon.png", target_icon_h)
-
-        margin_x = int(box_w * 0.08)
-        if icon_img is not None:
-            icon_x = x_min + margin_x
-            icon_y = y_min + int((box_h - target_icon_h) / 2)
-            image.paste(icon_img, (icon_x, icon_y), icon_img)
-            content_x = icon_x + icon_img.width + int(margin_x * 0.8)
-        else:
-            content_x = x_min + margin_x
-
         latest_cpu = self.cpu_history[-1] if self.cpu_history else 0.0
 
         if cpu_mode == 2: # Live Graph
-            graph_box = (content_x, y_min + int(box_h * 0.15), x_max - margin_x, y_max - int(box_h * 0.15))
+            margin_x = int(box_w * 0.08)
+            icon_w = icon_img.width if icon_img else 0
+            gap = int(box_w * 0.05) if icon_img else 0
+            if align == "center":
+                gw = min(int(box_w * 0.75), box_w - 40)
+                gx_min = x_min + (box_w - gw) / 2
+                if icon_img is not None:
+                    icon_x = int(gx_min)
+                    icon_y = y_min + int((box_h - target_icon_h) / 2)
+                    image.paste(icon_img, (icon_x, icon_y), icon_img)
+                    gx_min += icon_w + gap
+                graph_box = (int(gx_min), y_min + int(box_h * 0.15), int(gx_min + gw - icon_w - gap), y_max - int(box_h * 0.15))
+            else:
+                if icon_img is not None:
+                    icon_x = x_min + margin_x
+                    icon_y = y_min + int((box_h - target_icon_h) / 2)
+                    image.paste(icon_img, (icon_x, icon_y), icon_img)
+                    content_x = icon_x + icon_w + gap
+                else:
+                    content_x = x_min + margin_x
+                graph_box = (content_x, y_min + int(box_h * 0.15), x_max - margin_x, y_max - int(box_h * 0.15))
             self.draw_history_graph(draw, graph_box, self.cpu_history, max_val=100.0, color=(0, 200, 255, 255))
         elif cpu_mode == 1: # Percentage + Process Count
             top_str = f"CPU {round(latest_cpu)}%"
@@ -3334,8 +2149,26 @@ class TouchBarInfoAction(ActionBase):
             bbox_b = draw.textbbox((0, 0), bot_str, font=font_sub)
             th, bh = bbox_t[3] - bbox_t[1], bbox_b[3] - bbox_b[1]
             tw, bw = bbox_t[2] - bbox_t[0], bbox_b[2] - bbox_b[0]
-            center_x = content_x + (max(tw, bw) / 2)
+            text_col_w = max(tw, bw)
 
+            icon_w = icon_img.width if icon_img else 0
+            gap = int(box_w * 0.05) if icon_img else 0
+            content_w = icon_w + (gap if icon_img else 0) + text_col_w
+
+            if align == "center":
+                start_x = x_min + max(0, (box_w - content_w) / 2)
+            else:
+                start_x = x_min + int(box_w * 0.08)
+
+            if icon_img is not None:
+                icon_x = int(start_x)
+                icon_y = y_min + int((box_h - target_icon_h) / 2)
+                image.paste(icon_img, (icon_x, icon_y), icon_img)
+                content_x = icon_x + icon_w + gap
+            else:
+                content_x = start_x
+
+            center_x = content_x + (text_col_w / 2)
             spacing = max(1, int(box_h * 0.04))
             total_h = th + spacing + bh
             start_y = y_min + (box_h - total_h) / 2
@@ -3346,11 +2179,31 @@ class TouchBarInfoAction(ActionBase):
             self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
         else: # Percentage %
             main_str = f"CPU {round(latest_cpu)}%"
-            center_x = content_x + ((x_max - margin_x - content_x) / 2)
+            bbox_m = draw.textbbox((0, 0), main_str, font=font_main)
+            tw = bbox_m[2] - bbox_m[0]
+
+            icon_w = icon_img.width if icon_img else 0
+            gap = int(box_w * 0.05) if icon_img else 0
+            content_w = icon_w + (gap if icon_img else 0) + tw
+
+            if align == "center":
+                start_x = x_min + max(0, (box_w - content_w) / 2)
+            else:
+                start_x = x_min + int(box_w * 0.08)
+
+            if icon_img is not None:
+                icon_x = int(start_x)
+                icon_y = y_min + int((box_h - target_icon_h) / 2)
+                image.paste(icon_img, (icon_x, icon_y), icon_img)
+                content_x = icon_x + icon_w + gap
+            else:
+                content_x = start_x
+
+            center_x = content_x + (tw / 2)
             center_y = y_min + (box_h / 2)
             self.render_styled_text(draw, (center_x, center_y), main_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
-    def draw_net_widget(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_main, font_sub, fill_en, fill_col, out_en, out_col, out_sz, net_mode: int, net_unit: int):
+    def draw_net_widget(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_main, font_sub, fill_en, fill_col, out_en, out_col, out_sz, net_mode: int, net_unit: int, align: str = "left"):
         x_min, y_min, x_max, y_max = box
         box_w = x_max - x_min
         box_h = y_max - y_min
@@ -3358,17 +2211,28 @@ class TouchBarInfoAction(ActionBase):
         target_icon_h = int(box_h * 0.65)
         icon_img = self.load_widget_icon("net_icon.png", target_icon_h)
 
-        margin_x = int(box_w * 0.08)
-        if icon_img is not None:
-            icon_x = x_min + margin_x
-            icon_y = y_min + int((box_h - target_icon_h) / 2)
-            image.paste(icon_img, (icon_x, icon_y), icon_img)
-            content_x = icon_x + icon_img.width + int(margin_x * 0.8)
-        else:
-            content_x = x_min + margin_x
-
         if net_mode == 1: # Live Graph
-            graph_box = (content_x, y_min + int(box_h * 0.15), x_max - margin_x, y_max - int(box_h * 0.15))
+            margin_x = int(box_w * 0.08)
+            icon_w = icon_img.width if icon_img else 0
+            gap = int(box_w * 0.05) if icon_img else 0
+            if align == "center":
+                gw = min(int(box_w * 0.75), box_w - 40)
+                gx_min = x_min + (box_w - gw) / 2
+                if icon_img is not None:
+                    icon_x = int(gx_min)
+                    icon_y = y_min + int((box_h - target_icon_h) / 2)
+                    image.paste(icon_img, (icon_x, icon_y), icon_img)
+                    gx_min += icon_w + gap
+                graph_box = (int(gx_min), y_min + int(box_h * 0.15), int(gx_min + gw - icon_w - gap), y_max - int(box_h * 0.15))
+            else:
+                if icon_img is not None:
+                    icon_x = x_min + margin_x
+                    icon_y = y_min + int((box_h - target_icon_h) / 2)
+                    image.paste(icon_img, (icon_x, icon_y), icon_img)
+                    content_x = icon_x + icon_w + gap
+                else:
+                    content_x = x_min + margin_x
+                graph_box = (content_x, y_min + int(box_h * 0.15), x_max - margin_x, y_max - int(box_h * 0.15))
             max_r = max(50.0, max(self.net_history) if self.net_history else 100.0)
             self.draw_history_graph(draw, graph_box, self.net_history, max_val=max_r, color=(100, 255, 100, 255))
         else: # Rates
@@ -3386,8 +2250,26 @@ class TouchBarInfoAction(ActionBase):
             bbox_t = draw.textbbox((0, 0), tx_str, font=font_sub)
             rh, th = bbox_r[3] - bbox_r[1], bbox_t[3] - bbox_t[1]
             rw, tw = bbox_r[2] - bbox_r[0], bbox_t[2] - bbox_t[0]
-            center_x = content_x + (max(rw, tw) / 2)
+            text_col_w = max(rw, tw)
 
+            icon_w = icon_img.width if icon_img else 0
+            gap = int(box_w * 0.05) if icon_img else 0
+            content_w = icon_w + (gap if icon_img else 0) + text_col_w
+
+            if align == "center":
+                start_x = x_min + max(0, (box_w - content_w) / 2)
+            else:
+                start_x = x_min + int(box_w * 0.08)
+
+            if icon_img is not None:
+                icon_x = int(start_x)
+                icon_y = y_min + int((box_h - target_icon_h) / 2)
+                image.paste(icon_img, (icon_x, icon_y), icon_img)
+                content_x = icon_x + icon_w + gap
+            else:
+                content_x = start_x
+
+            center_x = content_x + (text_col_w / 2)
             spacing = max(1, int(box_h * 0.04))
             total_h = rh + spacing + th
             start_y = y_min + (box_h - total_h) / 2
@@ -3397,39 +2279,89 @@ class TouchBarInfoAction(ActionBase):
             self.render_styled_text(draw, (center_x, rx_y), rx_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
             self.render_styled_text(draw, (center_x, tx_y), tx_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
-    def draw_ram_widget(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_main, font_sub, fill_en, fill_col, out_en, out_col, out_sz, ram_mode: int):
+    def draw_ram_widget(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_main, font_sub, fill_en, fill_col, out_en, out_col, out_sz, ram_mode: int, align: str = "left"):
         x_min, y_min, x_max, y_max = box
         box_w = x_max - x_min
         box_h = y_max - y_min
 
         target_icon_h = int(box_h * 0.65)
         icon_img = self.load_widget_icon("ram_icon.png", target_icon_h)
-
-        margin_x = int(box_w * 0.08)
-        if icon_img is not None:
-            icon_x = x_min + margin_x
-            icon_y = y_min + int((box_h - target_icon_h) / 2)
-            image.paste(icon_img, (icon_x, icon_y), icon_img)
-            content_x = icon_x + icon_img.width + int(margin_x * 0.8)
-        else:
-            content_x = x_min + margin_x
-
         latest_ram = self.ram_history[-1] if self.ram_history else 0.0
 
         if ram_mode == 2: # Live Graph
-            graph_box = (content_x, y_min + int(box_h * 0.15), x_max - margin_x, y_max - int(box_h * 0.15))
+            margin_x = int(box_w * 0.08)
+            icon_w = icon_img.width if icon_img else 0
+            gap = int(box_w * 0.05) if icon_img else 0
+            if align == "center":
+                gw = min(int(box_w * 0.75), box_w - 40)
+                gx_min = x_min + (box_w - gw) / 2
+                if icon_img is not None:
+                    icon_x = int(gx_min)
+                    icon_y = y_min + int((box_h - target_icon_h) / 2)
+                    image.paste(icon_img, (icon_x, icon_y), icon_img)
+                    gx_min += icon_w + gap
+                graph_box = (int(gx_min), y_min + int(box_h * 0.15), int(gx_min + gw - icon_w - gap), y_max - int(box_h * 0.15))
+            else:
+                if icon_img is not None:
+                    icon_x = x_min + margin_x
+                    icon_y = y_min + int((box_h - target_icon_h) / 2)
+                    image.paste(icon_img, (icon_x, icon_y), icon_img)
+                    content_x = icon_x + icon_w + gap
+                else:
+                    content_x = x_min + margin_x
+                graph_box = (content_x, y_min + int(box_h * 0.15), x_max - margin_x, y_max - int(box_h * 0.15))
             self.draw_history_graph(draw, graph_box, self.ram_history, max_val=100.0, color=(255, 170, 0, 255))
         elif ram_mode == 1: # Used / Total GB
             mem = psutil.virtual_memory()
             used_gb = mem.used / (1024**3)
             tot_gb = mem.total / (1024**3)
-            main_str = f"{used_gb:.1f} / {tot_gb:.1f} GB"
-            center_x = content_x + ((x_max - margin_x - content_x) / 2)
+            main_str = f"{used_gb:.1f}/{tot_gb:.1f} GB"
+            bbox_m = draw.textbbox((0, 0), main_str, font=font_main)
+            tw = bbox_m[2] - bbox_m[0]
+
+            icon_w = icon_img.width if icon_img else 0
+            gap = int(box_w * 0.05) if icon_img else 0
+            content_w = icon_w + (gap if icon_img else 0) + tw
+
+            if align == "center":
+                start_x = x_min + max(0, (box_w - content_w) / 2)
+            else:
+                start_x = x_min + int(box_w * 0.08)
+
+            if icon_img is not None:
+                icon_x = int(start_x)
+                icon_y = y_min + int((box_h - target_icon_h) / 2)
+                image.paste(icon_img, (icon_x, icon_y), icon_img)
+                content_x = icon_x + icon_w + gap
+            else:
+                content_x = start_x
+
+            center_x = content_x + (tw / 2)
             center_y = y_min + (box_h / 2)
             self.render_styled_text(draw, (center_x, center_y), main_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
         else: # Percentage %
             main_str = f"RAM {round(latest_ram)}%"
-            center_x = content_x + ((x_max - margin_x - content_x) / 2)
+            bbox_m = draw.textbbox((0, 0), main_str, font=font_main)
+            tw = bbox_m[2] - bbox_m[0]
+
+            icon_w = icon_img.width if icon_img else 0
+            gap = int(box_w * 0.05) if icon_img else 0
+            content_w = icon_w + (gap if icon_img else 0) + tw
+
+            if align == "center":
+                start_x = x_min + max(0, (box_w - content_w) / 2)
+            else:
+                start_x = x_min + int(box_w * 0.08)
+
+            if icon_img is not None:
+                icon_x = int(start_x)
+                icon_y = y_min + int((box_h - target_icon_h) / 2)
+                image.paste(icon_img, (icon_x, icon_y), icon_img)
+                content_x = icon_x + icon_w + gap
+            else:
+                content_x = start_x
+
+            center_x = content_x + (tw / 2)
             center_y = y_min + (box_h / 2)
             self.render_styled_text(draw, (center_x, center_y), main_str, font_main, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
@@ -3446,7 +2378,6 @@ class TouchBarInfoAction(ActionBase):
                 return cached_res
 
         import shutil
-
         host_env = dict(os.environ)
         uid = os.getuid() if hasattr(os, "getuid") else 1000
         if "DBUS_SESSION_BUS_ADDRESS" not in host_env or not host_env["DBUS_SESSION_BUS_ADDRESS"]:
@@ -3454,7 +2385,6 @@ class TouchBarInfoAction(ActionBase):
         if "XDG_RUNTIME_DIR" not in host_env or not host_env["XDG_RUNTIME_DIR"]:
             host_env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
 
-        # 1. Host flatpak-spawn df query (Primary inside Flatpak container)
         if shutil.which("flatpak-spawn"):
             try:
                 cmd = ["flatpak-spawn", "--host", "--directory=/", "df", "-k", mount_path]
@@ -3474,10 +2404,9 @@ class TouchBarInfoAction(ActionBase):
                             res = (pct, used_gb, free_gb)
                             self._disk_usage_cache[mount_path] = (now, res)
                             return res
-            except Exception as e:
-                log.error(f"TouchBarInfo: get_disk_usage_host flatpak-spawn error for {mount_path}: {e}")
+            except Exception:
+                pass
 
-        # 2. Native df query fallback
         for df_bin in ["df", "/usr/bin/df"]:
             try:
                 p = subprocess.run([df_bin, "-k", mount_path], capture_output=True, text=True, timeout=2)
@@ -3497,14 +2426,13 @@ class TouchBarInfoAction(ActionBase):
             except Exception:
                 pass
 
-        # 3. psutil fallback
         try:
             du = psutil.disk_usage(mount_path)
             return du.percent, du.used / (1024**3), du.free / (1024**3)
         except Exception:
             return 0.0, 0.0, 0.0
 
-    def draw_disk_widget(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_main, font_sub, fill_en, fill_col, out_en, out_col, out_sz, disk_mode: int, disk_mount_idx: int):
+    def draw_disk_widget(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_main, font_sub, fill_en, fill_col, out_en, out_col, out_sz, disk_mode: int, disk_mount_path: str = "/", align: str = "left"):
         x_min, y_min, x_max, y_max = box
         box_w = x_max - x_min
         box_h = y_max - y_min
@@ -3512,19 +2440,7 @@ class TouchBarInfoAction(ActionBase):
         target_icon_h = int(box_h * 0.65)
         icon_img = self.load_widget_icon("disk_icon.png", target_icon_h)
 
-        margin_x = int(box_w * 0.08)
-        if icon_img is not None:
-            icon_x = x_min + margin_x
-            icon_y = y_min + int((box_h - target_icon_h) / 2)
-            image.paste(icon_img, (icon_x, icon_y), icon_img)
-            content_x = icon_x + icon_img.width + int(margin_x * 0.8)
-        else:
-            content_x = x_min + margin_x
-
-        settings = self.get_settings() or {}
-        disk_mount_path = settings.get("disk_mount_path", "")
         mount_path = disk_mount_path if disk_mount_path else "/"
-
         if not mount_path or mount_path == "/":
             disp_name = "System Root"
         elif mount_path.startswith("/home"):
@@ -3536,9 +2452,18 @@ class TouchBarInfoAction(ActionBase):
 
         pct, used_gb, free_gb = self.get_disk_usage_host(mount_path)
 
+        margin_x = int(box_w * 0.08)
+        if icon_img is not None:
+            icon_x = x_min + margin_x
+            icon_y = y_min + int((box_h - target_icon_h) / 2)
+            image.paste(icon_img, (icon_x, icon_y), icon_img)
+            content_x = icon_x + icon_img.width + int(margin_x * 0.8)
+        else:
+            content_x = x_min + margin_x
+
         max_avail_w = max(20.0, float((x_max - margin_x) - content_x))
 
-        if disk_mode == 2: # Mini bar graph with top title header
+        if disk_mode == 2: # Mini bar graph
             top_str = f"{disp_name} — {round(pct)}%"
             font_sub_fit = self.fit_font_to_width(draw, top_str, font_sub, max_avail_w, min_size=8)
             bbox_t = draw.textbbox((0, 0), top_str, font=font_sub_fit)
@@ -3557,20 +2482,13 @@ class TouchBarInfoAction(ActionBase):
             gx_max = x_max - margin_x
             gw = gx_max - gx_min
 
-            # Render top disk name + percentage header
             self.render_styled_text(draw, (gx_min + (gw / 2), top_y), top_str, font_sub_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
-
-            # Fill entire bar background with Emerald Green for Available Space
             draw.rectangle([gx_min, bar_y_min, gx_max, bar_y_max], fill=(46, 204, 113, 220))
-
-            # Fill left portion with Coral Red for Used Space
             fill_w = int(gw * (pct / 100.0))
             if fill_w > 0:
                 draw.rectangle([gx_min, bar_y_min, gx_min + fill_w, bar_y_max], fill=(231, 76, 60, 220))
-
-            # Clean silver border outline
             draw.rectangle([gx_min, bar_y_min, gx_max, bar_y_max], outline=(200, 200, 200, 255), width=1)
-        elif disk_mode == 1: # Used / Total GB (Top: Disk Name, Bottom: Used/Total)
+        elif disk_mode == 1: # Used / Total GB
             top_str = f"{disp_name}"
             total_gb = used_gb + free_gb
             bot_str = f"{used_gb:.0f}GB/{total_gb:.0f}GB"
@@ -3591,7 +2509,7 @@ class TouchBarInfoAction(ActionBase):
 
             self.render_styled_text(draw, (center_x, top_y), top_str, font_main_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
             self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
-        else: # Percentage % (Top: Disk Name, Bottom: Percentage Used)
+        else: # Percentage %
             top_str = f"{disp_name}"
             bot_str = f"{round(pct)}% Used"
 
@@ -3612,12 +2530,11 @@ class TouchBarInfoAction(ActionBase):
             self.render_styled_text(draw, (center_x, top_y), top_str, font_main_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
             self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
 
-    def draw_world_clock(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_city, font_time, font_sub, fill_en, fill_col, out_en, out_col, out_sz, city_idx: int, custom_label: str, custom_tz: str, show_offset: bool, use_24h: bool, show_seconds: bool, clock_view: int = 0):
+    def draw_world_clock(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_city, font_time, font_sub, fill_en, fill_col, out_en, out_col, out_sz, city_idx: int, custom_label: str, custom_tz: str, show_offset: bool, use_24h: bool, show_seconds: bool, clock_view: int = 0, align: str = "left"):
         x_min, y_min, x_max, y_max = box
         box_w = x_max - x_min
         box_h = y_max - y_min
 
-        # 1. Resolve Timezone & City Label
         if 0 <= city_idx < len(self.worldclock_cities):
             city_name, tz_str = self.worldclock_cities[city_idx]
             if tz_str == "custom":
@@ -3634,12 +2551,10 @@ class TouchBarInfoAction(ActionBase):
         try:
             tz = ZoneInfo(tz_str)
             city_now = datetime.datetime.now(tz)
-        except Exception as e:
-            log.error(f"TouchBarInfo: Invalid timezone '{tz_str}': {e}")
+        except Exception:
             tz = ZoneInfo("UTC")
             city_now = datetime.datetime.now(tz)
 
-        # 2. Format Time String
         if use_24h:
             time_fmt = "%H:%M:%S" if show_seconds else "%H:%M"
             time_str = city_now.strftime(time_fmt)
@@ -3647,7 +2562,6 @@ class TouchBarInfoAction(ActionBase):
             time_fmt = "%I:%M:%S %p" if show_seconds else "%I:%M %p"
             time_str = city_now.strftime(time_fmt).lstrip("0")
 
-        # 3. Format Offset / Day Diff String
         offset_str = ""
         if show_offset:
             try:
@@ -3663,7 +2577,6 @@ class TouchBarInfoAction(ActionBase):
                 else:
                     diff_fmt = f"{diff_hours:+.1f}h"
 
-                # Date comparison
                 c_date = city_now.date()
                 l_date = local_now.date()
                 if c_date > l_date:
@@ -3675,18 +2588,13 @@ class TouchBarInfoAction(ActionBase):
             except Exception:
                 offset_str = ""
 
-        # 4. Render Layout (Analog vs Digital)
-        if clock_view == 1:
-            # --- ANALOG CLOCK VIEW ---
+        if clock_view == 1: # ANALOG CLOCK
             if box_h >= 80:
-                # Full Slot (100px height)
                 dial_r = int(min(box_h - 14, box_w * 0.45) / 2)
                 cx = x_min + dial_r + 14
                 cy = y_min + (box_h / 2)
 
-                # Outer circle dial
                 draw.ellipse((cx - dial_r, cy - dial_r, cx + dial_r, cy + dial_r), outline=fill_col, width=2)
-                # Ticks (Thick lines for 12, 3, 6, 9)
                 for i in range(12):
                     angle = math.radians(i * 30)
                     is_cardinal = (i % 3 == 0)
@@ -3698,7 +2606,6 @@ class TouchBarInfoAction(ActionBase):
                     y2 = cy - (dial_r - 1) * math.cos(angle)
                     draw.line((x1, y1, x2, y2), fill=fill_col, width=tick_w)
 
-                # Clock Hands
                 hour = city_now.hour % 12
                 minute = city_now.minute
                 second = city_now.second
@@ -3723,7 +2630,6 @@ class TouchBarInfoAction(ActionBase):
 
                 draw.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill=fill_col)
 
-                # Text Info on Right Side of Clock
                 text_x_start = cx + dial_r + 12
                 text_center_x = text_x_start + (x_max - text_x_start) / 2
 
@@ -3748,14 +2654,11 @@ class TouchBarInfoAction(ActionBase):
                 if offset_str:
                     self.render_styled_text(draw, (text_center_x, off_y), offset_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
             else:
-                # Split Slot (50px height)
                 dial_r = int(min(box_h - 8, box_w * 0.35) / 2)
                 cx = x_min + dial_r + 8
                 cy = y_min + (box_h / 2)
 
                 draw.ellipse((cx - dial_r, cy - dial_r, cx + dial_r, cy + dial_r), outline=fill_col, width=1)
-
-                # Ticks with thick lines for 12, 3, 6, 9 cardinal markers
                 for i in range(12):
                     angle = math.radians(i * 30)
                     is_cardinal = (i % 3 == 0)
@@ -3794,11 +2697,16 @@ class TouchBarInfoAction(ActionBase):
                 text_x_start = cx + dial_r + 6
                 text_center_x = text_x_start + (x_max - text_x_start) / 2
                 full_time_line = f"{disp_city} ({offset_str})" if offset_str else disp_city
-
                 self.render_styled_text(draw, (text_center_x, cy), full_time_line, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
-        else:
-            # --- DIGITAL CLOCK VIEW ---
-            center_x = x_min + (box_w / 2)
+        else: # DIGITAL CLOCK
+            if align == "center":
+                center_x = x_min + (box_w / 2)
+                anchor = "mm"
+            else:
+                margin_x = int(box_w * 0.08)
+                center_x = x_min + margin_x
+                anchor = "lm"
+
             if box_h >= 80:
                 bbox_city = draw.textbbox((0, 0), disp_city, font=font_city)
                 bbox_time = draw.textbbox((0, 0), time_str, font=font_time)
@@ -3816,10 +2724,10 @@ class TouchBarInfoAction(ActionBase):
                 time_y = start_y + ch + spacing + (th / 2)
                 off_y = start_y + ch + spacing + th + spacing + (oh / 2)
 
-                self.render_styled_text(draw, (center_x, city_y), disp_city, font_city, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
-                self.render_styled_text(draw, (center_x, time_y), time_str, font_time, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+                self.render_styled_text(draw, (center_x, city_y), disp_city, font_city, fill_en, fill_col, out_en, out_col, out_sz, anchor=anchor)
+                self.render_styled_text(draw, (center_x, time_y), time_str, font_time, fill_en, fill_col, out_en, out_col, out_sz, anchor=anchor)
                 if offset_str:
-                    self.render_styled_text(draw, (center_x, off_y), offset_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+                    self.render_styled_text(draw, (center_x, off_y), offset_str, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor=anchor)
             else:
                 full_time_line = f"{time_str} ({offset_str})" if offset_str else time_str
                 bbox_city = draw.textbbox((0, 0), disp_city, font=font_city)
@@ -3835,12 +2743,12 @@ class TouchBarInfoAction(ActionBase):
                 city_y = start_y + (ch / 2)
                 time_y = start_y + ch + spacing + (th / 2)
 
-                self.render_styled_text(draw, (center_x, city_y), disp_city, font_city, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
-                self.render_styled_text(draw, (center_x, time_y), full_time_line, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+                self.render_styled_text(draw, (center_x, city_y), disp_city, font_city, fill_en, fill_col, out_en, out_col, out_sz, anchor=anchor)
+                self.render_styled_text(draw, (center_x, time_y), full_time_line, font_sub, fill_en, fill_col, out_en, out_col, out_sz, anchor=anchor)
 
     # --- Media Player Drawers & Helpers ---
     def interpolate_color(self, c1: tuple, c2: tuple, t: float) -> tuple:
-        t = max(0.0, min(1.0, float(t)))
+        t = min(1.0, max(0.0, float(t)))
         r = int(c1[0] + (c2[0] - c1[0]) * t)
         g = int(c1[1] + (c2[1] - c1[1]) * t)
         b = int(c1[2] + (c2[2] - c1[2]) * t)
@@ -3868,10 +2776,11 @@ class TouchBarInfoAction(ActionBase):
                 player_names = []
 
             settings = self.get_settings() or {}
-            player_id = settings.get("media_player_id", "")
+            player_id = settings.get("media_player_id", "") if isinstance(settings, dict) else ""
             if not player_id:
-                player_idx = settings.get("media_player_idx", 0)
-                player_id = self.media_player_ids[player_idx] if hasattr(self, "media_player_ids") and player_idx < len(self.media_player_ids) else "auto"
+                player_idx = settings.get("media_player_idx", 0) if isinstance(settings, dict) else 0
+                player_id = self.media_player_ids[player_idx] if hasattr(self, "media_player_ids") and isinstance(player_idx, int) and player_idx < len(self.media_player_ids) else "auto"
+            player_id = str(player_id) if isinstance(player_id, str) else "auto"
 
             target_name = None
             if player_id and player_id != "auto":
@@ -4193,7 +3102,7 @@ class TouchBarInfoAction(ActionBase):
             if len(pts) >= 2:
                 draw.line(pts, fill=solid_col, width=2)
 
-    def draw_media_full(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_artist, font_song, artist_fill_en, artist_fill_col, artist_out_en, artist_out_col, artist_out_sz, song_fill_en, song_fill_col, song_out_en, song_out_col, song_out_sz, player_idx: int, vis_style: int, color_mode: int, solid_col: tuple, start_col: tuple, mid_col: tuple, end_col: tuple):
+    def draw_media_full(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_artist, font_song, artist_fill_en, artist_fill_col, artist_out_en, artist_out_col, artist_out_sz, song_fill_en, song_fill_col, song_out_en, song_out_col, song_out_sz, player_idx: int, vis_style: int, color_mode: int, solid_col: tuple, start_col: tuple, mid_col: tuple, end_col: tuple, align: str = "left"):
         x_min, y_min, x_max, y_max = box
         bw = x_max - x_min
         bh = y_max - y_min
@@ -4230,7 +3139,7 @@ class TouchBarInfoAction(ActionBase):
         else:
             self.draw_stepped_bars(draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, mid_col, end_col)
 
-    def draw_media_sub(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], player_idx: int, vis_style: int, color_mode: int, solid_col: tuple, start_col: tuple, mid_col: tuple, end_col: tuple):
+    def draw_media_sub(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], player_idx: int, vis_style: int, color_mode: int, solid_col: tuple, start_col: tuple, mid_col: tuple, end_col: tuple, align: str = "left"):
         x_min, y_min, x_max, y_max = box
         bw = x_max - x_min
         bh = y_max - y_min
@@ -4255,280 +3164,86 @@ class TouchBarInfoAction(ActionBase):
         else:
             self.draw_stepped_bars(draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, mid_col, end_col)
 
-    def update_display(self) -> None:
-        if self.handle_lock_blanking():
-            return
+    def start_anim_timer(self):
+        if self._anim_timer_id is None:
+            self._anim_timer_id = GLib.timeout_add(40, self._anim_tick)
+
+    def stop_anim_timer(self):
+        if self._anim_timer_id is not None:
+            try:
+                GLib.source_remove(self._anim_timer_id)
+            except Exception:
+                pass
+            self._anim_timer_id = None
+
+    def _anim_tick(self) -> bool:
+        if self._was_locked:
+            self._anim_timer_id = None
+            return False
+        if not self.is_media_active_and_playing():
+            self._anim_timer_id = None
+            self.vis_heights = [0.04] * len(self.vis_heights)
+            self.last_rendered_key = ""
+            self.update_display()
+            return False
+
+        self.update_media_state(poll_dbus=False)
+        self.update_display()
+        return True
+
+    def is_media_active_and_playing(self) -> bool:
         settings = self.get_settings() or {}
-        use_24h = settings.get("use_24h", False)
-        show_seconds = settings.get("show_seconds", False)
-        date_format_idx = settings.get("date_format_idx", 0)
-
-        # Section Selections
-        sec_a_mode = settings.get("sec_a_mode", 0)
-        sec_a_full = settings.get("sec_a_full_widget", 0)
-        sec_a_top = settings.get("sec_a_top_widget", 0)
-        sec_a_bot = settings.get("sec_a_bottom_widget", 0)
-
-        sec_b_mode = settings.get("sec_b_mode", 0)
-        sec_b_full = settings.get("sec_b_full_widget", 0)
-        sec_b_top = settings.get("sec_b_top_widget", 0)
-        sec_b_bot = settings.get("sec_b_bottom_widget", 0)
-
-        sec_c_mode = settings.get("sec_c_mode", 0)
-        sec_c_full = settings.get("sec_c_full_widget", 0)
-        sec_c_top = settings.get("sec_c_top_widget", 0)
-        sec_c_bot = settings.get("sec_c_bottom_widget", 0)
-
-        # System Monitor Modes
-        cpu_mode_idx = settings.get("cpu_mode_idx", 0)
-        net_mode_idx = settings.get("net_mode_idx", 0)
-        net_unit_idx = settings.get("net_unit_idx", 0)
-        ram_mode_idx = settings.get("ram_mode_idx", 0)
-        disk_mode_idx = settings.get("disk_mode_idx", 0)
-        disk_mount_idx = settings.get("disk_mount_idx", 0)
-        disk_mount_path = settings.get("disk_mount_path", "")
-        custom_bg_path = settings.get("custom_bg_path", "")
-
-        # Date Font & Fill/Outline Settings
-        date_font_str = settings.get("date_font_str", "DejaVu Sans Bold 25")
-        date_fill_en = settings.get("date_fill_enabled", True)
-        date_fill_col_hex = settings.get("date_font_color", "#AAC8E6FF")
-        date_out_en = settings.get("date_outline_enabled", False)
-        date_out_col_hex = settings.get("date_outline_color", "#000000FF")
-        date_out_sz = settings.get("date_outline_size", 2)
-
-        # Time Font & Fill/Outline Settings
-        time_font_str = settings.get("time_font_str", "DejaVu Sans Bold 45")
-        time_fill_en = settings.get("time_fill_enabled", True)
-        time_fill_col_hex = settings.get("time_font_color", "#FFFFFFFF")
-        time_out_en = settings.get("time_outline_enabled", False)
-        time_out_col_hex = settings.get("time_outline_color", "#000000FF")
-        time_out_sz = settings.get("time_outline_size", 2)
-
-        # Weather Font & Fill/Outline Settings
-        weather_font_str = settings.get("weather_font_str", "DejaVu Sans Bold 22")
-        weather_fill_en = settings.get("weather_fill_enabled", True)
-        weather_fill_col_hex = settings.get("weather_font_color", "#FFFFFFFF")
-        weather_out_en = settings.get("weather_outline_enabled", False)
-        weather_out_col_hex = settings.get("weather_outline_color", "#000000FF")
-        weather_out_sz = settings.get("weather_outline_size", 2)
-
-        # World Clock Settings
-        worldclock_city_idx = settings.get("worldclock_city_idx", 0)
-        worldclock_view = settings.get("worldclock_view", 0)
-        worldclock_custom_label = settings.get("worldclock_custom_label", "")
-        worldclock_custom_tz = settings.get("worldclock_custom_tz", "America/New_York")
-        worldclock_show_seconds = settings.get("worldclock_show_seconds", False)
-        worldclock_show_offset = settings.get("worldclock_show_offset", True)
-        worldclock_font_str = settings.get("worldclock_font_str", "DejaVu Sans Bold 25")
-        wc_fill_en = settings.get("worldclock_fill_enabled", True)
-        wc_fill_col_hex = settings.get("worldclock_font_color", "#FFFFFFFF")
-        wc_out_en = settings.get("worldclock_outline_enabled", False)
-        wc_out_col_hex = settings.get("worldclock_outline_color", "#000000FF")
-        wc_out_sz = settings.get("worldclock_outline_size", 2)
-
-        # Media Player Settings
-        media_player_idx = settings.get("media_player_idx", 0)
-        media_vis_style_idx = settings.get("media_vis_style_idx", 0)
-        media_color_mode_idx = settings.get("media_color_mode_idx", 0)
-        media_solid_col_hex = settings.get("media_solid_color", "#FFFFFFFF")
-        media_grad_start_hex = settings.get("media_grad_start", "#00D2FFFF")
-        media_grad_mid_hex = settings.get("media_grad_mid", "#7B2CBFFF")
-        media_grad_end_hex = settings.get("media_grad_end", "#FF2A6DFF")
-
-        media_artist_font_str = settings.get("media_artist_font_str", "DejaVu Sans Bold 18")
-        media_artist_fill_en = settings.get("media_artist_fill_enabled", True)
-        media_artist_fill_col_hex = settings.get("media_artist_font_color", "#FFFFFFFF")
-        media_artist_out_en = settings.get("media_artist_outline_enabled", False)
-        media_artist_out_col_hex = settings.get("media_artist_outline_color", "#000000FF")
-        media_artist_out_sz = settings.get("media_artist_outline_size", 2)
-
-        media_song_font_str = settings.get("media_song_font_str", "DejaVu Sans Bold 18")
-        media_song_fill_en = settings.get("media_song_fill_enabled", True)
-        media_song_fill_col_hex = settings.get("media_song_font_color", "#FFFFFFFF")
-        media_song_out_en = settings.get("media_song_outline_enabled", False)
-        media_song_out_col_hex = settings.get("media_song_outline_color", "#000000FF")
-        media_song_out_sz = settings.get("media_song_outline_size", 2)
-
-        date_options = [
-            ("%b. %d, %Y", "Mon. Day, Year"),
-            ("%a. %d, %Y", "DayOfWeek. Day, Year"),
-            ("%a. %b. %d, %Y", "DayOfWeek. Mon. Day, Year"),
-            ("%Y-%b-%d", "Year-Mon-Day")
+        slots = [
+            ("sec_a", "full_widget", "top_widget", "bottom_widget", "mode"),
+            ("sec_b", "full_widget", "top_widget", "bottom_widget", "mode"),
+            ("sec_c", "full_widget", "top_widget", "bottom_widget", "mode")
         ]
-        fmt_str, _ = date_options[min(date_format_idx, len(date_options) - 1)]
+        is_active = False
+        for prefix, fw, tw, bw, mw in slots:
+            mode = self.get_slot_setting(settings, prefix, "mode", 0)
+            if mode == 0:
+                if self.get_slot_setting(settings, f"{prefix}_full", "widget", self.get_slot_setting(settings, prefix, "full_widget", 0)) == 4:
+                    is_active = True
+                    break
+            else:
+                if self.get_slot_setting(settings, f"{prefix}_top", "widget", self.get_slot_setting(settings, prefix, "top_widget", 0)) == 4:
+                    is_active = True
+                    break
+                if self.get_slot_setting(settings, f"{prefix}_bot", "widget", self.get_slot_setting(settings, prefix, "bottom_widget", 0)) == 4:
+                    is_active = True
+                    break
+        return is_active and (self.media_state.get("status") == "Playing")
 
-        now = datetime.datetime.now()
-        date_str = now.strftime(fmt_str)
+    def is_screen_locked(self) -> bool:
+        try:
+            if not self.session_bus:
+                self.session_bus = dbus.SessionBus()
+            try:
+                obj = self.session_bus.get_object("org.gnome.ScreenSaver", "/org/gnome/ScreenSaver")
+                props = dbus.Interface(obj, "org.gnome.ScreenSaver")
+                if bool(props.GetActive()):
+                    return True
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return False
 
-        if use_24h:
-            time_fmt = "%H:%M:%S" if show_seconds else "%H:%M"
+    def handle_lock_blanking(self) -> bool:
+        if self.is_screen_locked():
+            if not self._was_locked:
+                self._was_locked = True
+                blank_img = Image.new("RGBA", (800, 100), (0, 0, 0, 255))
+                self.render_to_input(blank_img)
+            return True
         else:
-            time_fmt = "%I:%M:%S %p" if show_seconds else "%I:%M %p"
-        
-        time_str = now.strftime(time_fmt).lstrip("0") if not use_24h else now.strftime(time_fmt)
-
-        cache_temp = self.weather_cache.get("temp_str", "--°") if hasattr(self, "weather_cache") else "--°"
-        cache_loc = self.weather_cache.get("location", "") if hasattr(self, "weather_cache") else ""
-        latest_cpu = self.cpu_history[-1] if self.cpu_history else 0.0
-        latest_ram = self.ram_history[-1] if self.ram_history else 0.0
-
-        is_media_active = (sec_a_mode == 0 and sec_a_full == 4) or (sec_a_mode == 1 and (sec_a_top == 4 or sec_a_bot == 4)) or \
-                          (sec_b_mode == 0 and sec_b_full == 4) or (sec_b_mode == 1 and (sec_b_top == 4 or sec_b_bot == 4)) or \
-                          (sec_c_mode == 0 and sec_c_full == 4) or (sec_c_mode == 1 and (sec_c_top == 4 or sec_c_bot == 4))
-
-        media_key = f"{self.vis_tick}|{self.media_state.get('title','')}|{self.media_state.get('artist','')}|{self.media_state.get('status','')}|{self.media_state.get('art_url','')}|{media_player_idx}|{media_vis_style_idx}|{media_color_mode_idx}|{media_solid_col_hex}|{media_grad_start_hex}|{media_grad_mid_hex}|{media_grad_end_hex}" if is_media_active else "nomedia"
-
-        combined_key = f"{date_str}|{time_str}|{cache_temp}|{cache_loc}|{latest_cpu:.1f}|{latest_ram:.1f}|{self.net_tx_rate:.0f}|{self.net_rx_rate:.0f}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{cpu_mode_idx}|{net_mode_idx}|{net_unit_idx}|{ram_mode_idx}|{disk_mode_idx}|{disk_mount_idx}|{disk_mount_path}|{custom_bg_path}|{date_font_str}|{date_fill_en}|{date_fill_col_hex}|{date_out_en}|{date_out_col_hex}|{date_out_sz}|{time_font_str}|{time_fill_en}|{time_fill_col_hex}|{time_out_en}|{time_out_col_hex}|{time_out_sz}|{weather_font_str}|{weather_fill_en}|{weather_fill_col_hex}|{weather_out_en}|{weather_out_col_hex}|{weather_out_sz}|{worldclock_city_idx}|{worldclock_view}|{worldclock_custom_label}|{worldclock_custom_tz}|{worldclock_show_seconds}|{worldclock_show_offset}|{worldclock_font_str}|{wc_fill_en}|{wc_fill_col_hex}|{wc_out_en}|{wc_out_col_hex}|{wc_out_sz}|{media_key}"
-
-        if combined_key == self.last_rendered_key:
-            return
-        self.last_rendered_key = combined_key
-
-        width, height = self.get_canvas_size()
-
-        # 100% Transparent Background Canvas
-        image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(image)
-
-        font_date = self.get_font_from_desc(date_font_str, default_size=25)
-        font_time = self.get_font_from_desc(time_font_str, default_size=45)
-
-        font_weather_full = self.get_font_from_desc(weather_font_str, default_size=22, scale_factor=1.4)
-        font_loc_full = self.get_font_from_desc(weather_font_str, default_size=22, scale_factor=1.0)
-
-        font_weather_sub = self.get_font_from_desc(weather_font_str, default_size=22, scale_factor=1.0)
-        font_loc_sub = self.get_font_from_desc(weather_font_str, default_size=22, scale_factor=0.75)
-
-        # World Clock Fonts
-        font_wc_city_full = self.get_font_from_desc(worldclock_font_str, default_size=20, scale_factor=0.8)
-        font_wc_time_full = self.get_font_from_desc(worldclock_font_str, default_size=32, scale_factor=1.2)
-        font_wc_sub_full = self.get_font_from_desc(worldclock_font_str, default_size=15, scale_factor=0.6)
-
-        font_wc_city_sub = self.get_font_from_desc(worldclock_font_str, default_size=16, scale_factor=0.7)
-        font_wc_time_sub = self.get_font_from_desc(worldclock_font_str, default_size=14, scale_factor=0.6)
-
-        # Monitor Fonts
-        font_mon_main_full = self.get_font_from_desc("DejaVu Sans Bold 22", default_size=22, scale_factor=1.3)
-        font_mon_sub_full = self.get_font_from_desc("DejaVu Sans Bold 16", default_size=16, scale_factor=1.0)
-
-        font_mon_main_sub = self.get_font_from_desc("DejaVu Sans Bold 18", default_size=18, scale_factor=1.0)
-        font_mon_sub_sub = self.get_font_from_desc("DejaVu Sans Bold 13", default_size=13, scale_factor=1.0)
-
-        # Media Player Fonts
-        font_media_artist_full = self.get_font_from_desc(media_artist_font_str, default_size=15, scale_factor=0.8)
-        font_media_song_full = self.get_font_from_desc(media_song_font_str, default_size=18, scale_factor=1.0)
-
-        date_fill_col = self.hex_to_rgba_tuple(date_fill_col_hex, default=(170, 200, 230, 255))
-        date_out_col = self.hex_to_rgba_tuple(date_out_col_hex, default=(0, 0, 0, 255))
-
-        time_fill_col = self.hex_to_rgba_tuple(time_fill_col_hex, default=(255, 255, 255, 255))
-        time_out_col = self.hex_to_rgba_tuple(time_out_col_hex, default=(0, 0, 0, 255))
-
-        weather_fill_col = self.hex_to_rgba_tuple(weather_fill_col_hex, default=(255, 255, 255, 255))
-        weather_out_col = self.hex_to_rgba_tuple(weather_out_col_hex, default=(0, 0, 0, 255))
-
-        wc_fill_col = self.hex_to_rgba_tuple(wc_fill_col_hex, default=(255, 255, 255, 255))
-        wc_out_col = self.hex_to_rgba_tuple(wc_out_col_hex, default=(0, 0, 0, 255))
-
-        media_solid_col = self.hex_to_rgba_tuple(media_solid_col_hex, default=(255, 255, 255, 255))
-        media_grad_start_col = self.hex_to_rgba_tuple(media_grad_start_hex, default=(0, 210, 255, 255))
-        media_grad_mid_col = self.hex_to_rgba_tuple(media_grad_mid_hex, default=(123, 44, 191, 255))
-        media_grad_end_col = self.hex_to_rgba_tuple(media_grad_end_hex, default=(255, 42, 109, 255))
-
-        media_artist_fill_col = self.hex_to_rgba_tuple(media_artist_fill_col_hex, default=(255, 255, 255, 255))
-        media_artist_out_col = self.hex_to_rgba_tuple(media_artist_out_col_hex, default=(0, 0, 0, 255))
-
-        media_song_fill_col = self.hex_to_rgba_tuple(media_song_fill_col_hex, default=(255, 255, 255, 255))
-        media_song_out_col = self.hex_to_rgba_tuple(media_song_out_col_hex, default=(0, 0, 0, 255))
-
-        white_col = (255, 255, 255, 255)
-
-        # --- Section Bounding Boxes ---
-        box_a_full = (0, 0, 200, 100)
-        box_a_top = (0, 0, 200, 50)
-        box_a_bot = (0, 50, 200, 100)
-
-        box_b_full = (200, 0, 600, 100)
-        box_b_top = (200, 0, 600, 50)
-        box_b_bot = (200, 50, 600, 100)
-
-        box_c_full = (600, 0, 800, 100)
-        box_c_top = (600, 0, 800, 50)
-        box_c_bot = (600, 50, 800, 100)
-
-        def render_section(mode, full_choice, top_choice, bot_choice, full_box, top_box, bot_box):
-            if mode == 0: # 1 Widget (Full Section)
-                if full_choice == 1: # CPU Usage
-                    self.draw_cpu_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, cpu_mode_idx)
-                elif full_choice == 2: # Date
-                    self.draw_single(draw, full_box, date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz)
-                elif full_choice == 3: # Disk Usage
-                    self.draw_disk_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
-                elif full_choice == 4: # Media Player
-                    self.draw_media_full(image, draw, full_box, font_media_artist_full, font_media_song_full, media_artist_fill_en, media_artist_fill_col, media_artist_out_en, media_artist_out_col, media_artist_out_sz, media_song_fill_en, media_song_fill_col, media_song_out_en, media_song_out_col, media_song_out_sz, media_player_idx, media_vis_style_idx, media_color_mode_idx, media_solid_col, media_grad_start_col, media_grad_mid_col, media_grad_end_col)
-                elif full_choice == 5: # Network Activity
-                    self.draw_net_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
-                elif full_choice == 6: # RAM Usage
-                    self.draw_ram_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, ram_mode_idx)
-                elif full_choice == 7: # Stacked Date & Time
-                    self.draw_stacked(draw, full_box, date_str, time_str, font_date, font_time, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
-                elif full_choice == 8: # Time
-                    self.draw_single(draw, full_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
-                elif full_choice == 9: # Weather
-                    self.draw_weather(image, draw, full_box, font_weather_full, font_loc_full, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
-                elif full_choice == 10: # World Clock
-                    self.draw_world_clock(draw, full_box, font_wc_city_full, font_wc_time_full, font_wc_sub_full, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
-            else: # 2 Widgets (Split Top / Bottom)
-                # Top Sub-slot
-                if top_choice == 1: # CPU Usage
-                    self.draw_cpu_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, cpu_mode_idx)
-                elif top_choice == 2: # Date
-                    self.draw_single(draw, top_box, date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz)
-                elif top_choice == 3: # Disk Usage
-                    self.draw_disk_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
-                elif top_choice == 4: # Media Player
-                    self.draw_media_sub(image, draw, top_box, media_player_idx, media_vis_style_idx, media_color_mode_idx, media_solid_col, media_grad_start_col, media_grad_mid_col, media_grad_end_col)
-                elif top_choice == 5: # Network Activity
-                    self.draw_net_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
-                elif top_choice == 6: # RAM Usage
-                    self.draw_ram_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, ram_mode_idx)
-                elif top_choice == 7: # Time
-                    self.draw_single(draw, top_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
-                elif top_choice == 8: # Weather
-                    self.draw_weather(image, draw, top_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
-                elif top_choice == 9: # World Clock
-                    self.draw_world_clock(draw, top_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
-
-                # Bottom Sub-slot
-                if bot_choice == 1: # CPU Usage
-                    self.draw_cpu_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, cpu_mode_idx)
-                elif bot_choice == 2: # Date
-                    self.draw_single(draw, bot_box, date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz)
-                elif bot_choice == 3: # Disk Usage
-                    self.draw_disk_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
-                elif bot_choice == 4: # Media Player
-                    self.draw_media_sub(image, draw, bot_box, media_player_idx, media_vis_style_idx, media_color_mode_idx, media_solid_col, media_grad_start_col, media_grad_mid_col, media_grad_end_col)
-                elif bot_choice == 5: # Network Activity
-                    self.draw_net_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
-                elif bot_choice == 6: # RAM Usage
-                    self.draw_ram_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, ram_mode_idx)
-                elif bot_choice == 7: # Time
-                    self.draw_single(draw, bot_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
-                elif bot_choice == 8: # Weather
-                    self.draw_weather(image, draw, bot_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
-                elif bot_choice == 9: # World Clock
-                    self.draw_world_clock(draw, bot_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
-
-        render_section(sec_a_mode, sec_a_full, sec_a_top, sec_a_bot, box_a_full, box_a_top, box_a_bot)
-        render_section(sec_b_mode, sec_b_full, sec_b_top, sec_b_bot, box_b_full, box_b_top, box_b_bot)
-        render_section(sec_c_mode, sec_c_full, sec_c_top, sec_c_bot, box_c_full, box_c_top, box_c_bot)
-
-        self.render_to_input(image)
+            if self._was_locked:
+                self._was_locked = False
+                self.last_rendered_key = ""
+                self.trigger_redraw()
+            return False
 
     def render_to_input(self, image: Image.Image) -> None:
-        if self.handle_lock_blanking():
-            return
         if not hasattr(self, "page") or self.page is None:
             return
 
@@ -4545,6 +3260,14 @@ class TouchBarInfoAction(ActionBase):
                     rel_p = os.path.join(gl.DATA_PATH, custom_bg)
                     if os.path.isfile(rel_p):
                         resolved_bg_path = rel_p
+                elif hasattr(gl, "asset_manager_backend") and gl.asset_manager_backend is not None:
+                    try:
+                        if gl.asset_manager_backend.has_by_internal_path(custom_bg):
+                            asset_data = gl.asset_manager_backend.get_by_internal_path(custom_bg)
+                            if asset_data and "path" in asset_data:
+                                resolved_bg_path = asset_data["path"]
+                    except Exception:
+                        pass
 
             if not resolved_bg_path and hasattr(self.page, "get_background_image"):
                 bg_p = self.page.get_background_image(self.input_ident, self.state)
@@ -4557,6 +3280,9 @@ class TouchBarInfoAction(ActionBase):
                         self._cached_bg_image = bg_img.convert("RGBA").resize(image.size, Image.Resampling.LANCZOS)
                     self._cached_bg_path = resolved_bg_path
                 final_image = Image.alpha_composite(self._cached_bg_image, image)
+            else:
+                base = Image.new("RGBA", (800, 100), (0, 0, 0, 255))
+                final_image = Image.alpha_composite(base, image)
         except Exception as e:
             log.error(f"TouchBarInfo: Error compositing custom background image: {e}")
 
@@ -4577,3 +3303,270 @@ class TouchBarInfoAction(ActionBase):
                     c_input.update()
                 except Exception as e:
                     log.error(f"TouchBarInfo: Error updating touchscreen controller: {e}")
+
+    def update_system_stats(self):
+        try:
+            cpu = psutil.cpu_percent(interval=None)
+            self.cpu_history.pop(0)
+            self.cpu_history.append(cpu)
+
+            mem = psutil.virtual_memory()
+            self.ram_history.pop(0)
+            self.ram_history.append(mem.percent)
+
+            self.process_count = len(psutil.pids())
+
+            net = psutil.net_io_counters()
+            now = datetime.datetime.now().timestamp()
+            if self.last_net_io is not None:
+                last_time, last_bytes_sent, last_bytes_recv = self.last_net_io
+                dt = max(0.1, now - last_time)
+                self.net_tx_rate = max(0.0, (net.bytes_sent - last_bytes_sent) / dt)
+                self.net_rx_rate = max(0.0, (net.bytes_recv - last_bytes_recv) / dt)
+                total_rate_kb = (self.net_tx_rate + self.net_rx_rate) / 1024.0
+                self.net_history.pop(0)
+                self.net_history.append(total_rate_kb)
+            self.last_net_io = (now, net.bytes_sent, net.bytes_recv)
+        except Exception as e:
+            log.error(f"TouchBarInfo: Error updating system stats: {e}")
+
+    def on_ready(self):
+        self.load_config_defaults()
+        self.fetch_weather_async()
+        self.update_system_stats()
+        self.update_media_state(poll_dbus=True)
+        self.update_display()
+        if self.is_media_active_and_playing():
+            self.start_anim_timer()
+
+        def background_timer():
+            while True:
+                time.sleep(1.0)
+                if not self.handle_lock_blanking():
+                    self.update_system_stats()
+                    self.update_media_state(poll_dbus=True)
+                    self.fetch_weather_async()
+                    if self.is_media_active_and_playing():
+                        GLib.idle_add(self.start_anim_timer)
+                    else:
+                        GLib.idle_add(self.stop_anim_timer)
+                    GLib.idle_add(self.update_display)
+
+        Thread(target=background_timer, daemon=True).start()
+
+    def on_key_down(self):
+        self.fetch_weather_async(force=True)
+        self.update_display()
+
+    def trigger_redraw(self):
+        self.last_rendered_key = ""
+        if hasattr(self, "_font_cache"):
+            self._font_cache.clear()
+        self.update_display()
+
+    def schedule_update_display(self):
+        if getattr(self, "_update_scheduled", False):
+            return
+        self._update_scheduled = True
+
+        def _do_update():
+            self._update_scheduled = False
+            self.trigger_redraw()
+            return False
+
+        GLib.timeout_add(50, _do_update)
+
+    def update_display(self):
+        if self.handle_lock_blanking():
+            return
+
+        settings = self.get_settings() or {}
+        now = datetime.datetime.now()
+
+        # Canvas & Background (Transparent overlay layer for widgets)
+        image = Image.new("RGBA", (800, 100), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+
+        # Default system monitor fonts
+        font_mon_main_full = self.get_font_from_desc("DejaVu Sans Bold 20", default_size=20)
+        font_mon_sub_full = self.get_font_from_desc("DejaVu Sans Bold 14", default_size=14)
+        font_mon_main_sub = self.get_font_from_desc("DejaVu Sans Bold 13", default_size=13)
+        font_mon_sub_sub = self.get_font_from_desc("DejaVu Sans Bold 11", default_size=11)
+        white_col = (255, 255, 255, 255)
+
+        # Helper to render a specific widget inside a slot box
+        def render_slot_widget(slot_key: str, widget_choice: int, box: tuple[int, int, int, int], is_full: bool, align: str):
+            if widget_choice == 0:
+                return # Blank / None
+
+            if widget_choice == 1: # CPU Usage
+                cpu_mode_idx = self.get_slot_setting(settings, slot_key, "cpu_mode_idx", 0)
+                font_main = font_mon_main_full if is_full else font_mon_main_sub
+                font_sub = font_mon_sub_full if is_full else font_mon_sub_sub
+                self.draw_cpu_widget(image, draw, box, font_main, font_sub, True, white_col, False, white_col, 2, cpu_mode_idx, align=align)
+
+            elif widget_choice == 2: # Date
+                date_fmt_idx = self.get_slot_setting(settings, slot_key, "date_format_idx", 0)
+                fmt_str = self.date_format_options[min(date_fmt_idx, len(self.date_format_options) - 1)][0]
+                date_str = now.strftime(fmt_str)
+                date_font_str = self.get_slot_setting(settings, slot_key, "date_font_str", "DejaVu Sans Bold 25")
+                font_date = self.get_font_from_desc(date_font_str, default_size=25 if is_full else 16)
+                fill_en = self.get_slot_setting(settings, slot_key, "date_fill_enabled", True)
+                fill_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "date_font_color", "#AAC8E6FF"), (170, 200, 230, 255))
+                out_en = self.get_slot_setting(settings, slot_key, "date_outline_enabled", False)
+                out_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "date_outline_color", "#000000FF"), (0, 0, 0, 255))
+                out_sz = self.get_slot_setting(settings, slot_key, "date_outline_size", 2)
+                self.draw_single(draw, box, date_str, font_date, fill_en, fill_col, out_en, out_col, out_sz, align=align)
+
+            elif widget_choice == 3: # Disk Usage
+                disk_mode_idx = self.get_slot_setting(settings, slot_key, "disk_mode_idx", 0)
+                disk_mount_path = self.get_slot_setting(settings, slot_key, "disk_mount_path", "/")
+                font_main = font_mon_main_full if is_full else font_mon_main_sub
+                font_sub = font_mon_sub_full if is_full else font_mon_sub_sub
+                self.draw_disk_widget(image, draw, box, font_main, font_sub, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_path, align=align)
+
+            elif widget_choice == 4: # Media Player
+                vis_style = self.get_slot_setting(settings, slot_key, "media_vis_style_idx", 0)
+                color_mode = self.get_slot_setting(settings, slot_key, "media_color_mode_idx", 0)
+                solid_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "media_solid_color", "#FFFFFFFF"), (255, 255, 255, 255))
+                grad_start = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "media_grad_start", "#00D2FFFF"), (0, 210, 255, 255))
+                grad_mid = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "media_grad_mid", "#7B2CBFFF"), (123, 44, 191, 255))
+                grad_end = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "media_grad_end", "#FF2A6DFF"), (255, 42, 109, 255))
+
+                if is_full:
+                    s_font_str = self.get_slot_setting(settings, slot_key, "media_song_font_str", "DejaVu Sans Bold 18")
+                    font_song = self.get_font_from_desc(s_font_str, default_size=18, scale_factor=1.0)
+                    s_fill_en = self.get_slot_setting(settings, slot_key, "media_song_fill_enabled", True)
+                    s_fill_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "media_song_font_color", "#FFFFFFFF"), (255, 255, 255, 255))
+                    s_out_en = self.get_slot_setting(settings, slot_key, "media_song_outline_enabled", False)
+                    s_out_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "media_song_outline_color", "#000000FF"), (0, 0, 0, 255))
+                    s_out_sz = self.get_slot_setting(settings, slot_key, "media_song_outline_size", 2)
+
+                    a_font_str = self.get_slot_setting(settings, slot_key, "media_artist_font_str", "DejaVu Sans Bold 18")
+                    font_artist = self.get_font_from_desc(a_font_str, default_size=15, scale_factor=0.8)
+                    a_fill_en = self.get_slot_setting(settings, slot_key, "media_artist_fill_enabled", True)
+                    a_fill_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "media_artist_font_color", "#FFFFFFFF"), (255, 255, 255, 255))
+                    a_out_en = self.get_slot_setting(settings, slot_key, "media_artist_outline_enabled", False)
+                    a_out_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "media_artist_outline_color", "#000000FF"), (0, 0, 0, 255))
+                    a_out_sz = self.get_slot_setting(settings, slot_key, "media_artist_outline_size", 2)
+
+                    self.draw_media_full(image, draw, box, font_artist, font_song, a_fill_en, a_fill_col, a_out_en, a_out_col, a_out_sz, s_fill_en, s_fill_col, s_out_en, s_out_col, s_out_sz, 0, vis_style, color_mode, solid_col, grad_start, grad_mid, grad_end, align=align)
+                else:
+                    self.draw_media_sub(image, draw, box, 0, vis_style, color_mode, solid_col, grad_start, grad_mid, grad_end, align=align)
+
+                if self.is_media_active_and_playing():
+                    self.start_anim_timer()
+
+            elif widget_choice == 5: # Network Activity
+                net_mode_idx = self.get_slot_setting(settings, slot_key, "net_mode_idx", 0)
+                net_unit_idx = self.get_slot_setting(settings, slot_key, "net_unit_idx", 0)
+                font_main = font_mon_main_full if is_full else font_mon_main_sub
+                font_sub = font_mon_sub_full if is_full else font_mon_sub_sub
+                self.draw_net_widget(image, draw, box, font_main, font_sub, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx, align=align)
+
+            elif widget_choice == 6: # RAM Usage
+                ram_mode_idx = self.get_slot_setting(settings, slot_key, "ram_mode_idx", 0)
+                font_main = font_mon_main_full if is_full else font_mon_main_sub
+                font_sub = font_mon_sub_full if is_full else font_mon_sub_sub
+                self.draw_ram_widget(image, draw, box, font_main, font_sub, True, white_col, False, white_col, 2, ram_mode_idx, align=align)
+
+            elif widget_choice == 7 and is_full: # Stacked Date & Time
+                date_fmt_idx = self.get_slot_setting(settings, slot_key, "date_format_idx", 0)
+                fmt_str = self.date_format_options[min(date_fmt_idx, len(self.date_format_options) - 1)][0]
+                date_str = now.strftime(fmt_str)
+                d_font_str = self.get_slot_setting(settings, slot_key, "date_font_str", "DejaVu Sans Bold 25")
+                font_date = self.get_font_from_desc(d_font_str, default_size=25)
+                d_fill_en = self.get_slot_setting(settings, slot_key, "date_fill_enabled", True)
+                d_fill_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "date_font_color", "#AAC8E6FF"), (170, 200, 230, 255))
+                d_out_en = self.get_slot_setting(settings, slot_key, "date_outline_enabled", False)
+                d_out_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "date_outline_color", "#000000FF"), (0, 0, 0, 255))
+                d_out_sz = self.get_slot_setting(settings, slot_key, "date_outline_size", 2)
+
+                use_24h = self.get_slot_setting(settings, slot_key, "use_24h", False)
+                show_sec = self.get_slot_setting(settings, slot_key, "show_seconds", False)
+                time_fmt = ("%H:%M:%S" if show_sec else "%H:%M") if use_24h else ("%I:%M:%S %p" if show_sec else "%I:%M %p")
+                time_str = now.strftime(time_fmt).lstrip("0") if not use_24h else now.strftime(time_fmt)
+                t_font_str = self.get_slot_setting(settings, slot_key, "time_font_str", "DejaVu Sans Bold 45")
+                font_time = self.get_font_from_desc(t_font_str, default_size=45)
+                t_fill_en = self.get_slot_setting(settings, slot_key, "time_fill_enabled", True)
+                t_fill_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "time_font_color", "#FFFFFFFF"), (255, 255, 255, 255))
+                t_out_en = self.get_slot_setting(settings, slot_key, "time_outline_enabled", False)
+                t_out_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "time_outline_color", "#000000FF"), (0, 0, 0, 255))
+                t_out_sz = self.get_slot_setting(settings, slot_key, "time_outline_size", 2)
+
+                self.draw_stacked(draw, box, date_str, time_str, font_date, font_time, d_fill_en, d_fill_col, d_out_en, d_out_col, d_out_sz, t_fill_en, t_fill_col, t_out_en, t_out_col, t_out_sz, align=align)
+
+            elif (widget_choice == 8 and is_full) or (widget_choice == 7 and not is_full): # Time
+                use_24h = self.get_slot_setting(settings, slot_key, "use_24h", False)
+                show_sec = self.get_slot_setting(settings, slot_key, "show_seconds", False)
+                time_fmt = ("%H:%M:%S" if show_sec else "%H:%M") if use_24h else ("%I:%M:%S %p" if show_sec else "%I:%M %p")
+                time_str = now.strftime(time_fmt).lstrip("0") if not use_24h else now.strftime(time_fmt)
+                t_font_str = self.get_slot_setting(settings, slot_key, "time_font_str", "DejaVu Sans Bold 45")
+                font_time = self.get_font_from_desc(t_font_str, default_size=45 if is_full else 22)
+                t_fill_en = self.get_slot_setting(settings, slot_key, "time_fill_enabled", True)
+                t_fill_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "time_font_color", "#FFFFFFFF"), (255, 255, 255, 255))
+                t_out_en = self.get_slot_setting(settings, slot_key, "time_outline_enabled", False)
+                t_out_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "time_outline_color", "#000000FF"), (0, 0, 0, 255))
+                t_out_sz = self.get_slot_setting(settings, slot_key, "time_outline_size", 2)
+                self.draw_single(draw, box, time_str, font_time, t_fill_en, t_fill_col, t_out_en, t_out_col, t_out_sz, align=align)
+
+            elif (widget_choice == 9 and is_full) or (widget_choice == 8 and not is_full): # Weather
+                lat = self.get_slot_setting(settings, slot_key, "weather_lat", "25.7617")
+                lon = self.get_slot_setting(settings, slot_key, "weather_lon", "-80.1918")
+                unit_idx = self.get_slot_setting(settings, slot_key, "weather_unit_idx", 0)
+                temp_unit = "fahrenheit" if unit_idx == 0 else "celsius"
+                c_key = f"{lat}_{lon}_{temp_unit}"
+                slot_cache = self.weather_caches.get(c_key, self.weather_cache)
+
+                w_font_str = self.get_slot_setting(settings, slot_key, "weather_font_str", "DejaVu Sans Bold 22")
+                font_weather = self.get_font_from_desc(w_font_str, default_size=22, scale_factor=1.4 if is_full else 1.0)
+                font_loc = self.get_font_from_desc(w_font_str, default_size=22, scale_factor=1.0 if is_full else 0.75)
+                w_fill_en = self.get_slot_setting(settings, slot_key, "weather_fill_enabled", True)
+                w_fill_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "weather_font_color", "#FFFFFFFF"), (255, 255, 255, 255))
+                w_out_en = self.get_slot_setting(settings, slot_key, "weather_outline_enabled", False)
+                w_out_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "weather_outline_color", "#000000FF"), (0, 0, 0, 255))
+                w_out_sz = self.get_slot_setting(settings, slot_key, "weather_outline_size", 2)
+                self.draw_weather(image, draw, box, font_weather, font_loc, w_fill_en, w_fill_col, w_out_en, w_out_col, w_out_sz, slot_cache, align=align)
+
+            elif (widget_choice == 10 and is_full) or (widget_choice == 9 and not is_full): # World Clock
+                city_idx = self.get_slot_setting(settings, slot_key, "worldclock_city_idx", 0)
+                clock_view = self.get_slot_setting(settings, slot_key, "worldclock_view", 0)
+                custom_label = self.get_slot_setting(settings, slot_key, "worldclock_custom_label", "")
+                custom_tz = self.get_slot_setting(settings, slot_key, "worldclock_custom_tz", "America/New_York")
+                show_sec = self.get_slot_setting(settings, slot_key, "worldclock_show_seconds", False)
+                show_offset = self.get_slot_setting(settings, slot_key, "worldclock_show_offset", True)
+                wc_font_str = self.get_slot_setting(settings, slot_key, "worldclock_font_str", "DejaVu Sans Bold 25")
+                font_city = self.get_font_from_desc(wc_font_str, default_size=20 if is_full else 16, scale_factor=0.8 if is_full else 0.7)
+                font_time = self.get_font_from_desc(wc_font_str, default_size=32 if is_full else 14, scale_factor=1.2 if is_full else 0.6)
+                font_sub = self.get_font_from_desc(wc_font_str, default_size=15 if is_full else 14, scale_factor=0.6 if is_full else 0.6)
+                wc_fill_en = self.get_slot_setting(settings, slot_key, "worldclock_fill_enabled", True)
+                wc_fill_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "worldclock_font_color", "#FFFFFFFF"), (255, 255, 255, 255))
+                wc_out_en = self.get_slot_setting(settings, slot_key, "worldclock_outline_enabled", False)
+                wc_out_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "worldclock_outline_color", "#000000FF"), (0, 0, 0, 255))
+                wc_out_sz = self.get_slot_setting(settings, slot_key, "worldclock_outline_size", 2)
+                use_24h = self.get_slot_setting(settings, slot_key, "use_24h", False)
+                self.draw_world_clock(draw, box, font_city, font_time, font_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, city_idx, custom_label, custom_tz, show_offset, use_24h, show_sec, clock_view, align=align)
+
+        # Section Specifications: (Prefix, Alignment, Full Box, Top Box, Bot Box)
+        sections = [
+            ("sec_a", "left", (0, 0, 200, 100), (0, 0, 200, 50), (0, 50, 200, 100)),
+            ("sec_b", "center", (200, 0, 600, 100), (200, 0, 600, 50), (200, 50, 600, 100)),
+            ("sec_c", "left", (600, 0, 800, 100), (600, 0, 800, 50), (600, 50, 800, 100))
+        ]
+
+        for prefix, align, full_box, top_box, bot_box in sections:
+            sec_mode = self.get_slot_setting(settings, prefix, "mode", 0)
+            if sec_mode == 0: # Full mode
+                full_choice = self.get_slot_setting(settings, prefix, "full_widget", 0)
+                render_slot_widget(f"{prefix}_full", full_choice, full_box, is_full=True, align=align)
+            else: # Split mode
+                top_choice = self.get_slot_setting(settings, prefix, "top_widget", 0)
+                bot_choice = self.get_slot_setting(settings, prefix, "bottom_widget", 0)
+                render_slot_widget(f"{prefix}_top", top_choice, top_box, is_full=False, align=align)
+                render_slot_widget(f"{prefix}_bot", bot_choice, bot_box, is_full=False, align=align)
+
+        self.render_to_input(image)
+        try:
+            self.set_media(image=image)
+        except Exception:
+            pass
