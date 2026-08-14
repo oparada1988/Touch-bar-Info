@@ -220,9 +220,10 @@ class TouchBarInfoAction(ActionBase):
         ]
 
         self.date_format_options = [
+            ("%b %d, %Y", "Oct 24, 2026"),
+            ("%B %d, %Y", "October 24, 2026"),
             ("%a, %b %d", "Mon, Oct 24"),
             ("%A, %b %d", "Monday, Oct 24"),
-            ("%b %d, %Y", "Oct 24, 2026"),
             ("%m/%d/%Y", "10/24/2026"),
             ("%d/%m/%Y", "24/10/2026"),
             ("%Y-%m-%d", "2026-10-24")
@@ -682,7 +683,17 @@ class TouchBarInfoAction(ActionBase):
                     title=self.get_locale_text("actions.touchbar-info.show-seconds.label", "Show Seconds"),
                     subtitle=self.get_locale_text("actions.touchbar-info.show-seconds.subtitle", "Include seconds in the displayed time")
                 )
-                sw_sec.connect("notify::active", lambda sw, pspec, sk=slot_key: self.set_slot_setting(sk, "show_seconds", sw.get_active()))
+                def on_time_sec_toggled(sw, pspec, sk=slot_key, fb=font_btn):
+                    is_sec = sw.get_active()
+                    self.set_slot_setting(sk, "show_seconds", is_sec)
+                    if not sk.endswith("_full"):
+                        curr_f = self.get_slot_setting(self.get_settings() or {}, sk, "time_font_str", "")
+                        if not curr_f or curr_f in ["DejaVu Sans Bold 36", "DejaVu Sans Bold 27"]:
+                            new_f = "DejaVu Sans Bold 27" if is_sec else "DejaVu Sans Bold 36"
+                            self.set_slot_setting(sk, "time_font_str", new_f)
+                            fb.set_font(new_f)
+
+                sw_sec.connect("notify::active", on_time_sec_toggled)
 
                 font_row = Adw.ActionRow(
                     title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
@@ -1988,10 +1999,14 @@ class TouchBarInfoAction(ActionBase):
                 if t.get("exp") is not None:
                     target_t_groups.append(t["exp"])
 
-                default_time_font = "DejaVu Sans Bold 45" if slot_key.endswith("_full") else "DejaVu Sans Bold 36"
+                is_time_sec = self.get_slot_setting(settings, slot_key, "show_seconds", False)
+                if slot_key.endswith("_full"):
+                    default_time_font = "DejaVu Sans Bold 45"
+                else:
+                    default_time_font = "DejaVu Sans Bold 27" if is_time_sec else "DejaVu Sans Bold 36"
                 for grp in target_t_groups:
                     grp["sw_24h"].set_active(self.get_slot_setting(settings, slot_key, "use_24h", False))
-                    grp["sw_sec"].set_active(self.get_slot_setting(settings, slot_key, "show_seconds", False))
+                    grp["sw_sec"].set_active(is_time_sec)
                     grp["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "time_font_str", default_time_font))
                     time_fill_en = self.get_slot_setting(settings, slot_key, "time_fill_enabled", True)
                     grp["fill_sw"].set_active(time_fill_en)
@@ -4368,9 +4383,20 @@ class TouchBarInfoAction(ActionBase):
                 show_sec = self.get_slot_setting(settings, slot_key, "show_seconds", False)
                 time_fmt = ("%H:%M:%S" if show_sec else "%H:%M") if use_24h else ("%I:%M:%S %p" if show_sec else "%I:%M %p")
                 time_str = now.strftime(time_fmt).lstrip("0") if not use_24h else now.strftime(time_fmt)
-                default_time_font = "DejaVu Sans Bold 45" if is_full else "DejaVu Sans Bold 36"
+                if is_full:
+                    default_time_font = "DejaVu Sans Bold 45"
+                    default_sz = 45
+                else:
+                    default_time_font = "DejaVu Sans Bold 27" if show_sec else "DejaVu Sans Bold 36"
+                    default_sz = 27 if show_sec else 36
+
                 t_font_str = self.get_slot_setting(settings, slot_key, "time_font_str", default_time_font)
-                font_time = self.get_font_from_desc(t_font_str, default_size=45 if is_full else 36)
+                if not is_full and show_sec and t_font_str == "DejaVu Sans Bold 36":
+                    t_font_str = "DejaVu Sans Bold 27"
+                elif not is_full and not show_sec and t_font_str == "DejaVu Sans Bold 27":
+                    t_font_str = "DejaVu Sans Bold 36"
+
+                font_time = self.get_font_from_desc(t_font_str, default_size=default_sz)
                 t_fill_en = self.get_slot_setting(settings, slot_key, "time_fill_enabled", True)
                 t_fill_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "time_font_color", "#FFFFFFFF"), (255, 255, 255, 255))
                 t_out_en = self.get_slot_setting(settings, slot_key, "time_outline_enabled", False)
