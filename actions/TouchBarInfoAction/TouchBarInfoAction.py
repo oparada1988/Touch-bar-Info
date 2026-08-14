@@ -162,25 +162,25 @@ class TouchBarInfoAction(ActionBase):
             self.get_locale_text("actions.touchbar-info.widget.cpu", "CPU Usage"),
             self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
             self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.media", "Media Player"),
             self.get_locale_text("actions.touchbar-info.widget.net", "Network Activity"),
             self.get_locale_text("actions.touchbar-info.widget.ram", "RAM Usage"),
             self.get_locale_text("actions.touchbar-info.widget.stacked", "Stacked Date and Time"),
             self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
             self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
-            self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock"),
-            self.get_locale_text("actions.touchbar-info.widget.media", "Media Player")
+            self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock")
         ]
         self.split_widget_options = [
             self.get_locale_text("actions.touchbar-info.widget.none", "None (Empty)"),
             self.get_locale_text("actions.touchbar-info.widget.cpu", "CPU Usage"),
             self.get_locale_text("actions.touchbar-info.widget.date", "Date"),
             self.get_locale_text("actions.touchbar-info.widget.disk", "Disk Usage"),
+            self.get_locale_text("actions.touchbar-info.widget.media", "Media Player"),
             self.get_locale_text("actions.touchbar-info.widget.net", "Network Activity"),
             self.get_locale_text("actions.touchbar-info.widget.ram", "RAM Usage"),
             self.get_locale_text("actions.touchbar-info.widget.time", "Time"),
             self.get_locale_text("actions.touchbar-info.widget.weather", "Weather"),
-            self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock"),
-            self.get_locale_text("actions.touchbar-info.widget.media", "Media Player")
+            self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock")
         ]
         self.available_media_players = self.get_available_media_players()
         self.media_player_options = [label for (pid, label) in self.available_media_players]
@@ -293,9 +293,9 @@ class TouchBarInfoAction(ActionBase):
         sec_c_top = settings.get("sec_c_top_widget", 0)
         sec_c_bot = settings.get("sec_c_bottom_widget", 0)
 
-        is_active = (sec_a_mode == 0 and sec_a_full == 10) or (sec_a_mode == 1 and (sec_a_top == 9 or sec_a_bot == 9)) or \
-                    (sec_b_mode == 0 and sec_b_full == 10) or (sec_b_mode == 1 and (sec_b_top == 9 or sec_b_bot == 9)) or \
-                    (sec_c_mode == 0 and sec_c_full == 10) or (sec_c_mode == 1 and (sec_c_top == 9 or sec_c_bot == 9))
+        is_active = (sec_a_mode == 0 and sec_a_full == 4) or (sec_a_mode == 1 and (sec_a_top == 4 or sec_a_bot == 4)) or \
+                    (sec_b_mode == 0 and sec_b_full == 4) or (sec_b_mode == 1 and (sec_b_top == 4 or sec_b_bot == 4)) or \
+                    (sec_c_mode == 0 and sec_c_full == 4) or (sec_c_mode == 1 and (sec_c_top == 4 or sec_c_bot == 4))
 
         return is_active and self.media_state.get("status") == "Playing"
 
@@ -1411,8 +1411,8 @@ class TouchBarInfoAction(ActionBase):
                     for r in media_ctrls["all_rows"]: r.set_visible(False)
                     return
 
-                # Date Visibility (Full: 2 [Date], 6 [Stacked] | Split: 2 [Date])
-                show_date = (widget_choice in [2, 6]) if is_full_mode else (widget_choice == 2)
+                # Date Visibility (Full: 2 [Date], 7 [Stacked] | Split: 2 [Date])
+                show_date = (widget_choice in [2, 7]) if is_full_mode else (widget_choice == 2)
                 date_ctrls["date_hdr"].set_visible(show_date)
                 date_ctrls["fmt_combo"].set_visible(show_date)
                 date_ctrls["font_row"].set_visible(show_date)
@@ -1425,8 +1425,8 @@ class TouchBarInfoAction(ActionBase):
                 date_ctrls["out_size_spin"].set_visible(show_date)
                 date_ctrls["out_size_spin"].set_sensitive(show_date and date_ctrls["out_sw"].get_active())
 
-                # Time Visibility (Full: 6 [Stacked], 7 [Time] | Split: 6 [Time])
-                show_time = (widget_choice in [6, 7]) if is_full_mode else (widget_choice == 6)
+                # Time Visibility (Full: 7 [Stacked], 8 [Time] | Split: 7 [Time])
+                show_time = (widget_choice in [7, 8]) if is_full_mode else (widget_choice == 7)
                 time_ctrls["time_hdr"].set_visible(show_time)
                 time_ctrls["sw_24h"].set_visible(show_time)
                 time_ctrls["sw_sec"].set_visible(show_time)
@@ -1440,8 +1440,8 @@ class TouchBarInfoAction(ActionBase):
                 time_ctrls["out_size_spin"].set_visible(show_time)
                 time_ctrls["out_size_spin"].set_sensitive(show_time and time_ctrls["out_sw"].get_active())
 
-                # Weather Visibility (Full: 8 | Split: 7)
-                show_weather = (widget_choice == 8) if is_full_mode else (widget_choice == 7)
+                # Weather Visibility (Full: 9 | Split: 8)
+                show_weather = (widget_choice == 9) if is_full_mode else (widget_choice == 8)
                 weather_ctrls["loc_entry"].set_visible(show_weather)
                 weather_ctrls["res_combo"].set_visible(show_weather and len(self.search_results_data) > 0)
                 weather_ctrls["unit_combo"].set_visible(show_weather)
@@ -1464,16 +1464,28 @@ class TouchBarInfoAction(ActionBase):
                 show_disk = (widget_choice == 3) if is_full_mode else (widget_choice == 3)
                 for r in disk_ctrls["all_rows"]: r.set_visible(show_disk)
 
-                # Network Visibility (Full: 4 | Split: 4)
-                show_net = (widget_choice == 4) if is_full_mode else (widget_choice == 4)
+                # Media Player Visibility (Full: 4 | Split: 4)
+                show_media = (widget_choice == 4) if is_full_mode else (widget_choice == 4)
+                is_gradient = (media_ctrls["color_mode_combo"].get_selected() == 1)
+
+                media_ctrls["media_hdr"].set_visible(show_media)
+                media_ctrls["player_combo"].set_visible(show_media)
+                media_ctrls["vis_combo"].set_visible(show_media)
+                media_ctrls["color_mode_combo"].set_visible(show_media)
+                media_ctrls["solid_color_row"].set_visible(show_media and not is_gradient)
+                media_ctrls["grad_start_row"].set_visible(show_media and is_gradient)
+                media_ctrls["grad_end_row"].set_visible(show_media and is_gradient)
+
+                # Network Visibility (Full: 5 | Split: 5)
+                show_net = (widget_choice == 5) if is_full_mode else (widget_choice == 5)
                 for r in net_ctrls["all_rows"]: r.set_visible(show_net)
 
-                # RAM Visibility (Full: 5 | Split: 5)
-                show_ram = (widget_choice == 5) if is_full_mode else (widget_choice == 5)
+                # RAM Visibility (Full: 6 | Split: 6)
+                show_ram = (widget_choice == 6) if is_full_mode else (widget_choice == 6)
                 for r in ram_ctrls["all_rows"]: r.set_visible(show_ram)
 
-                # World Clock Visibility (Full: 9 | Split: 8)
-                show_wc = (widget_choice == 9) if is_full_mode else (widget_choice == 8)
+                # World Clock Visibility (Full: 10 | Split: 9)
+                show_wc = (widget_choice == 10) if is_full_mode else (widget_choice == 9)
                 worldclock_ctrls["city_combo"].set_visible(show_wc)
                 is_custom_city = (worldclock_ctrls["city_combo"].get_selected() == len(self.worldclock_cities) - 1)
                 worldclock_ctrls["view_combo"].set_visible(show_wc)
@@ -1490,18 +1502,6 @@ class TouchBarInfoAction(ActionBase):
                 worldclock_ctrls["out_color_row"].set_sensitive(show_wc and worldclock_ctrls["out_sw"].get_active())
                 worldclock_ctrls["out_size_spin"].set_visible(show_wc)
                 worldclock_ctrls["out_size_spin"].set_sensitive(show_wc and worldclock_ctrls["out_sw"].get_active())
-
-                # Media Player Visibility (Full: 10 | Split: 9)
-                show_media = (widget_choice == 10) if is_full_mode else (widget_choice == 9)
-                is_gradient = (media_ctrls["color_mode_combo"].get_selected() == 1)
-
-                media_ctrls["media_hdr"].set_visible(show_media)
-                media_ctrls["player_combo"].set_visible(show_media)
-                media_ctrls["vis_combo"].set_visible(show_media)
-                media_ctrls["color_mode_combo"].set_visible(show_media)
-                media_ctrls["solid_color_row"].set_visible(show_media and not is_gradient)
-                media_ctrls["grad_start_row"].set_visible(show_media and is_gradient)
-                media_ctrls["grad_end_row"].set_visible(show_media and is_gradient)
 
                 if is_full_mode:
                     media_ctrls["artist_font_row"].set_visible(show_media)
@@ -4328,9 +4328,9 @@ class TouchBarInfoAction(ActionBase):
         latest_cpu = self.cpu_history[-1] if self.cpu_history else 0.0
         latest_ram = self.ram_history[-1] if self.ram_history else 0.0
 
-        is_media_active = (sec_a_mode == 0 and sec_a_full == 10) or (sec_a_mode == 1 and (sec_a_top == 9 or sec_a_bot == 9)) or \
-                          (sec_b_mode == 0 and sec_b_full == 10) or (sec_b_mode == 1 and (sec_b_top == 9 or sec_b_bot == 9)) or \
-                          (sec_c_mode == 0 and sec_c_full == 10) or (sec_c_mode == 1 and (sec_c_top == 9 or sec_c_bot == 9))
+        is_media_active = (sec_a_mode == 0 and sec_a_full == 4) or (sec_a_mode == 1 and (sec_a_top == 4 or sec_a_bot == 4)) or \
+                          (sec_b_mode == 0 and sec_b_full == 4) or (sec_b_mode == 1 and (sec_b_top == 4 or sec_b_bot == 4)) or \
+                          (sec_c_mode == 0 and sec_c_full == 4) or (sec_c_mode == 1 and (sec_c_top == 4 or sec_c_bot == 4))
 
         media_key = f"{self.vis_tick}|{self.media_state.get('title','')}|{self.media_state.get('artist','')}|{self.media_state.get('status','')}|{self.media_state.get('art_url','')}|{media_player_idx}|{media_vis_style_idx}|{media_color_mode_idx}|{media_solid_col_hex}|{media_grad_start_hex}|{media_grad_end_hex}" if is_media_active else "nomedia"
 
@@ -4419,20 +4419,20 @@ class TouchBarInfoAction(ActionBase):
                     self.draw_single(draw, full_box, date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz)
                 elif full_choice == 3: # Disk Usage
                     self.draw_disk_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
-                elif full_choice == 4: # Network Activity
-                    self.draw_net_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
-                elif full_choice == 5: # RAM Usage
-                    self.draw_ram_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, ram_mode_idx)
-                elif full_choice == 6: # Stacked Date & Time
-                    self.draw_stacked(draw, full_box, date_str, time_str, font_date, font_time, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
-                elif full_choice == 7: # Time
-                    self.draw_single(draw, full_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
-                elif full_choice == 8: # Weather
-                    self.draw_weather(image, draw, full_box, font_weather_full, font_loc_full, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
-                elif full_choice == 9: # World Clock
-                    self.draw_world_clock(draw, full_box, font_wc_city_full, font_wc_time_full, font_wc_sub_full, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
-                elif full_choice == 10: # Media Player
+                elif full_choice == 4: # Media Player
                     self.draw_media_full(image, draw, full_box, font_media_artist_full, font_media_song_full, media_artist_fill_en, media_artist_fill_col, media_artist_out_en, media_artist_out_col, media_artist_out_sz, media_song_fill_en, media_song_fill_col, media_song_out_en, media_song_out_col, media_song_out_sz, media_player_idx, media_vis_style_idx, media_color_mode_idx, media_solid_col, media_grad_start_col, media_grad_end_col)
+                elif full_choice == 5: # Network Activity
+                    self.draw_net_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
+                elif full_choice == 6: # RAM Usage
+                    self.draw_ram_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, ram_mode_idx)
+                elif full_choice == 7: # Stacked Date & Time
+                    self.draw_stacked(draw, full_box, date_str, time_str, font_date, font_time, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
+                elif full_choice == 8: # Time
+                    self.draw_single(draw, full_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
+                elif full_choice == 9: # Weather
+                    self.draw_weather(image, draw, full_box, font_weather_full, font_loc_full, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
+                elif full_choice == 10: # World Clock
+                    self.draw_world_clock(draw, full_box, font_wc_city_full, font_wc_time_full, font_wc_sub_full, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
             else: # 2 Widgets (Split Top / Bottom)
                 # Top Sub-slot
                 if top_choice == 1: # CPU Usage
@@ -4441,18 +4441,18 @@ class TouchBarInfoAction(ActionBase):
                     self.draw_single(draw, top_box, date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz)
                 elif top_choice == 3: # Disk Usage
                     self.draw_disk_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
-                elif top_choice == 4: # Network Activity
-                    self.draw_net_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
-                elif top_choice == 5: # RAM Usage
-                    self.draw_ram_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, ram_mode_idx)
-                elif top_choice == 6: # Time
-                    self.draw_single(draw, top_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
-                elif top_choice == 7: # Weather
-                    self.draw_weather(image, draw, top_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
-                elif top_choice == 8: # World Clock
-                    self.draw_world_clock(draw, top_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
-                elif top_choice == 9: # Media Player
+                elif top_choice == 4: # Media Player
                     self.draw_media_sub(image, draw, top_box, media_player_idx, media_vis_style_idx, media_color_mode_idx, media_solid_col, media_grad_start_col, media_grad_end_col)
+                elif top_choice == 5: # Network Activity
+                    self.draw_net_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
+                elif top_choice == 6: # RAM Usage
+                    self.draw_ram_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, ram_mode_idx)
+                elif top_choice == 7: # Time
+                    self.draw_single(draw, top_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
+                elif top_choice == 8: # Weather
+                    self.draw_weather(image, draw, top_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
+                elif top_choice == 9: # World Clock
+                    self.draw_world_clock(draw, top_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
 
                 # Bottom Sub-slot
                 if bot_choice == 1: # CPU Usage
@@ -4461,18 +4461,18 @@ class TouchBarInfoAction(ActionBase):
                     self.draw_single(draw, bot_box, date_str, font_date, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz)
                 elif bot_choice == 3: # Disk Usage
                     self.draw_disk_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
-                elif bot_choice == 4: # Network Activity
-                    self.draw_net_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
-                elif bot_choice == 5: # RAM Usage
-                    self.draw_ram_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, ram_mode_idx)
-                elif bot_choice == 6: # Time
-                    self.draw_single(draw, bot_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
-                elif bot_choice == 7: # Weather
-                    self.draw_weather(image, draw, bot_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
-                elif bot_choice == 8: # World Clock
-                    self.draw_world_clock(draw, bot_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
-                elif bot_choice == 9: # Media Player
+                elif bot_choice == 4: # Media Player
                     self.draw_media_sub(image, draw, bot_box, media_player_idx, media_vis_style_idx, media_color_mode_idx, media_solid_col, media_grad_start_col, media_grad_end_col)
+                elif bot_choice == 5: # Network Activity
+                    self.draw_net_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
+                elif bot_choice == 6: # RAM Usage
+                    self.draw_ram_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, ram_mode_idx)
+                elif bot_choice == 7: # Time
+                    self.draw_single(draw, bot_box, time_str, font_time, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz)
+                elif bot_choice == 8: # Weather
+                    self.draw_weather(image, draw, bot_box, font_weather_sub, font_loc_sub, weather_fill_en, weather_fill_col, weather_out_en, weather_out_col, weather_out_sz)
+                elif bot_choice == 9: # World Clock
+                    self.draw_world_clock(draw, bot_box, font_wc_city_sub, font_wc_time_sub, font_wc_time_sub, wc_fill_en, wc_fill_col, wc_out_en, wc_out_col, wc_out_sz, worldclock_city_idx, worldclock_custom_label, worldclock_custom_tz, worldclock_show_offset, use_24h, worldclock_show_seconds, worldclock_view)
 
         render_section(sec_a_mode, sec_a_full, sec_a_top, sec_a_bot, box_a_full, box_a_top, box_a_bot)
         render_section(sec_b_mode, sec_b_full, sec_b_top, sec_b_bot, box_b_full, box_b_top, box_b_bot)
