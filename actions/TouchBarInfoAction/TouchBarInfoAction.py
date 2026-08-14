@@ -1687,6 +1687,8 @@ class TouchBarInfoAction(ActionBase):
                 media_ctrls["grad_end_row"].set_visible(show_media and is_grad)
 
                 if is_full_mode:
+                    if media_ctrls.get("dial_expander"):
+                        media_ctrls["dial_expander"].set_visible(show_media)
                     media_ctrls["artist_expander"].set_visible(show_media)
                     media_ctrls["song_expander"].set_visible(show_media)
 
