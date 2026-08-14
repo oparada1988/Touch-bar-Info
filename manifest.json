@@ -4,14 +4,14 @@
     "id": "com_core447_TouchBarInfo",
     "name": "Touch Bar Info",
     "descriptions": {
-        "en_US": "Display stacked date and time tailored for the Stream Deck + Touch Bar canvas."
+        "en_US": "Highly customizable, full-canvas modular information display for the Stream Deck + Touch Bar. Mix, match, and stack System Monitors (CPU, RAM, Disk, Network), Media Player with live audio visualizer, Live Weather, World Clock, Stacked Date & Time, and custom wallpapers across three independent sections."
     },
     "short-descriptions": {
-        "en_US": "Touch Bar Clock & Date"
+        "en_US": "Touch Bar Info & Widgets"
     },
-    "tags": "Clock, Information, Touchbar",
+    "tags": "Touchbar, Information, System, Media, Weather, Clock, Hardware",
     "minimum-version": "1.0.0",
     "app-version": "1.5.0-beta",
-    "description": "Display stacked date and time tailored for the Stream Deck + Touch Bar canvas.",
-    "short-description": "Touch Bar Clock & Date"
+    "description": "Highly customizable, full-canvas modular information display for the Stream Deck + Touch Bar. Mix, match, and stack System Monitors (CPU, RAM, Disk, Network), Media Player with live audio visualizer, Live Weather, World Clock, Stacked Date & Time, and custom wallpapers across three independent sections.",
+    "short-description": "Touch Bar Info & Widgets"
 }
