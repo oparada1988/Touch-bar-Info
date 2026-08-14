@@ -1653,6 +1653,9 @@ class TouchBarInfoAction(ActionBase):
         self.bg_image_row.add_suffix(bg_image_btn)
         self.bg_image_row.add_suffix(bg_clear_btn)
 
+        self.load_config_defaults()
+        self.notify_visibility_change()
+
         return [
             self.bg_image_row,
             self.sec_a_expander,
@@ -1668,153 +1671,157 @@ class TouchBarInfoAction(ActionBase):
                 pass
 
     def load_config_defaults(self):
+        if not hasattr(self, "sec_a_mode_combo") or not getattr(self, "slot_controls", None):
+            return
         settings = self.get_settings()
         if settings is None:
             return
 
-        # Section selections
-        self.sec_a_mode_combo.set_selected(self.get_slot_setting(settings, "sec_a", "mode", 0))
-        self.sec_a_full_combo.set_selected(self.get_slot_setting(settings, "sec_a", "full_widget", 0))
-        self.sec_a_top_combo.set_selected(self.get_slot_setting(settings, "sec_a", "top_widget", 0))
-        self.sec_a_bot_combo.set_selected(self.get_slot_setting(settings, "sec_a", "bottom_widget", 0))
+        self._syncing_controls = True
+        try:
+            # Section selections
+            self.sec_a_mode_combo.set_selected(self.get_slot_setting(settings, "sec_a", "mode", 0))
+            self.sec_a_full_combo.set_selected(self.get_slot_setting(settings, "sec_a", "full_widget", 0))
+            self.sec_a_top_combo.set_selected(self.get_slot_setting(settings, "sec_a", "top_widget", 0))
+            self.sec_a_bot_combo.set_selected(self.get_slot_setting(settings, "sec_a", "bottom_widget", 0))
 
-        self.sec_b_mode_combo.set_selected(self.get_slot_setting(settings, "sec_b", "mode", 0))
-        self.sec_b_full_combo.set_selected(self.get_slot_setting(settings, "sec_b", "full_widget", 0))
-        self.sec_b_top_combo.set_selected(self.get_slot_setting(settings, "sec_b", "top_widget", 0))
-        self.sec_b_bot_combo.set_selected(self.get_slot_setting(settings, "sec_b", "bottom_widget", 0))
+            self.sec_b_mode_combo.set_selected(self.get_slot_setting(settings, "sec_b", "mode", 0))
+            self.sec_b_full_combo.set_selected(self.get_slot_setting(settings, "sec_b", "full_widget", 0))
+            self.sec_b_top_combo.set_selected(self.get_slot_setting(settings, "sec_b", "top_widget", 0))
+            self.sec_b_bot_combo.set_selected(self.get_slot_setting(settings, "sec_b", "bottom_widget", 0))
 
-        self.sec_c_mode_combo.set_selected(self.get_slot_setting(settings, "sec_c", "mode", 0))
-        self.sec_c_full_combo.set_selected(self.get_slot_setting(settings, "sec_c", "full_widget", 0))
-        self.sec_c_top_combo.set_selected(self.get_slot_setting(settings, "sec_c", "top_widget", 0))
-        self.sec_c_bot_combo.set_selected(self.get_slot_setting(settings, "sec_c", "bottom_widget", 0))
+            self.sec_c_mode_combo.set_selected(self.get_slot_setting(settings, "sec_c", "mode", 0))
+            self.sec_c_full_combo.set_selected(self.get_slot_setting(settings, "sec_c", "full_widget", 0))
+            self.sec_c_top_combo.set_selected(self.get_slot_setting(settings, "sec_c", "top_widget", 0))
+            self.sec_c_bot_combo.set_selected(self.get_slot_setting(settings, "sec_c", "bottom_widget", 0))
 
-        # Populate all 9 slots' controls independently
-        for slot_key, ctrls in self.slot_controls.items():
-            # Date
-            d = ctrls["date"]
-            d["fmt_combo"].set_selected(self.get_slot_setting(settings, slot_key, "date_format_idx", 0))
-            d["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "date_font_str", "DejaVu Sans Bold 25"))
-            date_fill_en = self.get_slot_setting(settings, slot_key, "date_fill_enabled", True)
-            d["fill_sw"].set_active(date_fill_en)
-            d["fill_color_row"].set_sensitive(date_fill_en)
-            self.set_color_button_rgba(d["fill_color_btn"], self.get_slot_setting(settings, slot_key, "date_font_color", "#AAC8E6FF"))
-            date_out_en = self.get_slot_setting(settings, slot_key, "date_outline_enabled", False)
-            d["out_sw"].set_active(date_out_en)
-            d["out_color_row"].set_sensitive(date_out_en)
-            d["out_size_spin"].set_sensitive(date_out_en)
-            self.set_color_button_rgba(d["out_color_btn"], self.get_slot_setting(settings, slot_key, "date_outline_color", "#000000FF"))
-            d["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "date_outline_size", 2))
+            # Populate all 9 slots' controls independently
+            for slot_key, ctrls in self.slot_controls.items():
+                # Date
+                d = ctrls["date"]
+                d["fmt_combo"].set_selected(self.get_slot_setting(settings, slot_key, "date_format_idx", 0))
+                d["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "date_font_str", "DejaVu Sans Bold 25"))
+                date_fill_en = self.get_slot_setting(settings, slot_key, "date_fill_enabled", True)
+                d["fill_sw"].set_active(date_fill_en)
+                d["fill_color_row"].set_sensitive(date_fill_en)
+                self.set_color_button_rgba(d["fill_color_btn"], self.get_slot_setting(settings, slot_key, "date_font_color", "#AAC8E6FF"))
+                date_out_en = self.get_slot_setting(settings, slot_key, "date_outline_enabled", False)
+                d["out_sw"].set_active(date_out_en)
+                d["out_color_row"].set_sensitive(date_out_en)
+                d["out_size_spin"].set_sensitive(date_out_en)
+                self.set_color_button_rgba(d["out_color_btn"], self.get_slot_setting(settings, slot_key, "date_outline_color", "#000000FF"))
+                d["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "date_outline_size", 2))
 
-            # Time
-            t = ctrls["time"]
-            t["sw_24h"].set_active(self.get_slot_setting(settings, slot_key, "use_24h", False))
-            t["sw_sec"].set_active(self.get_slot_setting(settings, slot_key, "show_seconds", False))
-            t["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "time_font_str", "DejaVu Sans Bold 45"))
-            time_fill_en = self.get_slot_setting(settings, slot_key, "time_fill_enabled", True)
-            t["fill_sw"].set_active(time_fill_en)
-            t["fill_color_row"].set_sensitive(time_fill_en)
-            self.set_color_button_rgba(t["fill_color_btn"], self.get_slot_setting(settings, slot_key, "time_font_color", "#FFFFFFFF"))
-            time_out_en = self.get_slot_setting(settings, slot_key, "time_outline_enabled", False)
-            t["out_sw"].set_active(time_out_en)
-            t["out_color_row"].set_sensitive(time_out_en)
-            t["out_size_spin"].set_sensitive(time_out_en)
-            self.set_color_button_rgba(t["out_color_btn"], self.get_slot_setting(settings, slot_key, "time_outline_color", "#000000FF"))
-            t["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "time_outline_size", 2))
+                # Time
+                t = ctrls["time"]
+                t["sw_24h"].set_active(self.get_slot_setting(settings, slot_key, "use_24h", False))
+                t["sw_sec"].set_active(self.get_slot_setting(settings, slot_key, "show_seconds", False))
+                t["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "time_font_str", "DejaVu Sans Bold 45"))
+                time_fill_en = self.get_slot_setting(settings, slot_key, "time_fill_enabled", True)
+                t["fill_sw"].set_active(time_fill_en)
+                t["fill_color_row"].set_sensitive(time_fill_en)
+                self.set_color_button_rgba(t["fill_color_btn"], self.get_slot_setting(settings, slot_key, "time_font_color", "#FFFFFFFF"))
+                time_out_en = self.get_slot_setting(settings, slot_key, "time_outline_enabled", False)
+                t["out_sw"].set_active(time_out_en)
+                t["out_color_row"].set_sensitive(time_out_en)
+                t["out_size_spin"].set_sensitive(time_out_en)
+                self.set_color_button_rgba(t["out_color_btn"], self.get_slot_setting(settings, slot_key, "time_outline_color", "#000000FF"))
+                t["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "time_outline_size", 2))
 
-            # Weather
-            w = ctrls["weather"]
-            w["loc_entry"].set_text(self.get_slot_setting(settings, slot_key, "weather_location_name", "Miami"))
-            w["unit_combo"].set_selected(self.get_slot_setting(settings, slot_key, "weather_unit_idx", 0))
-            w["ref_combo"].set_selected(self.get_slot_setting(settings, slot_key, "weather_refresh_idx", 2))
-            w["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "weather_font_str", "DejaVu Sans Bold 22"))
-            w_fill_en = self.get_slot_setting(settings, slot_key, "weather_fill_enabled", True)
-            w["fill_sw"].set_active(w_fill_en)
-            w["fill_color_row"].set_sensitive(w_fill_en)
-            self.set_color_button_rgba(w["fill_color_btn"], self.get_slot_setting(settings, slot_key, "weather_font_color", "#FFFFFFFF"))
-            w_out_en = self.get_slot_setting(settings, slot_key, "weather_outline_enabled", False)
-            w["out_sw"].set_active(w_out_en)
-            w["out_color_row"].set_sensitive(w_out_en)
-            w["out_size_spin"].set_sensitive(w_out_en)
-            self.set_color_button_rgba(w["out_color_btn"], self.get_slot_setting(settings, slot_key, "weather_outline_color", "#000000FF"))
-            w["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "weather_outline_size", 2))
+                # Weather
+                w = ctrls["weather"]
+                w["loc_entry"].set_text(self.get_slot_setting(settings, slot_key, "weather_location_name", "Miami"))
+                w["unit_combo"].set_selected(self.get_slot_setting(settings, slot_key, "weather_unit_idx", 0))
+                w["ref_combo"].set_selected(self.get_slot_setting(settings, slot_key, "weather_refresh_idx", 2))
+                w["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "weather_font_str", "DejaVu Sans Bold 22"))
+                w_fill_en = self.get_slot_setting(settings, slot_key, "weather_fill_enabled", True)
+                w["fill_sw"].set_active(w_fill_en)
+                w["fill_color_row"].set_sensitive(w_fill_en)
+                self.set_color_button_rgba(w["fill_color_btn"], self.get_slot_setting(settings, slot_key, "weather_font_color", "#FFFFFFFF"))
+                w_out_en = self.get_slot_setting(settings, slot_key, "weather_outline_enabled", False)
+                w["out_sw"].set_active(w_out_en)
+                w["out_color_row"].set_sensitive(w_out_en)
+                w["out_size_spin"].set_sensitive(w_out_en)
+                self.set_color_button_rgba(w["out_color_btn"], self.get_slot_setting(settings, slot_key, "weather_outline_color", "#000000FF"))
+                w["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "weather_outline_size", 2))
 
-            # CPU
-            ctrls["cpu"]["mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "cpu_mode_idx", 0))
+                # World Clock
+                wc = ctrls["worldclock"]
+                wc["city_combo"].set_selected(self.get_slot_setting(settings, slot_key, "worldclock_city_idx", 0))
+                wc["view_combo"].set_selected(self.get_slot_setting(settings, slot_key, "worldclock_view_idx", 0))
+                wc["label_entry"].set_text(self.get_slot_setting(settings, slot_key, "worldclock_label", "London"))
+                wc["tz_entry"].set_text(self.get_slot_setting(settings, slot_key, "worldclock_tz", "Europe/London"))
+                wc["sec_sw"].set_active(self.get_slot_setting(settings, slot_key, "worldclock_show_seconds", False))
+                wc["offset_sw"].set_active(self.get_slot_setting(settings, slot_key, "worldclock_show_offset", True))
+                wc["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "worldclock_font_str", "DejaVu Sans Bold 20"))
+                wc_fill_en = self.get_slot_setting(settings, slot_key, "worldclock_fill_enabled", True)
+                wc["fill_sw"].set_active(wc_fill_en)
+                wc["fill_color_row"].set_sensitive(wc_fill_en)
+                self.set_color_button_rgba(wc["fill_color_btn"], self.get_slot_setting(settings, slot_key, "worldclock_font_color", "#FFD700FF"))
+                wc_out_en = self.get_slot_setting(settings, slot_key, "worldclock_outline_enabled", False)
+                wc["out_sw"].set_active(wc_out_en)
+                wc["out_color_row"].set_sensitive(wc_out_en)
+                wc["out_size_spin"].set_sensitive(wc_out_en)
+                self.set_color_button_rgba(wc["out_color_btn"], self.get_slot_setting(settings, slot_key, "worldclock_outline_color", "#000000FF"))
+                wc["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "worldclock_outline_size", 2))
 
-            # Net
-            ctrls["net"]["mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "net_mode_idx", 0))
-            ctrls["net"]["unit_combo"].set_selected(self.get_slot_setting(settings, slot_key, "net_unit_idx", 0))
+                # CPU
+                c = ctrls["cpu"]
+                c["mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "cpu_mode_idx", 0))
 
-            # RAM
-            ctrls["ram"]["mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "ram_mode_idx", 0))
+                # Net
+                n = ctrls["net"]
+                n["mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "net_mode_idx", 0))
+                n["unit_combo"].set_selected(self.get_slot_setting(settings, slot_key, "net_unit_idx", 0))
 
-            # Disk
-            ctrls["disk"]["mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "disk_mode_idx", 0))
-            d_mount_path = self.get_slot_setting(settings, slot_key, "disk_mount_path", "/")
-            d_idx = 0
-            for idx, (m_path, _) in enumerate(self.disk_mounts):
-                if m_path == d_mount_path:
-                    d_idx = idx
-                    break
-            ctrls["disk"]["mount_combo"].set_selected(d_idx)
-            if isinstance(d_mount_path, str):
-                ctrls["disk"]["browse_row"].set_subtitle(f"Selected: {d_mount_path}")
+                # RAM
+                r = ctrls["ram"]
+                r["mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "ram_mode_idx", 0))
 
-            # World Clock
-            wc = ctrls["worldclock"]
-            wc["city_combo"].set_selected(self.get_slot_setting(settings, slot_key, "worldclock_city_idx", 0))
-            wc["view_combo"].set_selected(self.get_slot_setting(settings, slot_key, "worldclock_view", 0))
-            wc["label_entry"].set_text(self.get_slot_setting(settings, slot_key, "worldclock_custom_label", ""))
-            wc["tz_entry"].set_text(self.get_slot_setting(settings, slot_key, "worldclock_custom_tz", "America/New_York"))
-            wc["sec_sw"].set_active(self.get_slot_setting(settings, slot_key, "worldclock_show_seconds", False))
-            wc["offset_sw"].set_active(self.get_slot_setting(settings, slot_key, "worldclock_show_offset", True))
-            wc["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "worldclock_font_str", "DejaVu Sans Bold 25"))
-            wc_fill_en = self.get_slot_setting(settings, slot_key, "worldclock_fill_enabled", True)
-            wc["fill_sw"].set_active(wc_fill_en)
-            wc["fill_color_row"].set_sensitive(wc_fill_en)
-            self.set_color_button_rgba(wc["fill_color_btn"], self.get_slot_setting(settings, slot_key, "worldclock_font_color", "#FFFFFFFF"))
-            wc_out_en = self.get_slot_setting(settings, slot_key, "worldclock_outline_enabled", False)
-            wc["out_sw"].set_active(wc_out_en)
-            wc["out_color_row"].set_sensitive(wc_out_en)
-            wc["out_size_spin"].set_sensitive(wc_out_en)
-            self.set_color_button_rgba(wc["out_color_btn"], self.get_slot_setting(settings, slot_key, "worldclock_outline_color", "#000000FF"))
-            wc["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "worldclock_outline_size", 2))
+                # Disk
+                dk = ctrls["disk"]
+                dk["mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "disk_mode_idx", 0))
+                mount_path = self.get_slot_setting(settings, slot_key, "disk_mount_path", "/")
+                mount_paths = [p for p, _ in self.get_system_disk_mounts()]
+                mount_idx = mount_paths.index(mount_path) if mount_path in mount_paths else 0
+                dk["mount_combo"].set_selected(mount_idx)
 
-            # Media
-            m = ctrls["media"]
-            p_id = self.get_slot_setting(settings, slot_key, "media_player_id", "auto")
-            p_ids = [pid for pid, _ in self.get_available_media_players()]
-            p_idx = p_ids.index(p_id) if p_id in p_ids else 0
-            m["player_combo"].set_selected(p_idx)
-            m["vis_combo"].set_selected(self.get_slot_setting(settings, slot_key, "media_vis_style_idx", 0))
-            m["color_mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "media_color_mode_idx", 0))
-            self.set_color_button_rgba(m["solid_color_btn"], self.get_slot_setting(settings, slot_key, "media_solid_color", "#FFFFFFFF"))
-            self.set_color_button_rgba(m["grad_start_btn"], self.get_slot_setting(settings, slot_key, "media_grad_start", "#00D2FFFF"))
-            self.set_color_button_rgba(m["grad_mid_btn"], self.get_slot_setting(settings, slot_key, "media_grad_mid", "#7B2CBFFF"))
-            self.set_color_button_rgba(m["grad_end_btn"], self.get_slot_setting(settings, slot_key, "media_grad_end", "#FF2A6DFF"))
+                # Media
+                m = ctrls["media"]
+                p_id = self.get_slot_setting(settings, slot_key, "media_player_id", "auto")
+                p_idx = self.media_player_ids.index(p_id) if p_id in self.media_player_ids else 0
+                m["player_combo"].set_selected(p_idx)
+                m["vis_combo"].set_selected(self.get_slot_setting(settings, slot_key, "media_vis_style_idx", 0))
+                m["color_mode_combo"].set_selected(self.get_slot_setting(settings, slot_key, "media_color_mode_idx", 0))
+                self.set_color_button_rgba(m["solid_color_btn"], self.get_slot_setting(settings, slot_key, "media_solid_color", "#FFFFFFFF"))
+                self.set_color_button_rgba(m["grad_start_btn"], self.get_slot_setting(settings, slot_key, "media_grad_start", "#00D2FFFF"))
+                self.set_color_button_rgba(m["grad_mid_btn"], self.get_slot_setting(settings, slot_key, "media_grad_mid", "#7B2CBFFF"))
+                self.set_color_button_rgba(m["grad_end_btn"], self.get_slot_setting(settings, slot_key, "media_grad_end", "#FF2A6DFF"))
 
-            if m["is_full_mode"]:
-                m["song_font_btn"].set_font(self.get_slot_setting(settings, slot_key, "media_song_font_str", "DejaVu Sans Bold 18"))
-                s_fill_en = self.get_slot_setting(settings, slot_key, "media_song_fill_enabled", True)
-                m["song_fill_sw"].set_active(s_fill_en)
-                self.set_color_button_rgba(m["song_fill_color_btn"], self.get_slot_setting(settings, slot_key, "media_song_font_color", "#FFFFFFFF"))
-                s_out_en = self.get_slot_setting(settings, slot_key, "media_song_outline_enabled", False)
-                m["song_out_sw"].set_active(s_out_en)
-                self.set_color_button_rgba(m["song_out_color_btn"], self.get_slot_setting(settings, slot_key, "media_song_outline_color", "#000000FF"))
-                m["song_out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "media_song_outline_size", 2))
+                if m["is_full_mode"]:
+                    m["song_font_btn"].set_font(self.get_slot_setting(settings, slot_key, "media_song_font_str", "DejaVu Sans Bold 18"))
+                    s_fill_en = self.get_slot_setting(settings, slot_key, "media_song_fill_enabled", True)
+                    m["song_fill_sw"].set_active(s_fill_en)
+                    self.set_color_button_rgba(m["song_fill_color_btn"], self.get_slot_setting(settings, slot_key, "media_song_font_color", "#FFFFFFFF"))
+                    s_out_en = self.get_slot_setting(settings, slot_key, "media_song_outline_enabled", False)
+                    m["song_out_sw"].set_active(s_out_en)
+                    self.set_color_button_rgba(m["song_out_color_btn"], self.get_slot_setting(settings, slot_key, "media_song_outline_color", "#000000FF"))
+                    m["song_out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "media_song_outline_size", 2))
 
-                m["artist_font_btn"].set_font(self.get_slot_setting(settings, slot_key, "media_artist_font_str", "DejaVu Sans Bold 18"))
-                a_fill_en = self.get_slot_setting(settings, slot_key, "media_artist_fill_enabled", True)
-                m["artist_fill_sw"].set_active(a_fill_en)
-                self.set_color_button_rgba(m["artist_fill_color_btn"], self.get_slot_setting(settings, slot_key, "media_artist_font_color", "#FFFFFFFF"))
-                a_out_en = self.get_slot_setting(settings, slot_key, "media_artist_outline_enabled", False)
-                m["artist_out_sw"].set_active(a_out_en)
-                self.set_color_button_rgba(m["artist_out_color_btn"], self.get_slot_setting(settings, slot_key, "media_artist_outline_color", "#000000FF"))
-                m["artist_out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "media_artist_outline_size", 2))
+                    m["artist_font_btn"].set_font(self.get_slot_setting(settings, slot_key, "media_artist_font_str", "DejaVu Sans Bold 18"))
+                    a_fill_en = self.get_slot_setting(settings, slot_key, "media_artist_fill_enabled", True)
+                    m["artist_fill_sw"].set_active(a_fill_en)
+                    self.set_color_button_rgba(m["artist_fill_color_btn"], self.get_slot_setting(settings, slot_key, "media_artist_font_color", "#FFFFFFFF"))
+                    a_out_en = self.get_slot_setting(settings, slot_key, "media_artist_outline_enabled", False)
+                    m["artist_out_sw"].set_active(a_out_en)
+                    self.set_color_button_rgba(m["artist_out_color_btn"], self.get_slot_setting(settings, slot_key, "media_artist_outline_color", "#000000FF"))
+                    m["artist_out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "media_artist_outline_size", 2))
 
-        custom_bg_path = settings.get("custom_bg_path", "")
-        self.update_bg_row_subtitle(custom_bg_path)
-        self.notify_visibility_change()
+            custom_bg_path = settings.get("custom_bg_path", "")
+            self.update_bg_row_subtitle(custom_bg_path)
+            self.notify_visibility_change()
+        finally:
+            self._syncing_controls = False
 
     def set_color_button_rgba(self, button: Gtk.ColorButton, hex_str: str):
         try:
@@ -3346,7 +3353,6 @@ class TouchBarInfoAction(ActionBase):
             log.error(f"TouchBarInfo: Error updating system stats: {e}")
 
     def on_ready(self):
-        self.load_config_defaults()
         self.fetch_weather_async()
         self.update_system_stats()
         self.update_media_state(poll_dbus=True)
