@@ -68,6 +68,12 @@ class TouchBarInfoAction(ActionBase):
         self.process_count = 0
         self._was_locked = False
         self._active_highlight_slot = None
+        try:
+            sm = Adw.StyleManager.get_default()
+            sm.connect("notify::accent-color", lambda *args: (setattr(self, "last_rendered_key", ""), self.update_display()))
+            sm.connect("notify::accent-color-rgba", lambda *args: (setattr(self, "last_rendered_key", ""), self.update_display()))
+        except Exception:
+            pass
         self.init_options()
 
     def get_locale_text(self, key: str, default: str) -> str:
@@ -1753,12 +1759,49 @@ class TouchBarInfoAction(ActionBase):
             self.last_rendered_key = ""
             self.update_display()
 
-    def draw_slot_glow(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int]):
+    def get_streamcontroller_accent_color(self) -> tuple[int, int, int]:
+        try:
+            sm = Adw.StyleManager.get_default()
+            if hasattr(sm, "get_accent_color_rgba"):
+                rgba = sm.get_accent_color_rgba()
+                r = int(max(0.0, min(1.0, rgba.red)) * 255)
+                g = int(max(0.0, min(1.0, rgba.green)) * 255)
+                b = int(max(0.0, min(1.0, rgba.blue)) * 255)
+                return (r, g, b)
+        except Exception:
+            pass
+        return (255, 85, 210)
+
+    def draw_slot_glow(self, image: Image.Image, box: tuple[int, int, int, int]):
         x1, y1, x2, y2 = box
-        # Multi-layer neon magenta glow (#FF55D2) matching StreamController UI
-        draw.rounded_rectangle([x1 - 2, y1 - 2, x2 + 2, y2 + 2], radius=8, outline=(255, 85, 210, 60), width=2)
-        draw.rounded_rectangle([x1 - 1, y1 - 1, x2 + 1, y2 + 1], radius=7, outline=(255, 100, 220, 140), width=1)
-        draw.rounded_rectangle([x1, y1, x2, y2], radius=6, outline=(255, 160, 240, 255), width=2)
+        ar, ag, ab = self.get_streamcontroller_accent_color()
+
+        # Brighter core stroke highlight
+        core_r = min(255, int(ar * 1.25 + 35))
+        core_g = min(255, int(ag * 1.25 + 35))
+        core_b = min(255, int(ab * 1.25 + 35))
+
+        glow_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        glow_draw = ImageDraw.Draw(glow_layer)
+
+        # 1. Inward radial/concentric gradient fade
+        fade_depth = 14
+        for d in range(fade_depth):
+            t = d / float(fade_depth)
+            alpha = int(120 * (1.0 - t) ** 1.8)
+            col = (ar, ag, ab, alpha)
+            r = max(2, 6 - d // 3)
+            glow_draw.rounded_rectangle([x1 + d, y1 + d, x2 - d, y2 - d], radius=r, outline=col, width=1)
+
+        # 2. Outer soft halos
+        glow_draw.rounded_rectangle([x1 - 2, y1 - 2, x2 + 2, y2 + 2], radius=8, outline=(ar, ag, ab, 60), width=2)
+        glow_draw.rounded_rectangle([x1 - 1, y1 - 1, x2 + 1, y2 + 1], radius=7, outline=(ar, ag, ab, 150), width=1)
+
+        # 3. Crisp solid core border
+        glow_draw.rounded_rectangle([x1, y1, x2, y2], radius=6, outline=(core_r, core_g, core_b, 255), width=2)
+
+        # Composite inward fade glow over main image
+        image.alpha_composite(glow_layer)
 
     def notify_visibility_change(self):
         for cb in getattr(self, "update_vis_callbacks", []):
@@ -3617,7 +3660,8 @@ class TouchBarInfoAction(ActionBase):
         media_val = (self.vis_tick, self.media_state.get("title"), self.media_state.get("artist"), self.media_state.get("status"), self.media_state.get("art_url")) if (any_media and self.is_media_active_and_playing()) else "nomedia"
         weather_repr = tuple((k, v.get("temp_str"), v.get("weathercode")) for k, v in sorted(self.weather_caches.items())) if any_weather else ()
         settings_sig = hash(tuple(sorted((k, str(v)) for k, v in settings.items() if not k.startswith("_"))))
-        highlight_sig = self._active_highlight_slot
+        accent_col = self.get_streamcontroller_accent_color()
+        highlight_sig = (self._active_highlight_slot, accent_col)
 
         combined_key = (time_sig, cpu_val, ram_val, net_val, media_val, weather_repr, settings_sig, highlight_sig)
         if combined_key == self.last_rendered_key:
@@ -3806,8 +3850,8 @@ class TouchBarInfoAction(ActionBase):
                 render_slot_widget(f"{prefix}_top", top_choice, top_box, is_full=False, align=align)
                 render_slot_widget(f"{prefix}_bot", bot_choice, bot_box, is_full=False, align=align)
 
-        # Draw highlight neon glow border around currently expanded slot
+        # Draw highlight neon glow border with inward fade around currently expanded slot
         if getattr(self, "_active_highlight_slot", None) is not None:
-            self.draw_slot_glow(draw, self._active_highlight_slot)
+            self.draw_slot_glow(image, self._active_highlight_slot)
 
         self.render_to_input(image)
