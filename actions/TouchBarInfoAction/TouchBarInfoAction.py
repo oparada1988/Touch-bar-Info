@@ -317,6 +317,8 @@ class TouchBarInfoAction(ActionBase):
             return False
         if not self.is_media_active_and_playing():
             self._anim_timer_id = None
+            self.vis_heights = [0.04] * len(self.vis_heights)
+            self.last_rendered_key = ""
             self.update_display()
             return False
 
@@ -345,6 +347,7 @@ class TouchBarInfoAction(ActionBase):
             self.start_anim_timer()
         else:
             self.stop_anim_timer()
+            self.vis_heights = [0.04] * len(self.vis_heights)
             self.update_display()
 
     def on_remove(self) -> None:
@@ -671,6 +674,7 @@ class TouchBarInfoAction(ActionBase):
         self.all_media_color_mode_combos = []
         self.all_media_solid_color_btns = []
         self.all_media_grad_start_btns = []
+        self.all_media_grad_mid_btns = []
         self.all_media_grad_end_btns = []
         self.all_media_artist_font_btns = []
         self.all_media_artist_fill_switches = []
@@ -1152,6 +1156,15 @@ class TouchBarInfoAction(ActionBase):
             grad_start_btn.set_valign(Gtk.Align.CENTER)
             grad_start_row.add_suffix(grad_start_btn)
 
+            # Gradient Middle Color
+            grad_mid_row = Adw.ActionRow(
+                title=self.get_locale_text("actions.touchbar-info.media-grad-mid.label", "Gradient Middle Color"),
+                subtitle=self.get_locale_text("actions.touchbar-info.media-grad-mid.subtitle", "Middle color of the 3-color visualizer gradient")
+            )
+            grad_mid_btn = Gtk.ColorButton()
+            grad_mid_btn.set_valign(Gtk.Align.CENTER)
+            grad_mid_row.add_suffix(grad_mid_btn)
+
             # Gradient End Color
             grad_end_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.media-grad-end.label", "Gradient End Color"),
@@ -1246,6 +1259,7 @@ class TouchBarInfoAction(ActionBase):
             self.all_media_color_mode_combos.append(color_mode_combo)
             self.all_media_solid_color_btns.append(solid_color_btn)
             self.all_media_grad_start_btns.append(grad_start_btn)
+            self.all_media_grad_mid_btns.append(grad_mid_btn)
             self.all_media_grad_end_btns.append(grad_end_btn)
             self.all_media_artist_font_btns.append(artist_font_btn)
             self.all_media_artist_fill_switches.append(artist_fill_sw)
@@ -1260,7 +1274,7 @@ class TouchBarInfoAction(ActionBase):
             self.all_media_song_out_color_btns.append(song_out_color_btn)
             self.all_media_song_out_size_spins.append(song_out_size_spin)
 
-            all_rows = [media_hdr, player_combo, vis_combo, color_mode_combo, solid_color_row, grad_start_row, grad_end_row]
+            all_rows = [media_hdr, player_combo, vis_combo, color_mode_combo, solid_color_row, grad_start_row, grad_mid_row, grad_end_row]
             if is_full_mode:
                 all_rows.extend([
                     artist_font_row, artist_fill_sw, artist_fill_color_row, artist_out_sw, artist_out_color_row, artist_out_size_spin,
@@ -1270,7 +1284,7 @@ class TouchBarInfoAction(ActionBase):
             return {
                 "media_hdr": media_hdr, "player_combo": player_combo, "vis_combo": vis_combo,
                 "color_mode_combo": color_mode_combo, "solid_color_row": solid_color_row,
-                "grad_start_row": grad_start_row, "grad_end_row": grad_end_row,
+                "grad_start_row": grad_start_row, "grad_mid_row": grad_mid_row, "grad_end_row": grad_end_row,
                 "artist_font_row": artist_font_row, "artist_fill_sw": artist_fill_sw,
                 "artist_fill_color_row": artist_fill_color_row, "artist_out_sw": artist_out_sw,
                 "artist_out_color_row": artist_out_color_row, "artist_out_size_spin": artist_out_size_spin,
@@ -1474,6 +1488,7 @@ class TouchBarInfoAction(ActionBase):
                 media_ctrls["color_mode_combo"].set_visible(show_media)
                 media_ctrls["solid_color_row"].set_visible(show_media and not is_gradient)
                 media_ctrls["grad_start_row"].set_visible(show_media and is_gradient)
+                media_ctrls["grad_mid_row"].set_visible(show_media and is_gradient)
                 media_ctrls["grad_end_row"].set_visible(show_media and is_gradient)
 
                 # Network Visibility (Full: 5 | Split: 5)
@@ -1718,6 +1733,7 @@ class TouchBarInfoAction(ActionBase):
         for combo in self.all_media_color_mode_combos: combo.connect("notify::selected", self.on_media_color_mode_changed)
         for btn in self.all_media_solid_color_btns: btn.connect("color-set", self.on_media_solid_color_set)
         for btn in self.all_media_grad_start_btns: btn.connect("color-set", self.on_media_grad_start_set)
+        for btn in self.all_media_grad_mid_btns: btn.connect("color-set", self.on_media_grad_mid_set)
         for btn in self.all_media_grad_end_btns: btn.connect("color-set", self.on_media_grad_end_set)
 
         for fb in self.all_media_artist_font_btns: fb.connect("font-set", self.on_media_artist_font_set)
@@ -1847,6 +1863,7 @@ class TouchBarInfoAction(ActionBase):
         media_color_mode_idx = settings.setdefault("media_color_mode_idx", 0)
         media_solid_color = settings.setdefault("media_solid_color", "#FFFFFFFF")
         media_grad_start = settings.setdefault("media_grad_start", "#00D2FFFF")
+        media_grad_mid = settings.setdefault("media_grad_mid", "#7B2CBFFF")
         media_grad_end = settings.setdefault("media_grad_end", "#FF2A6DFF")
 
         media_artist_font_str = settings.setdefault("media_artist_font_str", "DejaVu Sans Bold 18")
@@ -1964,6 +1981,7 @@ class TouchBarInfoAction(ActionBase):
             if 0 <= media_color_mode_idx < len(self.media_color_mode_options): combo.set_selected(media_color_mode_idx)
         for btn in self.all_media_solid_color_btns: self.set_color_button_rgba(btn, media_solid_color)
         for btn in self.all_media_grad_start_btns: self.set_color_button_rgba(btn, media_grad_start)
+        for btn in self.all_media_grad_mid_btns: self.set_color_button_rgba(btn, media_grad_mid)
         for btn in self.all_media_grad_end_btns: self.set_color_button_rgba(btn, media_grad_end)
 
         for fb in self.all_media_artist_font_btns: fb.set_font(media_artist_font_str)
@@ -2820,6 +2838,22 @@ class TouchBarInfoAction(ActionBase):
                 hex_val = self.gdk_to_hex(rgba)
                 settings["media_grad_start"] = hex_val
                 for btn in self.all_media_grad_start_btns:
+                    if btn != button: self.set_color_button_rgba(btn, hex_val)
+                self.set_settings(settings)
+                self.schedule_update_display()
+        finally:
+            self._syncing_controls = False
+
+    def on_media_grad_mid_set(self, button):
+        if getattr(self, "_syncing_controls", False): return
+        self._syncing_controls = True
+        try:
+            settings = self.get_settings()
+            if settings is not None:
+                rgba = button.get_rgba()
+                hex_val = self.gdk_to_hex(rgba)
+                settings["media_grad_mid"] = hex_val
+                for btn in self.all_media_grad_mid_btns:
                     if btn != button: self.set_color_button_rgba(btn, hex_val)
                 self.set_settings(settings)
                 self.schedule_update_display()
@@ -3811,6 +3845,15 @@ class TouchBarInfoAction(ActionBase):
         a = int(c1[3] + (c2[3] - c1[3]) * t) if len(c1) > 3 and len(c2) > 3 else 255
         return (r, g, b, a)
 
+    def interpolate_gradient_3(self, c_start: tuple, c_mid: tuple, c_end: tuple, t: float) -> tuple:
+        t = max(0.0, min(1.0, float(t)))
+        if t <= 0.5:
+            local_t = t * 2.0
+            return self.interpolate_color(c_start, c_mid, local_t)
+        else:
+            local_t = (t - 0.5) * 2.0
+            return self.interpolate_color(c_mid, c_end, local_t)
+
     def update_media_state(self, poll_dbus: bool = True):
         now_ts = time.time()
         if poll_dbus or (now_ts - self._last_dbus_poll > 0.8):
@@ -3906,11 +3949,11 @@ class TouchBarInfoAction(ActionBase):
             }
 
         # Advance visualizer tick and simulate independent equalizer bars
-        self.vis_tick += 1
         is_playing = (self.media_state["status"] == "Playing")
         num_bars = len(self.vis_heights)
 
         if is_playing:
+            self.vis_tick += 1
             t = self.vis_tick * 0.35
             beat = (math.sin(t * 1.6) ** 4) * 0.55 + (math.sin(t * 0.8 + 1.2) ** 6) * 0.45
             for i in range(num_bars):
@@ -3936,9 +3979,8 @@ class TouchBarInfoAction(ActionBase):
                 else:
                     self.vis_heights[i] = max(0.05, self.vis_heights[i] * 0.75 + target * 0.25)
         else:
-            for i in range(num_bars):
-                idle_baseline = 0.05 + 0.02 * math.sin(self.vis_tick * 0.05 + i * 0.2)
-                self.vis_heights[i] = max(0.04, self.vis_heights[i] * 0.85 + idle_baseline * 0.15)
+            # Instant flat baseline when paused or stopped
+            self.vis_heights = [0.04] * num_bars
 
     def get_media_art(self, art_url: str, target_size: tuple[int, int], corner_radius: int = 8) -> Image.Image:
         tw, th = target_size
@@ -4074,7 +4116,7 @@ class TouchBarInfoAction(ActionBase):
         paste_y = int(y - (surf_h - th) / 2.0)
         image.paste(sub_img, (int(x), paste_y), sub_img)
 
-    def draw_stepped_bars(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], heights: list[float], color_mode: int, solid_col: tuple, start_col: tuple, end_col: tuple):
+    def draw_stepped_bars(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], heights: list[float], color_mode: int, solid_col: tuple, start_col: tuple, mid_col: tuple, end_col: tuple):
         x_min, y_min, x_max, y_max = box
         bw = x_max - x_min
         bh = y_max - y_min
@@ -4104,15 +4146,15 @@ class TouchBarInfoAction(ActionBase):
                 sy_min = sy_max - step_h
 
                 if color_mode == 1:
-                    # Vertical Gradient: Bottom Start -> Top End
+                    # Vertical 3-Color Gradient: Bottom Start -> Mid -> Top End
                     t = s / max(1.0, float(num_steps - 1))
-                    col = self.interpolate_color(start_col, end_col, t)
+                    col = self.interpolate_gradient_3(start_col, mid_col, end_col, t)
                 else:
                     col = solid_col
 
                 draw.rectangle([cx_min, sy_min, cx_max, sy_max], fill=col)
 
-    def draw_wave_curves(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], heights: list[float], color_mode: int, solid_col: tuple, start_col: tuple, end_col: tuple, phase: float = 0.0):
+    def draw_wave_curves(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], heights: list[float], color_mode: int, solid_col: tuple, start_col: tuple, mid_col: tuple, end_col: tuple, phase: float = 0.0):
         x_min, y_min, x_max, y_max = box
         bw = x_max - x_min
         bh = y_max - y_min
@@ -4135,10 +4177,10 @@ class TouchBarInfoAction(ActionBase):
             pts.append((x, y))
 
         if color_mode == 1:
-            # Horizontal Gradient: Left Start -> Right End
+            # Horizontal 3-Color Gradient: Left Start -> Mid -> Right End
             for (x, y) in pts:
                 tx = (x - x_min) / float(bw)
-                col = self.interpolate_color(start_col, end_col, tx)
+                col = self.interpolate_gradient_3(start_col, mid_col, end_col, tx)
                 fill_col = (col[0], col[1], col[2], int(col[3] * 0.75))
                 draw.line([(x, y), (x, y_max)], fill=fill_col, width=1)
                 draw.point((x, y), fill=col)
@@ -4149,7 +4191,7 @@ class TouchBarInfoAction(ActionBase):
             if len(pts) >= 2:
                 draw.line(pts, fill=solid_col, width=2)
 
-    def draw_media_full(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_artist, font_song, artist_fill_en, artist_fill_col, artist_out_en, artist_out_col, artist_out_sz, song_fill_en, song_fill_col, song_out_en, song_out_col, song_out_sz, player_idx: int, vis_style: int, color_mode: int, solid_col: tuple, start_col: tuple, end_col: tuple):
+    def draw_media_full(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_artist, font_song, artist_fill_en, artist_fill_col, artist_out_en, artist_out_col, artist_out_sz, song_fill_en, song_fill_col, song_out_en, song_out_col, song_out_sz, player_idx: int, vis_style: int, color_mode: int, solid_col: tuple, start_col: tuple, mid_col: tuple, end_col: tuple):
         x_min, y_min, x_max, y_max = box
         bw = x_max - x_min
         bh = y_max - y_min
@@ -4182,11 +4224,11 @@ class TouchBarInfoAction(ActionBase):
         # Visualizer
         vis_box = (content_x, y_min + int(bh * 0.58), content_max_x, y_max - int(bh * 0.08))
         if vis_style == 1:
-            self.draw_wave_curves(image, draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, end_col, self.vis_tick * 0.15)
+            self.draw_wave_curves(image, draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, mid_col, end_col, self.vis_tick * 0.15)
         else:
-            self.draw_stepped_bars(draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, end_col)
+            self.draw_stepped_bars(draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, mid_col, end_col)
 
-    def draw_media_sub(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], player_idx: int, vis_style: int, color_mode: int, solid_col: tuple, start_col: tuple, end_col: tuple):
+    def draw_media_sub(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], player_idx: int, vis_style: int, color_mode: int, solid_col: tuple, start_col: tuple, mid_col: tuple, end_col: tuple):
         x_min, y_min, x_max, y_max = box
         bw = x_max - x_min
         bh = y_max - y_min
@@ -4207,9 +4249,9 @@ class TouchBarInfoAction(ActionBase):
         vis_box = (vis_x_min, y_min + 4, vis_x_max, y_max - 4)
 
         if vis_style == 1:
-            self.draw_wave_curves(image, draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, end_col, self.vis_tick * 0.15)
+            self.draw_wave_curves(image, draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, mid_col, end_col, self.vis_tick * 0.15)
         else:
-            self.draw_stepped_bars(draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, end_col)
+            self.draw_stepped_bars(draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, mid_col, end_col)
 
     def update_display(self) -> None:
         if self.handle_lock_blanking():
@@ -4289,6 +4331,7 @@ class TouchBarInfoAction(ActionBase):
         media_color_mode_idx = settings.get("media_color_mode_idx", 0)
         media_solid_col_hex = settings.get("media_solid_color", "#FFFFFFFF")
         media_grad_start_hex = settings.get("media_grad_start", "#00D2FFFF")
+        media_grad_mid_hex = settings.get("media_grad_mid", "#7B2CBFFF")
         media_grad_end_hex = settings.get("media_grad_end", "#FF2A6DFF")
 
         media_artist_font_str = settings.get("media_artist_font_str", "DejaVu Sans Bold 18")
@@ -4332,7 +4375,7 @@ class TouchBarInfoAction(ActionBase):
                           (sec_b_mode == 0 and sec_b_full == 4) or (sec_b_mode == 1 and (sec_b_top == 4 or sec_b_bot == 4)) or \
                           (sec_c_mode == 0 and sec_c_full == 4) or (sec_c_mode == 1 and (sec_c_top == 4 or sec_c_bot == 4))
 
-        media_key = f"{self.vis_tick}|{self.media_state.get('title','')}|{self.media_state.get('artist','')}|{self.media_state.get('status','')}|{self.media_state.get('art_url','')}|{media_player_idx}|{media_vis_style_idx}|{media_color_mode_idx}|{media_solid_col_hex}|{media_grad_start_hex}|{media_grad_end_hex}" if is_media_active else "nomedia"
+        media_key = f"{self.vis_tick}|{self.media_state.get('title','')}|{self.media_state.get('artist','')}|{self.media_state.get('status','')}|{self.media_state.get('art_url','')}|{media_player_idx}|{media_vis_style_idx}|{media_color_mode_idx}|{media_solid_col_hex}|{media_grad_start_hex}|{media_grad_mid_hex}|{media_grad_end_hex}" if is_media_active else "nomedia"
 
         combined_key = f"{date_str}|{time_str}|{cache_temp}|{cache_loc}|{latest_cpu:.1f}|{latest_ram:.1f}|{self.net_tx_rate:.0f}|{self.net_rx_rate:.0f}|{sec_a_mode}|{sec_a_full}|{sec_a_top}|{sec_a_bot}|{sec_b_mode}|{sec_b_full}|{sec_b_top}|{sec_b_bot}|{sec_c_mode}|{sec_c_full}|{sec_c_top}|{sec_c_bot}|{cpu_mode_idx}|{net_mode_idx}|{net_unit_idx}|{ram_mode_idx}|{disk_mode_idx}|{disk_mount_idx}|{disk_mount_path}|{custom_bg_path}|{date_font_str}|{date_fill_en}|{date_fill_col_hex}|{date_out_en}|{date_out_col_hex}|{date_out_sz}|{time_font_str}|{time_fill_en}|{time_fill_col_hex}|{time_out_en}|{time_out_col_hex}|{time_out_sz}|{weather_font_str}|{weather_fill_en}|{weather_fill_col_hex}|{weather_out_en}|{weather_out_col_hex}|{weather_out_sz}|{worldclock_city_idx}|{worldclock_view}|{worldclock_custom_label}|{worldclock_custom_tz}|{worldclock_show_seconds}|{worldclock_show_offset}|{worldclock_font_str}|{wc_fill_en}|{wc_fill_col_hex}|{wc_out_en}|{wc_out_col_hex}|{wc_out_sz}|{media_key}"
 
@@ -4388,6 +4431,7 @@ class TouchBarInfoAction(ActionBase):
 
         media_solid_col = self.hex_to_rgba_tuple(media_solid_col_hex, default=(255, 255, 255, 255))
         media_grad_start_col = self.hex_to_rgba_tuple(media_grad_start_hex, default=(0, 210, 255, 255))
+        media_grad_mid_col = self.hex_to_rgba_tuple(media_grad_mid_hex, default=(123, 44, 191, 255))
         media_grad_end_col = self.hex_to_rgba_tuple(media_grad_end_hex, default=(255, 42, 109, 255))
 
         media_artist_fill_col = self.hex_to_rgba_tuple(media_artist_fill_col_hex, default=(255, 255, 255, 255))
@@ -4420,7 +4464,7 @@ class TouchBarInfoAction(ActionBase):
                 elif full_choice == 3: # Disk Usage
                     self.draw_disk_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
                 elif full_choice == 4: # Media Player
-                    self.draw_media_full(image, draw, full_box, font_media_artist_full, font_media_song_full, media_artist_fill_en, media_artist_fill_col, media_artist_out_en, media_artist_out_col, media_artist_out_sz, media_song_fill_en, media_song_fill_col, media_song_out_en, media_song_out_col, media_song_out_sz, media_player_idx, media_vis_style_idx, media_color_mode_idx, media_solid_col, media_grad_start_col, media_grad_end_col)
+                    self.draw_media_full(image, draw, full_box, font_media_artist_full, font_media_song_full, media_artist_fill_en, media_artist_fill_col, media_artist_out_en, media_artist_out_col, media_artist_out_sz, media_song_fill_en, media_song_fill_col, media_song_out_en, media_song_out_col, media_song_out_sz, media_player_idx, media_vis_style_idx, media_color_mode_idx, media_solid_col, media_grad_start_col, media_grad_mid_col, media_grad_end_col)
                 elif full_choice == 5: # Network Activity
                     self.draw_net_widget(image, draw, full_box, font_mon_main_full, font_mon_sub_full, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
                 elif full_choice == 6: # RAM Usage
@@ -4442,7 +4486,7 @@ class TouchBarInfoAction(ActionBase):
                 elif top_choice == 3: # Disk Usage
                     self.draw_disk_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
                 elif top_choice == 4: # Media Player
-                    self.draw_media_sub(image, draw, top_box, media_player_idx, media_vis_style_idx, media_color_mode_idx, media_solid_col, media_grad_start_col, media_grad_end_col)
+                    self.draw_media_sub(image, draw, top_box, media_player_idx, media_vis_style_idx, media_color_mode_idx, media_solid_col, media_grad_start_col, media_grad_mid_col, media_grad_end_col)
                 elif top_choice == 5: # Network Activity
                     self.draw_net_widget(image, draw, top_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
                 elif top_choice == 6: # RAM Usage
@@ -4462,7 +4506,7 @@ class TouchBarInfoAction(ActionBase):
                 elif bot_choice == 3: # Disk Usage
                     self.draw_disk_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, disk_mode_idx, disk_mount_idx)
                 elif bot_choice == 4: # Media Player
-                    self.draw_media_sub(image, draw, bot_box, media_player_idx, media_vis_style_idx, media_color_mode_idx, media_solid_col, media_grad_start_col, media_grad_end_col)
+                    self.draw_media_sub(image, draw, bot_box, media_player_idx, media_vis_style_idx, media_color_mode_idx, media_solid_col, media_grad_start_col, media_grad_mid_col, media_grad_end_col)
                 elif bot_choice == 5: # Network Activity
                     self.draw_net_widget(image, draw, bot_box, font_mon_main_sub, font_mon_sub_sub, True, white_col, False, white_col, 2, net_mode_idx, net_unit_idx)
                 elif bot_choice == 6: # RAM Usage
