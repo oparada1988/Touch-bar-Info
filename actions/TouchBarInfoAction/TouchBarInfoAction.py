@@ -1843,9 +1843,10 @@ class TouchBarInfoAction(ActionBase):
                 if d.get("exp") is not None:
                     target_d_groups.append(d["exp"])
 
+                default_date_font = "DejaVu Sans Bold 25" if slot_key.endswith("_full") else "DejaVu Sans Bold 23"
                 for grp in target_d_groups:
                     grp["fmt_combo"].set_selected(self.get_slot_setting(settings, slot_key, "date_format_idx", 0))
-                    grp["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "date_font_str", "DejaVu Sans Bold 25"))
+                    grp["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "date_font_str", default_date_font))
                     date_fill_en = self.get_slot_setting(settings, slot_key, "date_fill_enabled", True)
                     grp["fill_sw"].set_active(date_fill_en)
                     grp["fill_color_row"].set_sensitive(date_fill_en)
@@ -1863,10 +1864,11 @@ class TouchBarInfoAction(ActionBase):
                 if t.get("exp") is not None:
                     target_t_groups.append(t["exp"])
 
+                default_time_font = "DejaVu Sans Bold 45" if slot_key.endswith("_full") else "DejaVu Sans Bold 36"
                 for grp in target_t_groups:
                     grp["sw_24h"].set_active(self.get_slot_setting(settings, slot_key, "use_24h", False))
                     grp["sw_sec"].set_active(self.get_slot_setting(settings, slot_key, "show_seconds", False))
-                    grp["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "time_font_str", "DejaVu Sans Bold 45"))
+                    grp["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "time_font_str", default_time_font))
                     time_fill_en = self.get_slot_setting(settings, slot_key, "time_fill_enabled", True)
                     grp["fill_sw"].set_active(time_fill_en)
                     grp["fill_color_row"].set_sensitive(time_fill_en)
@@ -3694,8 +3696,9 @@ class TouchBarInfoAction(ActionBase):
                 date_fmt_idx = self.get_slot_setting(settings, slot_key, "date_format_idx", 0)
                 fmt_str = self.date_format_options[min(date_fmt_idx, len(self.date_format_options) - 1)][0]
                 date_str = now.strftime(fmt_str)
-                date_font_str = self.get_slot_setting(settings, slot_key, "date_font_str", "DejaVu Sans Bold 25")
-                font_date = self.get_font_from_desc(date_font_str, default_size=25 if is_full else 16)
+                default_date_font = "DejaVu Sans Bold 25" if is_full else "DejaVu Sans Bold 23"
+                date_font_str = self.get_slot_setting(settings, slot_key, "date_font_str", default_date_font)
+                font_date = self.get_font_from_desc(date_font_str, default_size=25 if is_full else 23)
                 fill_en = self.get_slot_setting(settings, slot_key, "date_fill_enabled", True)
                 fill_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "date_font_color", "#AAC8E6FF"), (170, 200, 230, 255))
                 out_en = self.get_slot_setting(settings, slot_key, "date_outline_enabled", False)
@@ -3786,8 +3789,9 @@ class TouchBarInfoAction(ActionBase):
                 show_sec = self.get_slot_setting(settings, slot_key, "show_seconds", False)
                 time_fmt = ("%H:%M:%S" if show_sec else "%H:%M") if use_24h else ("%I:%M:%S %p" if show_sec else "%I:%M %p")
                 time_str = now.strftime(time_fmt).lstrip("0") if not use_24h else now.strftime(time_fmt)
-                t_font_str = self.get_slot_setting(settings, slot_key, "time_font_str", "DejaVu Sans Bold 45")
-                font_time = self.get_font_from_desc(t_font_str, default_size=45 if is_full else 22)
+                default_time_font = "DejaVu Sans Bold 45" if is_full else "DejaVu Sans Bold 36"
+                t_font_str = self.get_slot_setting(settings, slot_key, "time_font_str", default_time_font)
+                font_time = self.get_font_from_desc(t_font_str, default_size=45 if is_full else 36)
                 t_fill_en = self.get_slot_setting(settings, slot_key, "time_fill_enabled", True)
                 t_fill_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "time_font_color", "#FFFFFFFF"), (255, 255, 255, 255))
                 t_out_en = self.get_slot_setting(settings, slot_key, "time_outline_enabled", False)
