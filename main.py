@@ -17,8 +17,8 @@ class TouchBarInfoPlugin(PluginBase):
         self.touchbar_info_holder = ActionHolder(
             plugin_base = self,
             action_base = TouchBarInfoAction,
-            action_id = "com_core447_TouchBarInfo::TouchBarInfoAction",
-            action_name = "Touch Bar Info",
+            action_id = "com_oparada_TouchBarInfo::TouchBarInfoAction",
+            action_name = "TouchPulse",
             action_support = {
                 Input.Key: ActionInputSupport.UNSUPPORTED,
                 Input.Dial: ActionInputSupport.UNSUPPORTED,
@@ -29,7 +29,7 @@ class TouchBarInfoPlugin(PluginBase):
 
         # Register plugin
         self.register(
-            plugin_name = "Touch Bar Info",
+            plugin_name = "TouchPulse",
             github_repo = "https://github.com/oparada1988/Touch-bar-Info",
             plugin_version = "1.0.0",
             app_version = "1.5.0-beta"

@@ -1,8 +1,8 @@
-# Touch Bar Info Plugin for StreamController
+# TouchPulse Plugin for StreamController
 
-Touch Bar Info is a highly customizable, full-canvas information display plugin built for StreamController on the Elgato Stream Deck +. It unlocks the full potential of your device's 800x100 touch strip, giving you complete freedom to mix, match, and arrange a wide variety of real-time widgets to make your Touch Bar truly unique to your daily workflow.
+TouchPulse is a highly customizable, full-canvas information display plugin built for StreamController on the Elgato Stream Deck +. It unlocks the full potential of your device's 800x100 touch strip, giving you complete freedom to mix, match, and arrange a wide variety of real-time widgets to make your Touch Bar truly unique to your daily workflow.
 
-Whether you want an ultra-clean live music visualizer, an informative system performance monitor, global timezones, live weather updates, or a sleek stacked clock, Touch Bar Info lets you tailor every pixel with custom typography, gradients, colors, and background wallpapers.
+Whether you want an ultra-clean live music visualizer, an informative system performance monitor, global timezones, live weather updates, or a sleek stacked clock, TouchPulse lets you tailor every pixel with custom typography, gradients, colors, and background wallpapers.
 
 > **Development Notice**: This plugin is currently under active development. Features, user controls, and rendering options are subject to ongoing updates and refinements.
 

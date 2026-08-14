@@ -1,6 +1,6 @@
 {
-    "plugin.name": "Touch Bar Info",
-    "actions.touchbar-info.name": "Touch Bar Info",
+    "plugin.name": "TouchPulse",
+    "actions.touchbar-info.name": "TouchPulse",
     "actions.touchbar-info.use-24h.label": "24-Stunden-Format",
     "actions.touchbar-info.use-24h.subtitle": "Zwischen 12-Stunden- (AM/PM) und 24-Stunden-Format wechseln",
     "actions.touchbar-info.show-seconds.label": "Sekunden anzeigen",
