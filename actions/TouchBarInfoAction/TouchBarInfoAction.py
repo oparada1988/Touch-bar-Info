@@ -300,8 +300,9 @@ class TouchBarInfoAction(ActionBase):
         ]
 
         self.media_color_mode_options = [
-            self.get_locale_text("actions.touchbar-info.media-colormode.solid", "Solid Color"),
-            self.get_locale_text("actions.touchbar-info.media-colormode.gradient", "Dynamic Gradient (3 Colors)")
+            self.get_locale_text("actions.touchbar-info.media-color-mode.accent", "StreamController Accent Color"),
+            self.get_locale_text("actions.touchbar-info.media-color-mode.solid", "Custom Solid Color"),
+            self.get_locale_text("actions.touchbar-info.media-color-mode.gradient", "Dynamic Gradient (3 Colors)")
         ]
 
         self.media_dial_options = [
@@ -1695,13 +1696,14 @@ class TouchBarInfoAction(ActionBase):
                 # Media Player Visibility (Choice 4)
                 show_media = (widget_choice == 4)
                 color_mode = media_ctrls["color_mode_combo"].get_selected()
-                is_grad = (color_mode == 1)
+                is_solid = (color_mode == 1)
+                is_grad = (color_mode == 2)
 
                 media_ctrls["media_hdr"].set_visible(show_media)
                 media_ctrls["player_combo"].set_visible(show_media)
                 media_ctrls["vis_combo"].set_visible(show_media)
                 media_ctrls["color_mode_combo"].set_visible(show_media)
-                media_ctrls["solid_color_row"].set_visible(show_media and not is_grad)
+                media_ctrls["solid_color_row"].set_visible(show_media and is_solid)
                 media_ctrls["grad_start_row"].set_visible(show_media and is_grad)
                 media_ctrls["grad_mid_row"].set_visible(show_media and is_grad)
                 media_ctrls["grad_end_row"].set_visible(show_media and is_grad)
@@ -3827,7 +3829,7 @@ class TouchBarInfoAction(ActionBase):
                 sy_max = y_max - s * (step_h + step_gap)
                 sy_min = sy_max - step_h
 
-                if color_mode == 1:
+                if color_mode == 2:
                     t = s / max(1.0, float(num_steps - 1))
                     col = self.interpolate_gradient_3(start_col, mid_col, end_col, t)
                 else:
@@ -3840,7 +3842,7 @@ class TouchBarInfoAction(ActionBase):
                 sy_max = y_max - full_steps * (step_h + step_gap)
                 sy_min = sy_max - (step_h * frac)
 
-                if color_mode == 1:
+                if color_mode == 2:
                     t = full_steps / max(1.0, float(num_steps - 1))
                     base_col = self.interpolate_gradient_3(start_col, mid_col, end_col, t)
                 else:
@@ -3878,7 +3880,7 @@ class TouchBarInfoAction(ActionBase):
             y = y_max - (val * (bh - 2))
             pts.append((x, y))
 
-        if color_mode == 1:
+        if color_mode == 2:
             # Horizontal 3-Color Dynamic Gradient
             for (x, y) in pts:
                 tx = (x - x_min) / float(bw)
@@ -4310,7 +4312,11 @@ class TouchBarInfoAction(ActionBase):
             elif widget_choice == 4: # Media Player
                 vis_style = self.get_slot_setting(settings, slot_key, "media_vis_style_idx", 0)
                 color_mode = self.get_slot_setting(settings, slot_key, "media_color_mode_idx", 0)
-                solid_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "media_solid_color", "#FFFFFFFF"), (255, 255, 255, 255))
+                if color_mode == 0:
+                    ar, ag, ab = self.get_streamcontroller_accent_color()
+                    solid_col = (ar, ag, ab, 255)
+                else:
+                    solid_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "media_solid_color", "#FFFFFFFF"), (255, 255, 255, 255))
                 grad_start = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "media_grad_start", "#00D2FFFF"), (0, 210, 255, 255))
                 grad_mid = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "media_grad_mid", "#7B2CBFFF"), (123, 44, 191, 255))
                 grad_end = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "media_grad_end", "#FF2A6DFF"), (255, 42, 109, 255))
