@@ -526,181 +526,218 @@ class TouchBarInfoAction(ActionBase):
         except Exception:
             pass
 
-        # Helper to create Date controls with ExpanderRow
-        def build_date_controls(slot_key: str):
-            date_expander = Adw.ExpanderRow(
-                title=self.get_locale_text("actions.touchbar-info.hdr-date.label", "Date Settings"),
-                subtitle=self.get_locale_text("actions.touchbar-info.hdr-date.subtitle", "Format and typography configuration for date display")
-            )
-            date_expander.add_css_class("touchbar-subhdr-row")
+        # Helper to create Date controls
+        def build_date_controls(slot_key: str, is_full_mode: bool = False):
+            def _create_date_rows():
+                fmt_model = Gtk.StringList()
+                for _, label in self.date_format_options: fmt_model.append(label)
+                fmt_combo = Adw.ComboRow(
+                    model=fmt_model,
+                    title=self.get_locale_text("actions.touchbar-info.date-format.label", "Date Format"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.date-format.subtitle", "Format style for date text")
+                )
+                fmt_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "date_format_idx", combo.get_selected()))
 
-            fmt_model = Gtk.StringList()
-            for _, label in self.date_format_options: fmt_model.append(label)
-            fmt_combo = Adw.ComboRow(
-                model=fmt_model,
-                title=self.get_locale_text("actions.touchbar-info.date-format.label", "Date Format"),
-                subtitle=self.get_locale_text("actions.touchbar-info.date-format.subtitle", "Format style for date text")
-            )
-            fmt_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "date_format_idx", combo.get_selected()))
+                font_row = Adw.ActionRow(
+                    title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
+                )
+                font_btn = Gtk.FontButton.new()
+                font_btn.set_use_font(True)
+                font_btn.set_use_size(False)
+                font_btn.set_valign(Gtk.Align.CENTER)
+                font_btn.set_hexpand(False)
+                font_btn.connect("font-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "date_font_str", btn.get_font()))
+                font_row.add_suffix(font_btn)
 
-            font_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
-                subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
-            )
-            font_btn = Gtk.FontButton.new()
-            font_btn.set_use_font(True)
-            font_btn.set_use_size(False)
-            font_btn.set_valign(Gtk.Align.CENTER)
-            font_btn.set_hexpand(False)
-            font_btn.connect("font-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "date_font_str", btn.get_font()))
-            font_row.add_suffix(font_btn)
+                fill_sw = Adw.SwitchRow(
+                    title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
+                )
+                fill_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                    self.set_slot_setting(sk, "date_fill_enabled", sw.get_active()),
+                    fill_color_row.set_sensitive(sw.get_active())
+                ))
 
-            fill_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
-                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
-            )
-            fill_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
-                self.set_slot_setting(sk, "date_fill_enabled", sw.get_active()),
-                fill_color_row.set_sensitive(sw.get_active())
-            ))
+                fill_color_row = Adw.ActionRow(
+                    title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for text interior fill")
+                )
+                fill_color_btn = Gtk.ColorButton()
+                fill_color_btn.set_valign(Gtk.Align.CENTER)
+                fill_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "date_font_color", self.gdk_to_hex(btn.get_rgba())))
+                fill_color_row.add_suffix(fill_color_btn)
 
-            fill_color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for text interior fill")
-            )
-            fill_color_btn = Gtk.ColorButton()
-            fill_color_btn.set_valign(Gtk.Align.CENTER)
-            fill_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "date_font_color", self.gdk_to_hex(btn.get_rgba())))
-            fill_color_row.add_suffix(fill_color_btn)
+                out_sw = Adw.SwitchRow(
+                    title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
+                )
+                out_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                    self.set_slot_setting(sk, "date_outline_enabled", sw.get_active()),
+                    out_color_row.set_sensitive(sw.get_active()),
+                    out_size_spin.set_sensitive(sw.get_active())
+                ))
 
-            out_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
-                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
-            )
-            out_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
-                self.set_slot_setting(sk, "date_outline_enabled", sw.get_active()),
-                out_color_row.set_sensitive(sw.get_active()),
-                out_size_spin.set_sensitive(sw.get_active())
-            ))
+                out_color_row = Adw.ActionRow(
+                    title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for text stroke outline")
+                )
+                out_color_btn = Gtk.ColorButton()
+                out_color_btn.set_valign(Gtk.Align.CENTER)
+                out_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "date_outline_color", self.gdk_to_hex(btn.get_rgba())))
+                out_color_row.add_suffix(out_color_btn)
 
-            out_color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for text stroke outline")
-            )
-            out_color_btn = Gtk.ColorButton()
-            out_color_btn.set_valign(Gtk.Align.CENTER)
-            out_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "date_outline_color", self.gdk_to_hex(btn.get_rgba())))
-            out_color_row.add_suffix(out_color_btn)
+                out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
+                out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
+                out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+                out_size_spin.connect("notify::value", lambda spin, pspec, sk=slot_key: self.set_slot_setting(sk, "date_outline_size", int(spin.get_value())))
 
-            out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
-            out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
-            out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
-            out_size_spin.connect("notify::value", lambda spin, pspec, sk=slot_key: self.set_slot_setting(sk, "date_outline_size", int(spin.get_value())))
+                rows_list = [fmt_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+                return {
+                    "fmt_combo": fmt_combo, "font_btn": font_btn,
+                    "fill_sw": fill_sw, "fill_color_btn": fill_color_btn, "fill_color_row": fill_color_row,
+                    "out_sw": out_sw, "out_color_btn": out_color_btn, "out_color_row": out_color_row,
+                    "out_size_spin": out_size_spin, "rows_list": rows_list
+                }
 
-            date_expander.add_row(fmt_combo)
-            date_expander.add_row(font_row)
-            date_expander.add_row(fill_sw)
-            date_expander.add_row(fill_color_row)
-            date_expander.add_row(out_sw)
-            date_expander.add_row(out_color_row)
-            date_expander.add_row(out_size_spin)
+            flat_ctrls = _create_date_rows()
 
-            return {
-                "date_expander": date_expander, "fmt_combo": fmt_combo, "font_btn": font_btn,
-                "fill_sw": fill_sw, "fill_color_btn": fill_color_btn, "fill_color_row": fill_color_row,
-                "out_sw": out_sw, "out_color_btn": out_color_btn, "out_color_row": out_color_row,
-                "out_size_spin": out_size_spin, "all_rows": [date_expander]
-            }
+            if is_full_mode:
+                exp_ctrls = _create_date_rows()
+                date_expander = Adw.ExpanderRow(
+                    title=self.get_locale_text("actions.touchbar-info.hdr-date.label", "Date Settings"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.hdr-date.subtitle", "Format and typography configuration for date display")
+                )
+                date_expander.add_css_class("touchbar-subhdr-row")
+                for r in exp_ctrls["rows_list"]:
+                    date_expander.add_row(r)
 
-        # Helper to create Time controls with ExpanderRow
-        def build_time_controls(slot_key: str):
-            time_expander = Adw.ExpanderRow(
-                title=self.get_locale_text("actions.touchbar-info.hdr-time.label", "Time Settings"),
-                subtitle=self.get_locale_text("actions.touchbar-info.hdr-time.subtitle", "Format and typography configuration for clock display")
-            )
-            time_expander.add_css_class("touchbar-subhdr-row")
+                all_rows = [date_expander] + flat_ctrls["rows_list"]
+                return {
+                    "flat": flat_ctrls,
+                    "exp": exp_ctrls,
+                    "date_expander": date_expander,
+                    "flat_rows": flat_ctrls["rows_list"],
+                    "all_rows": all_rows,
+                    "is_full_mode": True
+                }
+            else:
+                return {
+                    "flat": flat_ctrls,
+                    "exp": None,
+                    "date_expander": None,
+                    "flat_rows": flat_ctrls["rows_list"],
+                    "all_rows": flat_ctrls["rows_list"],
+                    "is_full_mode": False
+                }
 
-            sw_24h = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.use-24h.label", "Use 24-Hour Clock"),
-                subtitle=self.get_locale_text("actions.touchbar-info.use-24h.subtitle", "Switch between 12-hour (AM/PM) and 24-hour time format")
-            )
-            sw_24h.connect("notify::active", lambda sw, pspec, sk=slot_key: self.set_slot_setting(sk, "use_24h", sw.get_active()))
+        # Helper to create Time controls
+        def build_time_controls(slot_key: str, is_full_mode: bool = False):
+            def _create_time_rows():
+                sw_24h = Adw.SwitchRow(
+                    title=self.get_locale_text("actions.touchbar-info.use-24h.label", "Use 24-Hour Clock"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.use-24h.subtitle", "Switch between 12-hour (AM/PM) and 24-hour time format")
+                )
+                sw_24h.connect("notify::active", lambda sw, pspec, sk=slot_key: self.set_slot_setting(sk, "use_24h", sw.get_active()))
 
-            sw_sec = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.show-seconds.label", "Show Seconds"),
-                subtitle=self.get_locale_text("actions.touchbar-info.show-seconds.subtitle", "Include seconds in the displayed time")
-            )
-            sw_sec.connect("notify::active", lambda sw, pspec, sk=slot_key: self.set_slot_setting(sk, "show_seconds", sw.get_active()))
+                sw_sec = Adw.SwitchRow(
+                    title=self.get_locale_text("actions.touchbar-info.show-seconds.label", "Show Seconds"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.show-seconds.subtitle", "Include seconds in the displayed time")
+                )
+                sw_sec.connect("notify::active", lambda sw, pspec, sk=slot_key: self.set_slot_setting(sk, "show_seconds", sw.get_active()))
 
-            font_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
-                subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
-            )
-            font_btn = Gtk.FontButton.new()
-            font_btn.set_use_font(True)
-            font_btn.set_use_size(False)
-            font_btn.set_valign(Gtk.Align.CENTER)
-            font_btn.set_hexpand(False)
-            font_btn.connect("font-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "time_font_str", btn.get_font()))
-            font_row.add_suffix(font_btn)
+                font_row = Adw.ActionRow(
+                    title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
+                )
+                font_btn = Gtk.FontButton.new()
+                font_btn.set_use_font(True)
+                font_btn.set_use_size(False)
+                font_btn.set_valign(Gtk.Align.CENTER)
+                font_btn.set_hexpand(False)
+                font_btn.connect("font-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "time_font_str", btn.get_font()))
+                font_row.add_suffix(font_btn)
 
-            fill_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
-                subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
-            )
-            fill_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
-                self.set_slot_setting(sk, "time_fill_enabled", sw.get_active()),
-                fill_color_row.set_sensitive(sw.get_active())
-            ))
+                fill_sw = Adw.SwitchRow(
+                    title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.enable-fill.subtitle", "Draw solid interior text fill")
+                )
+                fill_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                    self.set_slot_setting(sk, "time_fill_enabled", sw.get_active()),
+                    fill_color_row.set_sensitive(sw.get_active())
+                ))
 
-            fill_color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for text interior fill")
-            )
-            fill_color_btn = Gtk.ColorButton()
-            fill_color_btn.set_valign(Gtk.Align.CENTER)
-            fill_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "time_font_color", self.gdk_to_hex(btn.get_rgba())))
-            fill_color_row.add_suffix(fill_color_btn)
+                fill_color_row = Adw.ActionRow(
+                    title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Font Fill Color"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for text interior fill")
+                )
+                fill_color_btn = Gtk.ColorButton()
+                fill_color_btn.set_valign(Gtk.Align.CENTER)
+                fill_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "time_font_color", self.gdk_to_hex(btn.get_rgba())))
+                fill_color_row.add_suffix(fill_color_btn)
 
-            out_sw = Adw.SwitchRow(
-                title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
-                subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
-            )
-            out_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
-                self.set_slot_setting(sk, "time_outline_enabled", sw.get_active()),
-                out_color_row.set_sensitive(sw.get_active()),
-                out_size_spin.set_sensitive(sw.get_active())
-            ))
+                out_sw = Adw.SwitchRow(
+                    title=self.get_locale_text("actions.touchbar-info.enable-outline.label", "Enable Text Outline"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.enable-outline.subtitle", "Draw stroke outline around text")
+                )
+                out_sw.connect("notify::active", lambda sw, pspec, sk=slot_key: (
+                    self.set_slot_setting(sk, "time_outline_enabled", sw.get_active()),
+                    out_color_row.set_sensitive(sw.get_active()),
+                    out_size_spin.set_sensitive(sw.get_active())
+                ))
 
-            out_color_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
-                subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for text stroke outline")
-            )
-            out_color_btn = Gtk.ColorButton()
-            out_color_btn.set_valign(Gtk.Align.CENTER)
-            out_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "time_outline_color", self.gdk_to_hex(btn.get_rgba())))
-            out_color_row.add_suffix(out_color_btn)
+                out_color_row = Adw.ActionRow(
+                    title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Outline Color"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for text stroke outline")
+                )
+                out_color_btn = Gtk.ColorButton()
+                out_color_btn.set_valign(Gtk.Align.CENTER)
+                out_color_btn.connect("color-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "time_outline_color", self.gdk_to_hex(btn.get_rgba())))
+                out_color_row.add_suffix(out_color_btn)
 
-            out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
-            out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
-            out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
-            out_size_spin.connect("notify::value", lambda spin, pspec, sk=slot_key: self.set_slot_setting(sk, "time_outline_size", int(spin.get_value())))
+                out_size_spin = Adw.SpinRow.new_with_range(1, 10, 1)
+                out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
+                out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
+                out_size_spin.connect("notify::value", lambda spin, pspec, sk=slot_key: self.set_slot_setting(sk, "time_outline_size", int(spin.get_value())))
 
-            time_expander.add_row(sw_24h)
-            time_expander.add_row(sw_sec)
-            time_expander.add_row(font_row)
-            time_expander.add_row(fill_sw)
-            time_expander.add_row(fill_color_row)
-            time_expander.add_row(out_sw)
-            time_expander.add_row(out_color_row)
-            time_expander.add_row(out_size_spin)
+                rows_list = [sw_24h, sw_sec, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+                return {
+                    "sw_24h": sw_24h, "sw_sec": sw_sec, "font_btn": font_btn,
+                    "fill_sw": fill_sw, "fill_color_btn": fill_color_btn, "fill_color_row": fill_color_row,
+                    "out_sw": out_sw, "out_color_btn": out_color_btn, "out_color_row": out_color_row,
+                    "out_size_spin": out_size_spin, "rows_list": rows_list
+                }
 
-            return {
-                "time_expander": time_expander, "sw_24h": sw_24h, "sw_sec": sw_sec, "font_btn": font_btn,
-                "fill_sw": fill_sw, "fill_color_btn": fill_color_btn, "fill_color_row": fill_color_row,
-                "out_sw": out_sw, "out_color_btn": out_color_btn, "out_color_row": out_color_row,
-                "out_size_spin": out_size_spin, "all_rows": [time_expander]
-            }
+            flat_ctrls = _create_time_rows()
+
+            if is_full_mode:
+                exp_ctrls = _create_time_rows()
+                time_expander = Adw.ExpanderRow(
+                    title=self.get_locale_text("actions.touchbar-info.hdr-time.label", "Time Settings"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.hdr-time.subtitle", "Format and typography configuration for clock display")
+                )
+                time_expander.add_css_class("touchbar-subhdr-row")
+                for r in exp_ctrls["rows_list"]:
+                    time_expander.add_row(r)
+
+                all_rows = [time_expander] + flat_ctrls["rows_list"]
+                return {
+                    "flat": flat_ctrls,
+                    "exp": exp_ctrls,
+                    "time_expander": time_expander,
+                    "flat_rows": flat_ctrls["rows_list"],
+                    "all_rows": all_rows,
+                    "is_full_mode": True
+                }
+            else:
+                return {
+                    "flat": flat_ctrls,
+                    "exp": None,
+                    "time_expander": None,
+                    "flat_rows": flat_ctrls["rows_list"],
+                    "all_rows": flat_ctrls["rows_list"],
+                    "is_full_mode": False
+                }
 
         # Helper to create Weather controls
         def build_weather_controls(slot_key: str):
@@ -1328,7 +1365,7 @@ class TouchBarInfoAction(ActionBase):
 
             all_rows = [media_hdr, player_combo, vis_combo, color_mode_combo, solid_color_row, grad_start_row, grad_mid_row, grad_end_row]
             if is_full_mode:
-                all_rows.extend([song_expander, artist_expander])
+                all_rows.extend([artist_expander, song_expander])
 
             return {
                 "media_hdr": media_hdr, "player_combo": player_combo, "vis_combo": vis_combo,
@@ -1336,14 +1373,14 @@ class TouchBarInfoAction(ActionBase):
                 "solid_color_btn": solid_color_btn, "grad_start_row": grad_start_row,
                 "grad_start_btn": grad_start_btn, "grad_mid_row": grad_mid_row, "grad_mid_btn": grad_mid_btn,
                 "grad_end_row": grad_end_row, "grad_end_btn": grad_end_btn,
-                "song_expander": song_expander, "song_font_btn": song_font_btn,
-                "song_fill_sw": song_fill_sw, "song_fill_color_btn": song_fill_color_btn,
-                "song_out_sw": song_out_sw, "song_out_color_btn": song_out_color_btn,
-                "song_out_size_spin": song_out_size_spin,
                 "artist_expander": artist_expander, "artist_font_btn": artist_font_btn,
                 "artist_fill_sw": artist_fill_sw, "artist_fill_color_btn": artist_fill_color_btn,
                 "artist_out_sw": artist_out_sw, "artist_out_color_btn": artist_out_color_btn,
                 "artist_out_size_spin": artist_out_size_spin,
+                "song_expander": song_expander, "song_font_btn": song_font_btn,
+                "song_fill_sw": song_fill_sw, "song_fill_color_btn": song_fill_color_btn,
+                "song_out_sw": song_out_sw, "song_out_color_btn": song_out_color_btn,
+                "song_out_size_spin": song_out_size_spin,
                 "all_rows": all_rows, "is_full_mode": is_full_mode
             }
 
@@ -1372,8 +1409,8 @@ class TouchBarInfoAction(ActionBase):
             )
 
             full_slot_key = f"{prefix_key}_full"
-            full_date_ctrls = build_date_controls(full_slot_key)
-            full_time_ctrls = build_time_controls(full_slot_key)
+            full_date_ctrls = build_date_controls(full_slot_key, is_full_mode=True)
+            full_time_ctrls = build_time_controls(full_slot_key, is_full_mode=True)
             full_weather_ctrls = build_weather_controls(full_slot_key)
             full_cpu_ctrls = build_cpu_controls(full_slot_key)
             full_net_ctrls = build_net_controls(full_slot_key)
@@ -1402,8 +1439,8 @@ class TouchBarInfoAction(ActionBase):
             )
 
             top_slot_key = f"{prefix_key}_top"
-            top_date_ctrls = build_date_controls(top_slot_key)
-            top_time_ctrls = build_time_controls(top_slot_key)
+            top_date_ctrls = build_date_controls(top_slot_key, is_full_mode=False)
+            top_time_ctrls = build_time_controls(top_slot_key, is_full_mode=False)
             top_weather_ctrls = build_weather_controls(top_slot_key)
             top_cpu_ctrls = build_cpu_controls(top_slot_key)
             top_net_ctrls = build_net_controls(top_slot_key)
@@ -1443,8 +1480,8 @@ class TouchBarInfoAction(ActionBase):
             )
 
             bot_slot_key = f"{prefix_key}_bot"
-            bot_date_ctrls = build_date_controls(bot_slot_key)
-            bot_time_ctrls = build_time_controls(bot_slot_key)
+            bot_date_ctrls = build_date_controls(bot_slot_key, is_full_mode=False)
+            bot_time_ctrls = build_time_controls(bot_slot_key, is_full_mode=False)
             bot_weather_ctrls = build_weather_controls(bot_slot_key)
             bot_cpu_ctrls = build_cpu_controls(bot_slot_key)
             bot_net_ctrls = build_net_controls(bot_slot_key)
@@ -1500,13 +1537,31 @@ class TouchBarInfoAction(ActionBase):
                     for r in media_ctrls["all_rows"]: r.set_visible(False)
                     return
 
-                # Date Visibility (Full: only 7 [Stacked Date & Time] | Split: only 2 [Date])
-                show_date = (widget_choice == 7) if is_full_mode else (widget_choice == 2)
-                date_ctrls["date_expander"].set_visible(show_date)
+                # Date Visibility (Full: choice 7 [Stacked] uses expander; choice 2 [Date] uses flat rows | Split: choice 2 [Date] uses flat rows)
+                if is_full_mode:
+                    show_stacked = (widget_choice == 7)
+                    show_date = (widget_choice == 2)
+                    if date_ctrls["date_expander"] is not None:
+                        date_ctrls["date_expander"].set_visible(show_stacked)
+                    for r in date_ctrls["flat_rows"]:
+                        r.set_visible(show_date)
+                else:
+                    show_date = (widget_choice == 2)
+                    for r in date_ctrls["flat_rows"]:
+                        r.set_visible(show_date)
 
-                # Time Visibility (Full: only 7 [Stacked Date & Time] | Split: only 7 [Time])
-                show_time = (widget_choice == 7) if is_full_mode else (widget_choice == 7)
-                time_ctrls["time_expander"].set_visible(show_time)
+                # Time Visibility (Full: choice 7 [Stacked] uses expander; choice 8 [Time] uses flat rows | Split: choice 7 [Time] uses flat rows)
+                if is_full_mode:
+                    show_stacked = (widget_choice == 7)
+                    show_time = (widget_choice == 8)
+                    if time_ctrls["time_expander"] is not None:
+                        time_ctrls["time_expander"].set_visible(show_stacked)
+                    for r in time_ctrls["flat_rows"]:
+                        r.set_visible(show_time)
+                else:
+                    show_time = (widget_choice == 7)
+                    for r in time_ctrls["flat_rows"]:
+                        r.set_visible(show_time)
 
                 # Weather Visibility (Full: 9 | Split: 8)
                 show_weather = (widget_choice == 9) if is_full_mode else (widget_choice == 8)
@@ -1557,8 +1612,8 @@ class TouchBarInfoAction(ActionBase):
                 media_ctrls["grad_end_row"].set_visible(show_media and is_grad)
 
                 if is_full_mode:
-                    media_ctrls["song_expander"].set_visible(show_media)
                     media_ctrls["artist_expander"].set_visible(show_media)
+                    media_ctrls["song_expander"].set_visible(show_media)
 
             def update_section_vis():
                 is_split = (mode_combo.get_selected() == 1)
@@ -1692,34 +1747,44 @@ class TouchBarInfoAction(ActionBase):
             for slot_key, ctrls in self.slot_controls.items():
                 # Date
                 d = ctrls["date"]
-                d["fmt_combo"].set_selected(self.get_slot_setting(settings, slot_key, "date_format_idx", 0))
-                d["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "date_font_str", "DejaVu Sans Bold 25"))
-                date_fill_en = self.get_slot_setting(settings, slot_key, "date_fill_enabled", True)
-                d["fill_sw"].set_active(date_fill_en)
-                d["fill_color_row"].set_sensitive(date_fill_en)
-                self.set_color_button_rgba(d["fill_color_btn"], self.get_slot_setting(settings, slot_key, "date_font_color", "#AAC8E6FF"))
-                date_out_en = self.get_slot_setting(settings, slot_key, "date_outline_enabled", False)
-                d["out_sw"].set_active(date_out_en)
-                d["out_color_row"].set_sensitive(date_out_en)
-                d["out_size_spin"].set_sensitive(date_out_en)
-                self.set_color_button_rgba(d["out_color_btn"], self.get_slot_setting(settings, slot_key, "date_outline_color", "#000000FF"))
-                d["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "date_outline_size", 2))
+                target_d_groups = [d["flat"]]
+                if d.get("exp") is not None:
+                    target_d_groups.append(d["exp"])
+
+                for grp in target_d_groups:
+                    grp["fmt_combo"].set_selected(self.get_slot_setting(settings, slot_key, "date_format_idx", 0))
+                    grp["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "date_font_str", "DejaVu Sans Bold 25"))
+                    date_fill_en = self.get_slot_setting(settings, slot_key, "date_fill_enabled", True)
+                    grp["fill_sw"].set_active(date_fill_en)
+                    grp["fill_color_row"].set_sensitive(date_fill_en)
+                    self.set_color_button_rgba(grp["fill_color_btn"], self.get_slot_setting(settings, slot_key, "date_font_color", "#AAC8E6FF"))
+                    date_out_en = self.get_slot_setting(settings, slot_key, "date_outline_enabled", False)
+                    grp["out_sw"].set_active(date_out_en)
+                    grp["out_color_row"].set_sensitive(date_out_en)
+                    grp["out_size_spin"].set_sensitive(date_out_en)
+                    self.set_color_button_rgba(grp["out_color_btn"], self.get_slot_setting(settings, slot_key, "date_outline_color", "#000000FF"))
+                    grp["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "date_outline_size", 2))
 
                 # Time
                 t = ctrls["time"]
-                t["sw_24h"].set_active(self.get_slot_setting(settings, slot_key, "use_24h", False))
-                t["sw_sec"].set_active(self.get_slot_setting(settings, slot_key, "show_seconds", False))
-                t["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "time_font_str", "DejaVu Sans Bold 45"))
-                time_fill_en = self.get_slot_setting(settings, slot_key, "time_fill_enabled", True)
-                t["fill_sw"].set_active(time_fill_en)
-                t["fill_color_row"].set_sensitive(time_fill_en)
-                self.set_color_button_rgba(t["fill_color_btn"], self.get_slot_setting(settings, slot_key, "time_font_color", "#FFFFFFFF"))
-                time_out_en = self.get_slot_setting(settings, slot_key, "time_outline_enabled", False)
-                t["out_sw"].set_active(time_out_en)
-                t["out_color_row"].set_sensitive(time_out_en)
-                t["out_size_spin"].set_sensitive(time_out_en)
-                self.set_color_button_rgba(t["out_color_btn"], self.get_slot_setting(settings, slot_key, "time_outline_color", "#000000FF"))
-                t["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "time_outline_size", 2))
+                target_t_groups = [t["flat"]]
+                if t.get("exp") is not None:
+                    target_t_groups.append(t["exp"])
+
+                for grp in target_t_groups:
+                    grp["sw_24h"].set_active(self.get_slot_setting(settings, slot_key, "use_24h", False))
+                    grp["sw_sec"].set_active(self.get_slot_setting(settings, slot_key, "show_seconds", False))
+                    grp["font_btn"].set_font(self.get_slot_setting(settings, slot_key, "time_font_str", "DejaVu Sans Bold 45"))
+                    time_fill_en = self.get_slot_setting(settings, slot_key, "time_fill_enabled", True)
+                    grp["fill_sw"].set_active(time_fill_en)
+                    grp["fill_color_row"].set_sensitive(time_fill_en)
+                    self.set_color_button_rgba(grp["fill_color_btn"], self.get_slot_setting(settings, slot_key, "time_font_color", "#FFFFFFFF"))
+                    time_out_en = self.get_slot_setting(settings, slot_key, "time_outline_enabled", False)
+                    grp["out_sw"].set_active(time_out_en)
+                    grp["out_color_row"].set_sensitive(time_out_en)
+                    grp["out_size_spin"].set_sensitive(time_out_en)
+                    self.set_color_button_rgba(grp["out_color_btn"], self.get_slot_setting(settings, slot_key, "time_outline_color", "#000000FF"))
+                    grp["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "time_outline_size", 2))
 
                 # Weather
                 w = ctrls["weather"]
@@ -3182,15 +3247,15 @@ class TouchBarInfoAction(ActionBase):
         content_max_x = x_max - margin_x
         avail_w = max(20.0, float(content_max_x - content_x))
 
-        title = self.media_state.get("title", "No Media Playing")
         artist = self.media_state.get("artist", "")
+        title = self.media_state.get("title", "No Media Playing")
 
-        song_y = y_min + int(bh * 0.10)
-        artist_y = y_min + int(bh * 0.35)
+        artist_y = y_min + int(bh * 0.10)
+        song_y = y_min + int(bh * 0.35)
 
-        self.draw_marquee_text(image, draw, (content_x, song_y), avail_w, title, font_song, song_fill_en, song_fill_col, song_out_en, song_out_col, song_out_sz)
         if artist:
             self.draw_marquee_text(image, draw, (content_x, artist_y), avail_w, artist, font_artist, artist_fill_en, artist_fill_col, artist_out_en, artist_out_col, artist_out_sz)
+        self.draw_marquee_text(image, draw, (content_x, song_y), avail_w, title, font_song, song_fill_en, song_fill_col, song_out_en, song_out_col, song_out_sz)
 
         # Visualizer
         vis_box = (content_x, y_min + int(bh * 0.58), content_max_x, y_max - int(bh * 0.08))
