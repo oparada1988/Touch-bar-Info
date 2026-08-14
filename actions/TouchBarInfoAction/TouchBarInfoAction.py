@@ -17,6 +17,7 @@ import base64
 import hashlib
 from urllib.parse import urlparse, unquote
 import dbus
+import time
 from threading import Thread, Timer
 from PIL import Image, ImageDraw, ImageFont
 
@@ -41,7 +42,7 @@ class TouchBarInfoAction(ActionBase):
         self._syncing_controls = False
         self._update_scheduled = False
 
-        # Media Player State
+        # Media Player State & Animation Timer
         self.media_state = {"status": "Stopped", "title": "", "artist": "", "album": "", "art_url": "", "identity": ""}
         self.media_art_cache = {}
         self.media_fetching_urls = set()
@@ -51,6 +52,10 @@ class TouchBarInfoAction(ActionBase):
         self.vis_phases = [random.uniform(0, 6.28) for _ in range(self.num_vis_bars)]
         self.vis_tick = 0
         self.session_bus = None
+        self._anim_timer_id = None
+        self._last_dbus_poll = 0.0
+        self._cached_bg_path = None
+        self._cached_bg_image = None
 
         # System Monitor Stats Buffers
         self.cpu_history = [0.0] * 20
@@ -194,26 +199,83 @@ class TouchBarInfoAction(ActionBase):
                 GLib.idle_add(self.update_display)
             return False
 
+    def is_media_active_and_playing(self) -> bool:
+        settings = self.get_settings() or {}
+        sec_a_mode = settings.get("sec_a_mode", 0)
+        sec_a_full = settings.get("sec_a_full_widget", 0)
+        sec_a_top = settings.get("sec_a_top_widget", 0)
+        sec_a_bot = settings.get("sec_a_bottom_widget", 0)
+
+        sec_b_mode = settings.get("sec_b_mode", 0)
+        sec_b_full = settings.get("sec_b_full_widget", 0)
+        sec_b_top = settings.get("sec_b_top_widget", 0)
+        sec_b_bot = settings.get("sec_b_bottom_widget", 0)
+
+        sec_c_mode = settings.get("sec_c_mode", 0)
+        sec_c_full = settings.get("sec_c_full_widget", 0)
+        sec_c_top = settings.get("sec_c_top_widget", 0)
+        sec_c_bot = settings.get("sec_c_bottom_widget", 0)
+
+        is_active = (sec_a_mode == 0 and sec_a_full == 10) or (sec_a_mode == 1 and (sec_a_top == 9 or sec_a_bot == 9)) or \
+                    (sec_b_mode == 0 and sec_b_full == 10) or (sec_b_mode == 1 and (sec_b_top == 9 or sec_b_bot == 9)) or \
+                    (sec_c_mode == 0 and sec_c_full == 10) or (sec_c_mode == 1 and (sec_c_top == 9 or sec_c_bot == 9))
+
+        return is_active and self.media_state.get("status") == "Playing"
+
+    def start_anim_timer(self):
+        if self._anim_timer_id is None:
+            self._anim_timer_id = GLib.timeout_add(40, self._anim_tick)
+
+    def stop_anim_timer(self):
+        if self._anim_timer_id is not None:
+            try:
+                GLib.source_remove(self._anim_timer_id)
+            except Exception:
+                pass
+            self._anim_timer_id = None
+
+    def _anim_tick(self) -> bool:
+        if self._was_locked:
+            self._anim_timer_id = None
+            return False
+        if not self.is_media_active_and_playing():
+            self._anim_timer_id = None
+            self.update_display()
+            return False
+
+        self.update_media_state(poll_dbus=False)
+        self.update_display()
+        return True
+
     def on_ready(self) -> None:
         if self.handle_lock_blanking():
             return
         self.collect_system_stats()
         self.fetch_weather_async(force=True)
-        self.update_media_state()
+        self.update_media_state(poll_dbus=True)
         self.update_display()
+        if self.is_media_active_and_playing():
+            self.start_anim_timer()
 
     def on_tick(self) -> None:
         if self.handle_lock_blanking():
+            self.stop_anim_timer()
             return
         self.collect_system_stats()
         self.fetch_weather_async(force=False)
-        self.update_media_state()
-        self.update_display()
+        self.update_media_state(poll_dbus=True)
+        if self.is_media_active_and_playing():
+            self.start_anim_timer()
+        else:
+            self.stop_anim_timer()
+            self.update_display()
 
     def on_remove(self) -> None:
+        self.stop_anim_timer()
         self.clear_background()
 
     def on_removed_from_cache(self) -> None:
+        self.stop_anim_timer()
         self.clear_background()
 
     def clear_background(self) -> None:
@@ -3654,127 +3716,125 @@ class TouchBarInfoAction(ActionBase):
 
     # --- Media Player Drawers & Helpers ---
     def interpolate_color(self, c1: tuple, c2: tuple, t: float) -> tuple:
-        t = max(0.0, min(1.0, float(t)))
-        r = int(c1[0] + (c2[0] - c1[0]) * t)
-        g = int(c1[1] + (c2[1] - c1[1]) * t)
-        b = int(c1[2] + (c2[2] - c1[2]) * t)
-        a = int(c1[3] + (c2[3] - c1[3]) * t) if len(c1) > 3 and len(c2) > 3 else 255
-        return (r, g, b, a)
+            return (r, g, b, a)
 
-    def update_media_state(self):
-        try:
-            if not self.session_bus:
-                self.session_bus = dbus.SessionBus()
-            player_names = [name for name in self.session_bus.list_names() if name.startswith("org.mpris.MediaPlayer2.")]
-        except Exception:
-            player_names = []
-
-        settings = self.get_settings() or {}
-        player_idx = settings.get("media_player_idx", 0)
-
-        target_name = None
-        if player_idx == 1: # Spotify
-            for name in player_names:
-                if "spotify" in name.lower():
-                    target_name = name
-                    break
-        elif player_idx == 2: # Chrome/Chromium
-            for name in player_names:
-                if "chrome" in name.lower() or "chromium" in name.lower():
-                    target_name = name
-                    break
-        elif player_idx == 3: # Firefox
-            for name in player_names:
-                if "firefox" in name.lower():
-                    target_name = name
-                    break
-        elif player_idx == 4: # VLC
-            for name in player_names:
-                if "vlc" in name.lower():
-                    target_name = name
-                    break
-        elif player_idx == 5: # Rhythmbox
-            for name in player_names:
-                if "rhythmbox" in name.lower():
-                    target_name = name
-                    break
-        elif player_idx == 6: # Generic
-            if player_names:
-                target_name = player_names[0]
-
-        # Auto-detect: search for active Playing player first, else Paused, else first available
-        if target_name is None and player_names and self.session_bus:
-            playing_candidates = []
-            paused_candidates = []
-            for name in player_names:
-                try:
-                    obj = self.session_bus.get_object(name, "/org/mpris/MediaPlayer2")
-                    props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
-                    status = str(props.Get("org.mpris.MediaPlayer2.Player", "PlaybackStatus"))
-                    if status == "Playing":
-                        playing_candidates.append(name)
-                    elif status == "Paused":
-                        paused_candidates.append(name)
-                except Exception:
-                    pass
-            if playing_candidates:
-                target_name = playing_candidates[0]
-            elif paused_candidates:
-                target_name = paused_candidates[0]
-            else:
-                target_name = player_names[0]
-
-        title = ""
-        artist = ""
-        album = ""
-        art_url = ""
-        playback_status = "Stopped"
-
-        if target_name and self.session_bus:
+    def update_media_state(self, poll_dbus: bool = True):
+        now_ts = time.time()
+        if poll_dbus or (now_ts - self._last_dbus_poll > 0.8):
+            self._last_dbus_poll = now_ts
             try:
-                obj = self.session_bus.get_object(target_name, "/org/mpris/MediaPlayer2")
-                props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
-                playback_status = str(props.Get("org.mpris.MediaPlayer2.Player", "PlaybackStatus"))
-                metadata = props.Get("org.mpris.MediaPlayer2.Player", "Metadata")
-                if metadata:
-                    if "xesam:title" in metadata:
-                        title = str(metadata["xesam:title"])
-                    if "xesam:artist" in metadata:
-                        raw_artist = metadata["xesam:artist"]
-                        if isinstance(raw_artist, (list, dbus.Array)):
-                            artist = ", ".join(str(a) for a in raw_artist if str(a))
-                        else:
-                            artist = str(raw_artist)
-                    if "xesam:album" in metadata:
-                        album = str(metadata["xesam:album"])
-                    if "mpris:artUrl" in metadata:
-                        art_url = str(metadata["mpris:artUrl"])
+                if not self.session_bus:
+                    self.session_bus = dbus.SessionBus()
+                player_names = [name for name in self.session_bus.list_names() if name.startswith("org.mpris.MediaPlayer2.")]
             except Exception:
-                pass
+                player_names = []
 
-        if not title and not artist:
-            title = "No Media Playing"
-            artist = "Touch-bar Info"
+            settings = self.get_settings() or {}
+            player_idx = settings.get("media_player_idx", 0)
+
+            target_name = None
+            if player_idx == 1: # Spotify
+                for name in player_names:
+                    if "spotify" in name.lower():
+                        target_name = name
+                        break
+            elif player_idx == 2: # Chrome/Chromium
+                for name in player_names:
+                    if "chrome" in name.lower() or "chromium" in name.lower():
+                        target_name = name
+                        break
+            elif player_idx == 3: # Firefox
+                for name in player_names:
+                    if "firefox" in name.lower():
+                        target_name = name
+                        break
+            elif player_idx == 4: # VLC
+                for name in player_names:
+                    if "vlc" in name.lower():
+                        target_name = name
+                        break
+            elif player_idx == 5: # Rhythmbox
+                for name in player_names:
+                    if "rhythmbox" in name.lower():
+                        target_name = name
+                        break
+            elif player_idx == 6: # Generic
+                if player_names:
+                    target_name = player_names[0]
+
+            # Auto-detect: search for active Playing player first, else Paused, else first available
+            if target_name is None and player_names and self.session_bus:
+                playing_candidates = []
+                paused_candidates = []
+                for name in player_names:
+                    try:
+                        obj = self.session_bus.get_object(name, "/org/mpris/MediaPlayer2")
+                        props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
+                        status = str(props.Get("org.mpris.MediaPlayer2.Player", "PlaybackStatus"))
+                        if status == "Playing":
+                            playing_candidates.append(name)
+                        elif status == "Paused":
+                            paused_candidates.append(name)
+                    except Exception:
+                        pass
+                if playing_candidates:
+                    target_name = playing_candidates[0]
+                elif paused_candidates:
+                    target_name = paused_candidates[0]
+                else:
+                    target_name = player_names[0]
+
+            title = ""
+            artist = ""
+            album = ""
+            art_url = ""
             playback_status = "Stopped"
 
-        # Normalize Spotify / Web art URLs
-        if art_url:
-            if art_url.startswith("spotify:image:"):
-                art_url = "https://i.scdn.co/image/" + art_url.split(":")[-1]
-            elif "open.spotify.com/image/" in art_url:
-                art_url = "https://i.scdn.co/image/" + art_url.split("/")[-1]
+            if target_name and self.session_bus:
+                try:
+                    obj = self.session_bus.get_object(target_name, "/org/mpris/MediaPlayer2")
+                    props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
+                    playback_status = str(props.Get("org.mpris.MediaPlayer2.Player", "PlaybackStatus"))
+                    metadata = props.Get("org.mpris.MediaPlayer2.Player", "Metadata")
+                    if metadata:
+                        if "xesam:title" in metadata:
+                            title = str(metadata["xesam:title"])
+                        if "xesam:artist" in metadata:
+                            raw_artist = metadata["xesam:artist"]
+                            if isinstance(raw_artist, (list, dbus.Array)):
+                                artist = ", ".join(str(a) for a in raw_artist if str(a))
+                            else:
+                                artist = str(raw_artist)
+                        if "xesam:album" in metadata:
+                            album = str(metadata["xesam:album"])
+                        if "mpris:artUrl" in metadata:
+                            art_url = str(metadata["mpris:artUrl"])
+                except Exception:
+                    pass
 
-        self.media_state = {
-            "title": title,
-            "artist": artist,
-            "album": album,
-            "art_url": art_url,
-            "status": playback_status
-        }
+            if not title and not artist:
+                title = "No Media Playing"
+                artist = "Touch-bar Info"
+                playback_status = "Stopped"
+
+            # Normalize Spotify / Web art URLs
+            if art_url:
+                if art_url.startswith("spotify:image:"):
+                    art_url = "https://i.scdn.co/image/" + art_url.split(":")[-1]
+                elif "open.spotify.com/image/" in art_url:
+                    art_url = "https://i.scdn.co/image/" + art_url.split("/")[-1]
+
+            self.media_state = {
+                "title": title,
+                "artist": artist,
+                "album": album,
+                "art_url": art_url,
+                "status": playback_status
+            }
 
         # Advance visualizer tick and simulate independent equalizer bars
         self.vis_tick += 1
-        is_playing = (playback_status == "Playing")
+        is_playing = (self.media_state["status"] == "Playing")
         num_bars = len(self.vis_heights)
 
         if is_playing:
@@ -4373,9 +4433,11 @@ class TouchBarInfoAction(ActionBase):
                     resolved_bg_path = bg_p
 
             if resolved_bg_path and os.path.isfile(resolved_bg_path):
-                with Image.open(resolved_bg_path) as bg_img:
-                    bg_conv = bg_img.convert("RGBA").resize(image.size, Image.Resampling.LANCZOS)
-                    final_image = Image.alpha_composite(bg_conv, image)
+                if self._cached_bg_path != resolved_bg_path or self._cached_bg_image is None or self._cached_bg_image.size != image.size:
+                    with Image.open(resolved_bg_path) as bg_img:
+                        self._cached_bg_image = bg_img.convert("RGBA").resize(image.size, Image.Resampling.LANCZOS)
+                    self._cached_bg_path = resolved_bg_path
+                final_image = Image.alpha_composite(self._cached_bg_image, image)
         except Exception as e:
             log.error(f"TouchBarInfo: Error compositing custom background image: {e}")
 
@@ -4384,7 +4446,7 @@ class TouchBarInfoAction(ActionBase):
         render_path = os.path.join(assets_dir, f"touchbar_render_{self.state}.png")
 
         try:
-            final_image.save(render_path)
+            final_image.save(render_path, format="PNG", compress_level=1)
             self.page.set_background_image(self.input_ident, self.state, render_path, update=False)
         except Exception as e:
             log.error(f"TouchBarInfo: Error saving touchscreen background: {e}")
