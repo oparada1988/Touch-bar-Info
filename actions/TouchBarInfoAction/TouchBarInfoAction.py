@@ -297,95 +297,107 @@ class TouchBarInfoAction(ActionBase):
             self._cached_disk_mounts = self.get_system_disk_mounts()
         self.disk_mounts = self._cached_disk_mounts
 
-    def get_system_disk_mounts(self) -> list[tuple[str, str]]:
-        if getattr(self, "_cached_disk_mounts", None):
+    def get_system_disk_mounts(self, force: bool = False) -> list[tuple[str, str]]:
+        if not force and getattr(self, "_cached_disk_mounts", None):
             return self._cached_disk_mounts
 
         disks = []
         seen = set()
 
-        def add_target(mount_path, dev_name="", src=""):
-            if not mount_path or mount_path in seen:
+        IGNORED_PREFIXES = (
+            '/proc', '/sys', '/dev', '/run/user', '/var/lib/flatpak', '/app',
+            '/var/cache', '/var/tmp', '/tmp', '/boot/efi', '/.flatpak-info',
+            '/run/flatpak', '/run/host/fonts'
+        )
+        IGNORED_FSTYPES = {
+            'tmpfs', 'devtmpfs', 'squashfs', 'overlay', 'proc', 'sysfs',
+            'securityfs', 'cgroup', 'cgroup2', 'pstore', 'bpf', 'autofs',
+            'ramfs', 'hugetlbfs', 'mqueue', 'debugfs', 'tracefs',
+            'fuse.portal', 'fuse.gvfsd-fuse'
+        }
+
+        def add_target(mount_path, dev_name='', label=''):
+            if not mount_path:
                 return
             cleaned = os.path.normpath(mount_path)
-            if cleaned != "/" and (cleaned.startswith(('/proc', '/sys', '/dev', '/run/user', '/var/lib/flatpak', '/app')) or '.flatpak' in cleaned):
+            if cleaned in seen:
                 return
-            seen.add(mount_path)
+            if cleaned != '/' and (cleaned.startswith(IGNORED_PREFIXES) or '.flatpak' in cleaned):
+                return
+            seen.add(cleaned)
 
-            if mount_path == "/":
-                disp = "System Root (/)"
-            elif mount_path.startswith("/home"):
-                base = os.path.basename(mount_path.rstrip("/"))
-                disp = f"Home ({base})" if base and base != "home" else "Home (/home)"
+            if label:
+                clean_name = label
+            elif cleaned == '/':
+                clean_name = 'System Root'
+            elif cleaned == '/home':
+                clean_name = 'Home'
+            elif cleaned.startswith('/home/'):
+                parts = cleaned.split('/')
+                user_name = parts[2] if len(parts) > 2 and parts[2] else 'Home'
+                clean_name = f'Home ({user_name})'
             else:
-                base = os.path.basename(mount_path.rstrip("/"))
-                disp = f"{base.capitalize()} ({mount_path})" if base else mount_path
+                base = os.path.basename(cleaned.rstrip('/'))
+                clean_name = base.capitalize() if base else cleaned
 
-            if dev_name and not dev_name.startswith('/dev/loop'):
-                dev_base = os.path.basename(dev_name)
-                disp += f" [{dev_base}]"
+            dev_base = os.path.basename(dev_name) if dev_name and not dev_name.startswith('/dev/loop') else ''
+            if dev_base:
+                disp = f'{clean_name} — {cleaned} ({dev_base})'
+            else:
+                disp = f'{clean_name} — {cleaned}'
 
-            disks.append((mount_path, disp))
+            disks.append((cleaned, disp))
 
-        ignored_fstypes = {'tmpfs', 'devtmpfs', 'squashfs', 'overlay', 'proc', 'sysfs', 'securityfs', 'cgroup', 'cgroup2', 'pstore', 'bpf', 'autofs', 'ramfs', 'hugetlbfs', 'mqueue', 'debugfs', 'tracefs', 'fuse.portal', 'fuse.gvfsd-fuse'}
-
-        # Fast direct read of /proc/mounts if available
+        # Strategy 1: flatpak-spawn host /proc/mounts
         try:
-            if os.path.exists('/proc/mounts'):
+            p = subprocess.run(['flatpak-spawn', '--host', '--directory=/', 'cat', '/proc/mounts'], capture_output=True, text=True, timeout=2)
+            if p.stdout and p.returncode == 0:
+                for line in p.stdout.splitlines():
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        dev, m, fs = parts[0], parts[1], parts[2]
+                        if dev.startswith('/dev/') and fs not in IGNORED_FSTYPES:
+                            add_target(m, dev)
+        except Exception:
+            pass
+
+        # Strategy 2: host lsblk JSON query for labels and mountpoints
+        try:
+            p = subprocess.run(['flatpak-spawn', '--host', 'lsblk', '-J', '-o', 'NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS'], capture_output=True, text=True, timeout=3)
+            if p.stdout and p.stdout.strip().startswith('{'):
+                data = json.loads(p.stdout)
+                def parse_devs(dev_list):
+                    for item in dev_list:
+                        dev_name = item.get('name', '')
+                        label = item.get('label', '')
+                        raw_mounts = list(item.get('mountpoints') or [])
+                        if item.get('mountpoint'): raw_mounts.append(item.get('mountpoint'))
+                        for m in raw_mounts:
+                            if m:
+                                add_target(m, dev_name, label)
+                        if 'children' in item:
+                            parse_devs(item['children'])
+                parse_devs(data.get('blockdevices', []))
+        except Exception:
+            pass
+
+        # Strategy 3: native /proc/mounts fallback if running outside Flatpak
+        if not disks and os.path.exists('/proc/mounts'):
+            try:
                 with open('/proc/mounts', 'r') as f:
                     for line in f:
                         parts = line.split()
                         if len(parts) >= 3:
                             dev, m, fs = parts[0], parts[1], parts[2]
-                            if dev.startswith('/dev/') and fs not in ignored_fstypes:
-                                add_target(m, dev, "proc_mounts")
-        except Exception:
-            pass
-
-        if not disks:
-            host_env = dict(os.environ)
-            uid = os.getuid() if hasattr(os, "getuid") else 1000
-            if "DBUS_SESSION_BUS_ADDRESS" not in host_env or not host_env["DBUS_SESSION_BUS_ADDRESS"]:
-                host_env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{uid}/bus"
-            if "XDG_RUNTIME_DIR" not in host_env or not host_env["XDG_RUNTIME_DIR"]:
-                host_env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
-
-            try:
-                p = subprocess.run(['flatpak-spawn', '--host', '--directory=/', 'cat', '/proc/mounts'], capture_output=True, text=True, timeout=1, env=host_env)
-                if p.stdout:
-                    for line in p.stdout.splitlines():
-                        parts = line.split()
-                        if len(parts) >= 3:
-                            dev, m, fs = parts[0], parts[1], parts[2]
-                            if dev.startswith('/dev/') and fs not in ignored_fstypes:
-                                add_target(m, dev, "proc_mounts")
+                            if dev.startswith('/dev/') and fs not in IGNORED_FSTYPES:
+                                add_target(m, dev)
             except Exception:
                 pass
 
-        if not disks:
-            add_target("/", "/dev/root", "default")
+        if '/' not in seen:
+            add_target('/', '/dev/root', 'System Root')
 
         self._cached_disk_mounts = disks
-        return disks
-
-        if len(disks) <= 1:
-            try:
-                label_dir = "/dev/disk/by-label"
-                if os.path.exists(label_dir):
-                    for lbl in os.listdir(label_dir):
-                        dev = os.path.realpath(os.path.join(label_dir, lbl))
-                        for candidate in [f"/mnt/{lbl}", f"/media/{lbl}", f"/run/media/{lbl}", f"/media/{os.environ.get('USER', 'oscar')}/{lbl}"]:
-                            if os.path.exists(candidate):
-                                add_target(candidate, dev, "by_label_fallback")
-                for known_path in ["/mnt/Games", "/mnt/Stuff", "/home"]:
-                    if known_path not in seen and os.path.exists(known_path):
-                        add_target(known_path, "", "known_fallback")
-            except Exception:
-                pass
-
-        if "/" not in seen:
-            add_target("/", "", "default_root")
-
         return disks
 
     def get_weather_icon_filename(self, wmo_code: int, is_day: int = 1) -> str:
@@ -997,42 +1009,9 @@ class TouchBarInfoAction(ActionBase):
             )
             mode_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "disk_mode_idx", combo.get_selected()))
 
-            browse_row = Adw.ActionRow(
-                title=self.get_locale_text("actions.touchbar-info.disk-custom.label", "Custom Folder / Partition"),
-                subtitle=self.get_locale_text("actions.touchbar-info.disk-custom.subtitle", "Select custom folder or drive mount using native folder picker")
-            )
-            browse_btn = Gtk.Button(label=self.get_locale_text("actions.touchbar-info.disk-custom.choose", "Browse Folder..."))
-            browse_btn.set_valign(Gtk.Align.CENTER)
-
-            def on_browse_clicked(btn):
-                def _file_dialog_callback(dialog, result):
-                    try:
-                        folder = dialog.select_folder_finish(result)
-                        if folder is not None:
-                            folder_path = folder.get_path()
-                            if folder_path:
-                                settings = self.get_settings()
-                                if settings is not None:
-                                    settings[f"{slot_key}_disk_mount_path"] = folder_path
-                                    self.set_settings(settings)
-                                    browse_row.set_subtitle(f"Selected: {folder_path}")
-                                    self.trigger_redraw()
-                    except Exception as e:
-                        log.error(f"TouchBarInfo: Folder selection error: {e}")
-
-                try:
-                    native_dialog = Gtk.FileDialog.new()
-                    native_dialog.set_title(self.get_locale_text("actions.touchbar-info.disk-dialog.title", "Select Folder / Partition to Monitor"))
-                    native_dialog.select_folder(None, None, _file_dialog_callback)
-                except Exception as e:
-                    log.error(f"TouchBarInfo: Failed to open FileDialog: {e}")
-
-            browse_btn.connect("clicked", on_browse_clicked)
-            browse_row.add_suffix(browse_btn)
-
             return {
-                "mount_combo": mount_combo, "mode_combo": mode_combo, "browse_row": browse_row,
-                "all_rows": [mount_combo, mode_combo, browse_row]
+                "mount_combo": mount_combo, "mode_combo": mode_combo,
+                "all_rows": [mount_combo, mode_combo]
             }
 
         # Helper to create World Clock controls
@@ -2002,12 +1981,17 @@ class TouchBarInfoAction(ActionBase):
         return default
 
     def refresh_all_disk_combos(self):
-        self.disk_mounts = self.get_system_disk_mounts()
+        self.disk_mounts = self.get_system_disk_mounts(force=True)
         display_names = [d_name for _, d_name in self.disk_mounts]
+        settings = self.get_settings() or {}
         for slot_key, ctrls in self.slot_controls.items():
             if "disk" in ctrls:
                 combo = ctrls["disk"]["mount_combo"]
                 combo.set_model(Gtk.StringList.new(display_names))
+                mount_path = self.get_slot_setting(settings, slot_key, "disk_mount_path", "/")
+                mount_paths = [p for p, _ in self.disk_mounts]
+                mount_idx = mount_paths.index(mount_path) if mount_path in mount_paths else 0
+                combo.set_selected(mount_idx)
         self.trigger_redraw()
 
     def on_select_custom_bg_clicked(self, button):
