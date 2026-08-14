@@ -695,11 +695,11 @@ class TouchBarInfoAction(ActionBase):
 
         # Helper to create Date controls
         def build_date_controls():
-            date_hdr = Adw.ActionRow(
+            date_expander = Adw.ExpanderRow(
                 title=self.get_locale_text("actions.touchbar-info.hdr-date.label", "Date Settings"),
                 subtitle=self.get_locale_text("actions.touchbar-info.hdr-date.subtitle", "Format and typography configuration for date display")
             )
-            date_hdr.add_css_class("touchbar-subhdr-row")
+            date_expander.add_css_class("touchbar-subhdr-row")
 
             fmt_model = Gtk.StringList()
             for _, label in self.date_format_options: fmt_model.append(label)
@@ -750,6 +750,14 @@ class TouchBarInfoAction(ActionBase):
             out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
             out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
 
+            date_expander.add_row(fmt_combo)
+            date_expander.add_row(font_row)
+            date_expander.add_row(fill_sw)
+            date_expander.add_row(fill_color_row)
+            date_expander.add_row(out_sw)
+            date_expander.add_row(out_color_row)
+            date_expander.add_row(out_size_spin)
+
             self.all_date_fmt_combos.append(fmt_combo)
             self.all_date_font_btns.append(font_btn)
             self.all_date_fill_switches.append(fill_sw)
@@ -759,19 +767,19 @@ class TouchBarInfoAction(ActionBase):
             self.all_date_out_size_spins.append(out_size_spin)
 
             return {
-                "date_hdr": date_hdr, "fmt_combo": fmt_combo, "font_row": font_row, "fill_sw": fill_sw,
+                "date_expander": date_expander, "fmt_combo": fmt_combo, "font_row": font_row, "fill_sw": fill_sw,
                 "fill_color_row": fill_color_row, "out_sw": out_sw,
                 "out_color_row": out_color_row, "out_size_spin": out_size_spin,
-                "all_rows": [date_hdr, fmt_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+                "all_rows": [date_expander]
             }
 
         # Helper to create Time controls
         def build_time_controls():
-            time_hdr = Adw.ActionRow(
+            time_expander = Adw.ExpanderRow(
                 title=self.get_locale_text("actions.touchbar-info.hdr-time.label", "Time Settings"),
                 subtitle=self.get_locale_text("actions.touchbar-info.hdr-time.subtitle", "Format and typography configuration for clock display")
             )
-            time_hdr.add_css_class("touchbar-subhdr-row")
+            time_expander.add_css_class("touchbar-subhdr-row")
 
             sw_24h = Adw.SwitchRow(
                 title=self.get_locale_text("actions.touchbar-info.use-24h.label", "Use 24-Hour Clock"),
@@ -824,6 +832,15 @@ class TouchBarInfoAction(ActionBase):
             out_size_spin.set_title(self.get_locale_text("actions.touchbar-info.outline-size.label", "Outline Thickness"))
             out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
 
+            time_expander.add_row(sw_24h)
+            time_expander.add_row(sw_sec)
+            time_expander.add_row(font_row)
+            time_expander.add_row(fill_sw)
+            time_expander.add_row(fill_color_row)
+            time_expander.add_row(out_sw)
+            time_expander.add_row(out_color_row)
+            time_expander.add_row(out_size_spin)
+
             self.all_time_24h_switches.append(sw_24h)
             self.all_time_sec_switches.append(sw_sec)
             self.all_time_font_btns.append(font_btn)
@@ -834,10 +851,10 @@ class TouchBarInfoAction(ActionBase):
             self.all_time_out_size_spins.append(out_size_spin)
 
             return {
-                "time_hdr": time_hdr, "sw_24h": sw_24h, "sw_sec": sw_sec, "font_row": font_row, "fill_sw": fill_sw,
+                "time_expander": time_expander, "sw_24h": sw_24h, "sw_sec": sw_sec, "font_row": font_row, "fill_sw": fill_sw,
                 "fill_color_row": fill_color_row, "out_sw": out_sw,
                 "out_color_row": out_color_row, "out_size_spin": out_size_spin,
-                "all_rows": [time_hdr, sw_24h, sw_sec, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+                "all_rows": [time_expander]
             }
 
         # Helper to create Weather controls
@@ -1427,32 +1444,17 @@ class TouchBarInfoAction(ActionBase):
 
                 # Date Visibility (Full: 2 [Date], 7 [Stacked] | Split: 2 [Date])
                 show_date = (widget_choice in [2, 7]) if is_full_mode else (widget_choice == 2)
-                date_ctrls["date_hdr"].set_visible(show_date)
-                date_ctrls["fmt_combo"].set_visible(show_date)
-                date_ctrls["font_row"].set_visible(show_date)
-                date_ctrls["fill_sw"].set_visible(show_date)
-                date_ctrls["fill_color_row"].set_visible(show_date)
-                date_ctrls["fill_color_row"].set_sensitive(show_date and date_ctrls["fill_sw"].get_active())
-                date_ctrls["out_sw"].set_visible(show_date)
-                date_ctrls["out_color_row"].set_visible(show_date)
-                date_ctrls["out_color_row"].set_sensitive(show_date and date_ctrls["out_sw"].get_active())
-                date_ctrls["out_size_spin"].set_visible(show_date)
-                date_ctrls["out_size_spin"].set_sensitive(show_date and date_ctrls["out_sw"].get_active())
+                date_ctrls["date_expander"].set_visible(show_date)
+                date_ctrls["fill_color_row"].set_sensitive(date_ctrls["fill_sw"].get_active())
+                date_ctrls["out_color_row"].set_sensitive(date_ctrls["out_sw"].get_active())
+                date_ctrls["out_size_spin"].set_sensitive(date_ctrls["out_sw"].get_active())
 
                 # Time Visibility (Full: 7 [Stacked], 8 [Time] | Split: 7 [Time])
                 show_time = (widget_choice in [7, 8]) if is_full_mode else (widget_choice == 7)
-                time_ctrls["time_hdr"].set_visible(show_time)
-                time_ctrls["sw_24h"].set_visible(show_time)
-                time_ctrls["sw_sec"].set_visible(show_time)
-                time_ctrls["font_row"].set_visible(show_time)
-                time_ctrls["fill_sw"].set_visible(show_time)
-                time_ctrls["fill_color_row"].set_visible(show_time)
-                time_ctrls["fill_color_row"].set_sensitive(show_time and time_ctrls["fill_sw"].get_active())
-                time_ctrls["out_sw"].set_visible(show_time)
-                time_ctrls["out_color_row"].set_visible(show_time)
-                time_ctrls["out_color_row"].set_sensitive(show_time and time_ctrls["out_sw"].get_active())
-                time_ctrls["out_size_spin"].set_visible(show_time)
-                time_ctrls["out_size_spin"].set_sensitive(show_time and time_ctrls["out_sw"].get_active())
+                time_ctrls["time_expander"].set_visible(show_time)
+                time_ctrls["fill_color_row"].set_sensitive(time_ctrls["fill_sw"].get_active())
+                time_ctrls["out_color_row"].set_sensitive(time_ctrls["out_sw"].get_active())
+                time_ctrls["out_size_spin"].set_sensitive(time_ctrls["out_sw"].get_active())
 
                 # Weather Visibility (Full: 9 | Split: 8)
                 show_weather = (widget_choice == 9) if is_full_mode else (widget_choice == 8)
