@@ -3339,6 +3339,8 @@ class TouchBarInfoAction(ActionBase):
                             ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"],
                             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
                         )
+                        self.query_system_volume()
+                        GLib.idle_add(self.trigger_redraw)
                         return
                     except Exception:
                         pass
@@ -3347,6 +3349,8 @@ class TouchBarInfoAction(ActionBase):
                             ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"],
                             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.4
                         )
+                        self.query_system_volume()
+                        GLib.idle_add(self.trigger_redraw)
                         return
                     except Exception:
                         pass
@@ -3361,9 +3365,12 @@ class TouchBarInfoAction(ActionBase):
                         if curr_vol > 0.01:
                             self._mpris_saved_vol = curr_vol
                             props.Set("org.mpris.MediaPlayer2.Player", "Volume", dbus.Double(0.0))
+                            self._current_is_muted = True
                         else:
                             restore_vol = getattr(self, "_mpris_saved_vol", 0.5)
                             props.Set("org.mpris.MediaPlayer2.Player", "Volume", dbus.Double(restore_vol))
+                            self._current_is_muted = False
+                        GLib.idle_add(self.trigger_redraw)
             except Exception as e:
                 log.error(f"TouchPulse: Error toggling audio mute: {e}")
 
@@ -3392,25 +3399,6 @@ class TouchBarInfoAction(ActionBase):
                     log.warning(f"TouchPulse: Could not rebind deck dial callback: {e}")
             self.deck_controller._touchpulse_dial_hooked = True
 
-        if hasattr(self.deck_controller, "inputs") and hasattr(Input, "Dial") and Input.Dial in self.deck_controller.inputs:
-            for dial_input in self.deck_controller.inputs[Input.Dial]:
-                if not getattr(dial_input, "_touchpulse_hooked", False):
-                    orig_input_cb = dial_input.event_callback
-                    dial_num = getattr(dial_input.identifier, "index", getattr(dial_input.identifier, "key", 0))
-
-                    def make_input_hook(d_idx, original_fn):
-                        def _hook(*args, **kwargs):
-                            try:
-                                self.handle_deck_dial_event(d_idx, *args, **kwargs)
-                            except Exception as e:
-                                log.error(f"TouchPulse: dial input hook error: {e}")
-                            if original_fn:
-                                return original_fn(*args, **kwargs)
-                        return _hook
-
-                    dial_input.event_callback = make_input_hook(dial_num, orig_input_cb)
-                    dial_input._touchpulse_hooked = True
-
     def handle_deck_dial_event(self, dial_index, *args, **kwargs):
         try:
             dial_idx = int(dial_index)
@@ -3427,10 +3415,11 @@ class TouchBarInfoAction(ActionBase):
         if not is_turn and not is_push:
             return
 
-        # 40ms event deduplication window
+        # Dedicated Debounce Windows: 250ms for button click/push, 30ms for rotary turn
         now_ts = time.time()
         last_dial, last_event, last_val, last_time = getattr(self, "_last_dial_event", (None, None, None, 0.0))
-        if dial_idx == last_dial and event_str == str(last_event).upper() and value == last_val and (now_ts - last_time < 0.04):
+        debounce_window = 0.25 if is_push else 0.03
+        if dial_idx == last_dial and event_str == str(last_event).upper() and (now_ts - last_time < debounce_window):
             return
         self._last_dial_event = (dial_idx, event_type, value, now_ts)
 
