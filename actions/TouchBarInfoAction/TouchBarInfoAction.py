@@ -680,6 +680,18 @@ class TouchBarInfoAction(ActionBase):
                 )
                 sw_24h.connect("notify::active", lambda sw, pspec, sk=slot_key: self.set_slot_setting(sk, "use_24h", sw.get_active()))
 
+                font_row = Adw.ActionRow(
+                    title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
+                    subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
+                )
+                font_btn = Gtk.FontButton.new()
+                font_btn.set_use_font(True)
+                font_btn.set_use_size(False)
+                font_btn.set_valign(Gtk.Align.CENTER)
+                font_btn.set_hexpand(False)
+                font_btn.connect("font-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "time_font_str", btn.get_font()))
+                font_row.add_suffix(font_btn)
+
                 sw_sec = Adw.SwitchRow(
                     title=self.get_locale_text("actions.touchbar-info.show-seconds.label", "Show Seconds"),
                     subtitle=self.get_locale_text("actions.touchbar-info.show-seconds.subtitle", "Include seconds in the displayed time")
@@ -695,18 +707,6 @@ class TouchBarInfoAction(ActionBase):
                             fb.set_font(new_f)
 
                 sw_sec.connect("notify::active", on_time_sec_toggled)
-
-                font_row = Adw.ActionRow(
-                    title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
-                    subtitle=self.get_locale_text("actions.touchbar-info.font-chooser.subtitle", "Choose font family, style, and size using GTK font picker")
-                )
-                font_btn = Gtk.FontButton.new()
-                font_btn.set_use_font(True)
-                font_btn.set_use_size(False)
-                font_btn.set_valign(Gtk.Align.CENTER)
-                font_btn.set_hexpand(False)
-                font_btn.connect("font-set", lambda btn, sk=slot_key: self.set_slot_setting(sk, "time_font_str", btn.get_font()))
-                font_row.add_suffix(font_btn)
 
                 fill_sw = Adw.SwitchRow(
                     title=self.get_locale_text("actions.touchbar-info.enable-fill.label", "Enable Font Fill"),
