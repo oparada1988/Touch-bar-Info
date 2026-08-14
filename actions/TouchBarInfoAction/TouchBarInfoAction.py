@@ -67,6 +67,7 @@ class TouchBarInfoAction(ActionBase):
         self.net_rx_rate = 0.0
         self.process_count = 0
         self._was_locked = False
+        self._active_highlight_slot = None
         self.init_options()
 
     def get_locale_text(self, key: str, default: str) -> str:
@@ -1664,6 +1665,17 @@ class TouchBarInfoAction(ActionBase):
                 self.fetch_weather_async()
             ))
 
+            setattr(self, f"{prefix_key}_expander", expander)
+            setattr(self, f"{prefix_key}_top_expander", top_expander)
+            setattr(self, f"{prefix_key}_bot_expander", bot_expander)
+            setattr(self, f"{prefix_key}_mode_combo", mode_combo)
+
+            expander.connect("notify::expanded", lambda *args: self._update_active_highlight())
+            expander.connect("unmap", lambda *args: self._on_config_unmapped())
+            top_expander.connect("notify::expanded", lambda *args: self._update_active_highlight())
+            bot_expander.connect("notify::expanded", lambda *args: self._update_active_highlight())
+            mode_combo.connect("notify::selected", lambda *args: self._update_active_highlight())
+
             self.update_vis_callbacks.append(update_section_vis)
             update_section_vis()
 
@@ -1710,6 +1722,43 @@ class TouchBarInfoAction(ActionBase):
             self.sec_b_expander,
             self.sec_c_expander
         ]
+
+    def _on_config_unmapped(self):
+        if getattr(self, "_active_highlight_slot", None) is not None:
+            self._active_highlight_slot = None
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def _update_active_highlight(self):
+        new_slot = None
+        for prefix, (x1, x2) in [("sec_a", (2, 198)), ("sec_b", (202, 598)), ("sec_c", (602, 798))]:
+            exp = getattr(self, f"{prefix}_expander", None)
+            if exp and exp.get_expanded():
+                mode_combo = getattr(self, f"{prefix}_mode_combo", None)
+                is_split = (mode_combo.get_selected() == 1) if mode_combo else False
+                if not is_split:
+                    new_slot = (x1, 2, x2, 98)
+                else:
+                    top_exp = getattr(self, f"{prefix}_top_expander", None)
+                    bot_exp = getattr(self, f"{prefix}_bot_expander", None)
+                    if top_exp and top_exp.get_expanded():
+                        new_slot = (x1, 2, x2, 48)
+                    elif bot_exp and bot_exp.get_expanded():
+                        new_slot = (x1, 52, x2, 98)
+                    else:
+                        new_slot = (x1, 2, x2, 98)
+
+        if getattr(self, "_active_highlight_slot", None) != new_slot:
+            self._active_highlight_slot = new_slot
+            self.last_rendered_key = ""
+            self.update_display()
+
+    def draw_slot_glow(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int]):
+        x1, y1, x2, y2 = box
+        # Multi-layer neon magenta glow (#FF55D2) matching StreamController UI
+        draw.rounded_rectangle([x1 - 2, y1 - 2, x2 + 2, y2 + 2], radius=8, outline=(255, 85, 210, 60), width=2)
+        draw.rounded_rectangle([x1 - 1, y1 - 1, x2 + 1, y2 + 1], radius=7, outline=(255, 100, 220, 140), width=1)
+        draw.rounded_rectangle([x1, y1, x2, y2], radius=6, outline=(255, 160, 240, 255), width=2)
 
     def notify_visibility_change(self):
         for cb in getattr(self, "update_vis_callbacks", []):
@@ -3568,8 +3617,9 @@ class TouchBarInfoAction(ActionBase):
         media_val = (self.vis_tick, self.media_state.get("title"), self.media_state.get("artist"), self.media_state.get("status"), self.media_state.get("art_url")) if (any_media and self.is_media_active_and_playing()) else "nomedia"
         weather_repr = tuple((k, v.get("temp_str"), v.get("weathercode")) for k, v in sorted(self.weather_caches.items())) if any_weather else ()
         settings_sig = hash(tuple(sorted((k, str(v)) for k, v in settings.items() if not k.startswith("_"))))
+        highlight_sig = self._active_highlight_slot
 
-        combined_key = (time_sig, cpu_val, ram_val, net_val, media_val, weather_repr, settings_sig)
+        combined_key = (time_sig, cpu_val, ram_val, net_val, media_val, weather_repr, settings_sig, highlight_sig)
         if combined_key == self.last_rendered_key:
             return
         self.last_rendered_key = combined_key
@@ -3755,5 +3805,9 @@ class TouchBarInfoAction(ActionBase):
                 bot_choice = self.get_slot_setting(settings, prefix, "bottom_widget", 0)
                 render_slot_widget(f"{prefix}_top", top_choice, top_box, is_full=False, align=align)
                 render_slot_widget(f"{prefix}_bot", bot_choice, bot_box, is_full=False, align=align)
+
+        # Draw highlight neon glow border around currently expanded slot
+        if getattr(self, "_active_highlight_slot", None) is not None:
+            self.draw_slot_glow(draw, self._active_highlight_slot)
 
         self.render_to_input(image)
