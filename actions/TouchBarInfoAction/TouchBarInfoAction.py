@@ -4000,23 +4000,16 @@ class TouchBarInfoAction(ActionBase):
 
     def is_media_active_and_playing(self) -> bool:
         settings = self.get_settings() or {}
-        slots = [
-            ("sec_a", "full_widget", "top_widget", "bottom_widget", "mode"),
-            ("sec_b", "full_widget", "top_widget", "bottom_widget", "mode"),
-            ("sec_c", "full_widget", "top_widget", "bottom_widget", "mode")
-        ]
+        slots = ["sec_a", "sec_b", "sec_c"]
         is_active = False
-        for prefix, fw, tw, bw, mw in slots:
+        for prefix in slots:
             mode = self.get_slot_setting(settings, prefix, "mode", 0)
             if mode == 0:
-                if self.get_slot_setting(settings, f"{prefix}_full", "widget", self.get_slot_setting(settings, prefix, "full_widget", 0)) == 4:
+                if self.get_slot_setting(settings, prefix, "full_widget", 0) == 4:
                     is_active = True
                     break
             else:
-                if self.get_slot_setting(settings, f"{prefix}_top", "widget", self.get_slot_setting(settings, prefix, "top_widget", 0)) == 4:
-                    is_active = True
-                    break
-                if self.get_slot_setting(settings, f"{prefix}_bot", "widget", self.get_slot_setting(settings, prefix, "bottom_widget", 0)) == 4:
+                if self.get_slot_setting(settings, prefix, "top_widget", 0) == 4 or self.get_slot_setting(settings, prefix, "bottom_widget", 0) == 4:
                     is_active = True
                     break
         return is_active and ((self.media_state.get("status") == "Playing") or self.is_volume_hud_active())
@@ -4106,22 +4099,51 @@ class TouchBarInfoAction(ActionBase):
 
         if hasattr(self, "deck_controller") and self.deck_controller is not None:
             c_input = self.deck_controller.get_input(self.input_ident)
-            if c_input is not None:
-                if hasattr(c_input, "update"):
-                    try:
-                        c_input.update()
-                    except Exception as e:
-                        log.error(f"TouchBarInfo: Error updating touchscreen controller: {e}")
-                # Realtime GUI Mirroring: push rendered RGBA image to desktop app canvas
+            if c_input is not None and hasattr(c_input, "update"):
                 try:
-                    if hasattr(c_input, "set_ui_image"):
-                        c_input.set_ui_image(final_image)
-                    elif recursive_hasattr(self.deck_controller, "own_deck_stack_child.page_settings.deck_config.screenbar.image"):
-                        sb = self.deck_controller.own_deck_stack_child.page_settings.deck_config.screenbar
+                    c_input.update()
+                except Exception as e:
+                    log.error(f"TouchBarInfo: Error updating touchscreen controller: {e}")
+
+        # Realtime 1:1 Desktop App Canvas Mirroring
+        self.update_screenbar_ui(final_image)
+
+    def update_screenbar_ui(self, image: Image.Image):
+        try:
+            # 1. Update via deck_controller
+            dc = getattr(self, "deck_controller", None)
+            if dc is not None:
+                c_input = dc.get_input(self.input_ident) if hasattr(dc, "get_input") else None
+                if c_input is not None and hasattr(c_input, "set_ui_image"):
+                    c_input.set_ui_image(image)
+
+                dsc = dc.get_own_deck_stack_child() if hasattr(dc, "get_own_deck_stack_child") else getattr(dc, "own_deck_stack_child", None)
+                if dsc is not None:
+                    ps = getattr(dsc, "page_settings", None)
+                    dcfg = getattr(ps, "deck_config", None)
+                    sb = getattr(dcfg, "screenbar", None)
+                    if sb and hasattr(sb, "image") and sb.image:
+                        GLib.idle_add(sb.image.set_image, image)
+
+            # 2. Update via gl.app.main_win
+            if hasattr(gl, "app") and getattr(gl.app, "main_win", None) is not None:
+                main_win = gl.app.main_win
+                deck_stack = getattr(main_win, "deck_stack", None)
+                if deck_stack is not None:
+                    pages = []
+                    if hasattr(deck_stack, "get_pages"):
+                        pages = deck_stack.get_pages()
+                    elif hasattr(deck_stack, "get_children"):
+                        pages = deck_stack.get_children()
+                    for p in pages:
+                        child = p.get_child() if hasattr(p, "get_child") else p
+                        ps = getattr(child, "page_settings", None)
+                        dcfg = getattr(ps, "deck_config", None)
+                        sb = getattr(dcfg, "screenbar", None)
                         if sb and hasattr(sb, "image") and sb.image:
-                            GLib.idle_add(sb.image.set_image, final_image)
-                except Exception:
-                    pass
+                            GLib.idle_add(sb.image.set_image, image)
+        except Exception as e:
+            log.error(f"TouchBarInfo: Error updating screenbar UI: {e}")
 
     def update_system_stats(self):
         try:
