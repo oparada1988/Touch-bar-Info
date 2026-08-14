@@ -1,45 +1,76 @@
 # Touch Bar Info Plugin for StreamController
 
-Touch Bar Info is a feature-rich, full-canvas information display plugin built for StreamController on the Elgato Stream Deck +. It turns the 800x100 touch strip into a clean, customizable desktop dashboard for monitoring system performance, weather, time, and disk usage in real time.
+Touch Bar Info is a highly customizable, full-canvas information display plugin built for StreamController on the Elgato Stream Deck +. It unlocks the full potential of your device's 800x100 touch strip, giving you complete freedom to mix, match, and arrange a wide variety of real-time widgets to make your Touch Bar truly unique to your daily workflow.
 
-> **Development Notice**: This plugin is currently under active, heavy development. Features, user controls, and rendering options are subject to ongoing updates and refinements.
+Whether you want an ultra-clean live music visualizer, an informative system performance monitor, global timezones, live weather updates, or a sleek stacked clock, Touch Bar Info lets you tailor every pixel with custom typography, gradients, colors, and background wallpapers.
+
+> **Development Notice**: This plugin is currently under active development. Features, user controls, and rendering options are subject to ongoing updates and refinements.
 
 ---
 
-## Touch Bar Layout & Sections
+## Touch Bar Layout & Modular Sections
 
 The 800x100 Touch Bar canvas is divided into three customizable modular sections: **Section A** (Left), **Section B** (Center), and **Section C** (Right).
 
 ![Touch Bar Sections Breakdown](assets/touchbar-sections.png)
 
-Each section can be individually configured in two ways:
-- **Full Slot (Single Widget)**: Spans the full height of the section for large, detailed displays (such as stacked date and time or full-height performance monitors).
-- **Split Slot (Dual Sub-slots)**: Splits the section vertically into Top and Bottom sub-slots, allowing you to stack two independent widgets (such as Date on top and Weather on bottom).
+You have the flexibility to configure each section independently:
+- **Full Slot (Single Widget)**: Spans the full 100px height of the section for bold, detailed displays (such as full-height media equalizers, performance graphs, or stacked date and time).
+- **Split Slot (Dual Sub-slots)**: Splits the section vertically into two independent 50px Top and Bottom sub-slots, letting you stack any two widgets together (such as Date on top and Weather on bottom, or a compact Media mini-player on top and RAM on bottom).
 
 <img width="415" height="75" alt="Screenshot From 2026-08-11 20-26-51" src="https://github.com/user-attachments/assets/53001dd6-c877-4764-b15c-17b506baae2c" />
 <img width="415" height="75" alt="Screenshot From 2026-08-11 20-38-17" src="https://github.com/user-attachments/assets/860ef11c-8d20-46dc-a2c9-cfc7e51c778b" />
 <img width="414" height="82" alt="Screenshot From 2026-08-12 18-20-20" src="https://github.com/user-attachments/assets/ec44ed2d-4510-4ca5-9e4d-7908a511d236" />
 <img width="414" height="82" alt="Screencast From 2026-08-14 12-31-26" src="https://github.com/user-attachments/assets/70673705-c0ff-4837-ab22-379f1476c7be" />
 
-
-
-
-
 ---
 
 ## Available Widgets
 
-### Stacked Date & Time
-Displays your local date and time stacked across two lines. You can customize 12-hour or 24-hour clock formats, toggle seconds on or off, and choose from multiple date formatting styles (such as `Mon. Aug 11, 2026`, `08/11/2026`, or `11/08/2026`).
+All widgets can be placed anywhere across Sections A, B, and C in Full or Split mode and are listed in alphabetical order:
 
-### Standalone Date
-A clean, single-line date display formatted to your preference.
+### CPU Monitor
+Tracks live processor load percentage alongside an optional real-time utilization graph.
 
-### Standalone Time
+### Date
+A clean, single-line date display formatted to your preference (e.g. `Mon. Aug 11, 2026`, `08/11/2026`, or `11/08/2026`).
+
+### Disk Usage Monitor
+Monitors any physical partition or custom directory path (such as System Root `/`, Home `/home/user`, `/mnt/Games`, or `/mnt/Stuff`) selected using a native folder picker. Features three clean display modes:
+- **Percentage Mode**: A stacked 2-line layout showing the disk name and used percentage (e.g. `Home (oscar)` / `17% Used`).
+- **Used / Free GB Mode**: A stacked 2-line layout showing the disk name and exact capacity breakdown (e.g. `Games` / `337G Used / 107G Free`).
+- **Live Bar Graph Mode**: A sleek progress bar underneath the mount title showing available vs. used space.
+
+### Media Player
+Turns your Touch Bar into a live mini-player and audio equalizer:
+- **Universal MPRIS Compatibility**: Automatically detects currently playing audio or lets you choose specific installed players on your system (like Spotify, VLC, Firefox, or Chrome).
+- **Album Artwork Display**: Automatically fetches and caches high-res track artwork.
+- **Dynamic Audio Visualizers**:
+  - *Wave Stepped Bars*: A multi-band equalizer with authentic frequency dynamics (deep bass bounce, mid harmonics, and treble jitter) rendered as discrete matrix-stepped LED columns.
+  - *Wave Curves*: Smooth, flowing sinusoidal wave curves.
+- **Fluid 25 FPS Animation**: High frame rate animation loop that runs smoothly while music is playing and automatically pauses when media is stopped to save system resources.
+- **Full & Split Slot Support**:
+  - *Full Section (100px)*: High-detail view featuring album art, scrolling song title and artist typography, and the equalizer below.
+  - *Split Subsection (50px)*: Compact mini-cover art and wide equalizer visualization.
+- **Coloring & Typography**: Customize visualizer colors with solid colors or vibrant two-color gradients, plus full typography controls (custom fonts, text fill colors, and stroke outlines) for song and artist names.
+
+### Network Activity Monitor
+Tracks live upload (TX) and download (RX) throughput. Offers toggles for KB/s or MB/s units and includes a live traffic graph.
+
+### RAM Usage Monitor
+Monitors system memory consumption with three distinct display modes:
+- **Percentage Mode**: Displays current RAM load percentage.
+- **Used / Total GB Mode**: Displays a detailed breakdown of used and total system memory.
+- **Live Graph Mode**: Shows a continuous real-time memory graph.
+
+### Stacked Date & Time *(Full Section Mode)*
+Displays your local date and time stacked across two lines. You can customize 12-hour or 24-hour clock formats, toggle seconds on or off, and choose from multiple date formatting styles.
+
+### Time
 A high-visibility digital clock display with customizable typography, colors, and text outlines.
 
-### Real-Time Weather
-Provides live temperature, weather conditions, and location info retrieved automatically via Open-Meteo.
+### Weather
+Provides live temperature, weather conditions, and location info retrieved automatically via Open-Meteo with customizable refresh intervals and units (°C/°F).
 
 ### World Clock
 Displays a real-time clock for any global location with automatic time difference calculations:
@@ -50,33 +81,16 @@ Displays a real-time clock for any global location with automatic time differenc
 - **Time Offset & Day Indicator**: Displays time difference relative to local time along with day indicators (e.g., `+5h, Tomorrow` or `-3h`).
 - **Full Typography & Styling**: Custom GTK font selector, font colors, and stroke outlines.
 
-### CPU Monitor
-Tracks live processor load percentage alongside an optional real-time utilization graph.
-
-### RAM Usage Monitor
-Monitors system memory consumption with three distinct display modes:
-- **Percentage Mode**: Displays current RAM load percentage.
-- **Used / Total GB Mode**: Displays a detailed breakdown of used and total system memory.
-- **Live Graph Mode**: Shows a continuous real-time memory graph.
-
-### Network Activity Monitor
-Tracks live upload (TX) and download (RX) throughput. Offers toggles for KB/s or MB/s units and includes a live traffic graph.
-
-### System Disk Usage Monitor
-Monitors any physical partition or directory path (such as System Root `/`, Home `/home/user`, `/mnt/Games`, or `/mnt/Stuff`) selected using a native folder picker. Features three clean display modes:
-- **Percentage Mode**: A stacked 2-line layout showing the disk name and used percentage (e.g. `Home (oscar)` / `17% Used`).
-- **Used / Free GB Mode**: A stacked 2-line layout showing the disk name and exact capacity breakdown (e.g. `Games` / `337G Used / 107G Free`).
-- **Live Bar Graph Mode**: A stacked layout featuring a header title on top and a sleek progress bar underneath showing available vs. used space.
-
 ---
 
-## Key Features & Customization
+## Key Features & Personalization
 
-- **Modular 3-Section Grid**: Flexible layout control across Sections A, B, and C with full-height or split sub-slot options.
-- **World Clock Integration**: Monitor multiple global timezones with custom labels and relative time offsets (`+5h`, `Tomorrow`).
-- **Custom Background Wallpapers**: Render custom PNG or JPG wallpaper images behind all Touch Bar widgets.
-- **Typography & Styling Controls**: Customize fonts, text fill colors, and outline strokes for Date, Time, Weather, and World Clock widgets.
-- **Multi-Input Support**: Works across Touchscreen (`sd-plus`), Dials, and Keys.
+- **Complete Creative Freedom**: Mix, match, and arrange up to 6 different widgets simultaneously across the 3 modular sections to design a Touch Bar tailored precisely to your desk setup.
+- **Live Media Player & Visualizer**: Real-time MPRIS player integration with album art and 25 FPS audio visualizers.
+- **Custom Background Wallpapers**: Set custom PNG or JPG wallpaper images behind all Touch Bar widgets.
+- **Deep Typography & Color Styling**: Full font selectors, custom fill colors, and outline strokes across clock, date, weather, and media typography.
+- **Power-Saving Lock Blanking**: Automatically blanks the display when your computer screen locks.
+- **Multi-Input Support**: Works seamlessly across Touchscreen (`sd-plus`), Dials, and Keys.
 
 ---
 
