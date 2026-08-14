@@ -763,6 +763,7 @@ class TouchBarInfoAction(ActionBase):
                 Thread(target=search_task, daemon=True).start()
 
             search_btn.connect("clicked", on_search_clicked)
+            loc_entry.connect("apply", lambda row: on_search_clicked(None))
 
             def on_res_selected(combo, pspec):
                 sel = combo.get_selected()
@@ -800,6 +801,12 @@ class TouchBarInfoAction(ActionBase):
                 subtitle=self.get_locale_text("actions.touchbar-info.weather-refresh.subtitle", "Automatic weather update frequency")
             )
             ref_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key: self.set_slot_setting(sk, "weather_refresh_idx", combo.get_selected()))
+
+            weather_font_expander = Adw.ExpanderRow(
+                title=self.get_locale_text("actions.touchbar-info.hdr-weather-font.label", "Text & Font Settings"),
+                subtitle=self.get_locale_text("actions.touchbar-info.hdr-weather-font.subtitle", "Typography, colors, and stroke styling for temperature display")
+            )
+            weather_font_expander.add_css_class("touchbar-subhdr-row")
 
             font_row = Adw.ActionRow(
                 title=self.get_locale_text("actions.touchbar-info.font-chooser.label", "Font and Size Picker"),
@@ -855,12 +862,20 @@ class TouchBarInfoAction(ActionBase):
             out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
             out_size_spin.connect("notify::value", lambda spin, pspec, sk=slot_key: self.set_slot_setting(sk, "weather_outline_size", int(spin.get_value())))
 
+            weather_font_expander.add_row(font_row)
+            weather_font_expander.add_row(fill_sw)
+            weather_font_expander.add_row(fill_color_row)
+            weather_font_expander.add_row(out_sw)
+            weather_font_expander.add_row(out_color_row)
+            weather_font_expander.add_row(out_size_spin)
+
             return {
                 "loc_entry": loc_entry, "res_combo": res_combo, "unit_combo": unit_combo,
-                "ref_combo": ref_combo, "font_btn": font_btn, "fill_sw": fill_sw,
+                "ref_combo": ref_combo, "font_expander": weather_font_expander,
+                "font_btn": font_btn, "fill_sw": fill_sw,
                 "fill_color_btn": fill_color_btn, "fill_color_row": fill_color_row, "out_sw": out_sw,
                 "out_color_btn": out_color_btn, "out_color_row": out_color_row, "out_size_spin": out_size_spin,
-                "all_rows": [loc_entry, res_combo, unit_combo, ref_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+                "all_rows": [loc_entry, res_combo, unit_combo, ref_combo, weather_font_expander]
             }
 
         # Helper to create CPU controls
