@@ -4,6 +4,7 @@ from src.backend.DeckManagement.InputIdentifier import Input
 
 # Import python modules
 import os
+import glob
 import subprocess
 import datetime
 from zoneinfo import ZoneInfo
@@ -68,6 +69,83 @@ class TouchBarInfoAction(ActionBase):
         self._was_locked = False
         self.init_options()
 
+    def get_available_media_players(self) -> list[tuple[str, str]]:
+        bus_players = {}
+        try:
+            if not self.session_bus:
+                self.session_bus = dbus.SessionBus()
+            for name in self.session_bus.list_names():
+                if name.startswith("org.mpris.MediaPlayer2."):
+                    clean_name = name.replace("org.mpris.MediaPlayer2.", "")
+                    try:
+                        obj = self.session_bus.get_object(name, "/org/mpris/MediaPlayer2")
+                        props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
+                        identity = str(props.Get("org.mpris.MediaPlayer2", "Identity"))
+                    except Exception:
+                        identity = clean_name.capitalize()
+                    bus_players[clean_name.lower()] = (clean_name, identity)
+        except Exception:
+            pass
+
+        app_dirs = [
+            "/run/host/usr/share/applications",
+            "/run/host/usr/local/share/applications",
+            "/run/host/var/lib/flatpak/exports/share/applications",
+            os.path.expanduser("~/.local/share/applications"),
+            os.path.expanduser("~/.local/share/flatpak/exports/share/applications"),
+            "/usr/share/applications",
+            "/usr/local/share/applications",
+            "/var/lib/flatpak/exports/share/applications"
+        ]
+
+        desktop_files = []
+        for d in app_dirs:
+            if os.path.isdir(d):
+                try:
+                    desktop_files.extend(glob.glob(os.path.join(d, "*.desktop")))
+                except Exception:
+                    pass
+
+        known_players = [
+            ("spotify", "Spotify", ["*spotify*.desktop"]),
+            ("chrome", "Chrome / Chromium", ["*google-chrome*.desktop", "*chromium*.desktop", "*brave*.desktop"]),
+            ("firefox", "Firefox", ["*firefox*.desktop", "*zen*.desktop"]),
+            ("vlc", "VLC Media Player", ["*vlc*.desktop"]),
+            ("rhythmbox", "Rhythmbox", ["*rhythmbox*.desktop"]),
+            ("cider", "Cider", ["*cider*.desktop"]),
+            ("amberol", "Amberol", ["*amberol*.desktop"]),
+            ("celluloid", "Celluloid", ["*celluloid*.desktop"]),
+        ]
+
+        detected = [("auto", self.get_locale_text("actions.touchbar-info.media-player-auto", "Active Player (Automatic)"))]
+        seen_keys = set(["auto"])
+
+        for key, label, patterns in known_players:
+            found = False
+            for p in patterns:
+                for df in desktop_files:
+                    fname = os.path.basename(df).lower()
+                    if glob.fnmatch.fnmatch(fname, p.lower()):
+                        found = True
+                        break
+                if found:
+                    break
+            if found:
+                detected.append((key, label))
+                seen_keys.add(key)
+
+        for bkey, (clean_name, identity) in bus_players.items():
+            matched = False
+            for sk in seen_keys:
+                if sk in bkey or bkey in sk:
+                    matched = True
+                    break
+            if not matched:
+                detected.append((bkey, identity))
+                seen_keys.add(bkey)
+
+        return detected
+
     def init_options(self):
         self.date_format_options = [
             ("%b. %d, %Y", self.get_locale_text("actions.touchbar-info.date-format.mon-day-year", "Mon. Day, Year (Aug. 11, 2026)")),
@@ -104,10 +182,9 @@ class TouchBarInfoAction(ActionBase):
             self.get_locale_text("actions.touchbar-info.widget.worldclock", "World Clock"),
             self.get_locale_text("actions.touchbar-info.widget.media", "Media Player")
         ]
-        self.media_player_options = [
-            self.get_locale_text("actions.touchbar-info.media-player-auto", "Active Player (Automatic)"),
-            "Spotify", "VLC", "Firefox", "Chrome", "Chromium", "Rhythmbox", "Cider", "Brave"
-        ]
+        self.available_media_players = self.get_available_media_players()
+        self.media_player_options = [label for (pid, label) in self.available_media_players]
+        self.media_player_ids = [pid for (pid, label) in self.available_media_players]
         self.media_vis_options = [
             self.get_locale_text("actions.touchbar-info.media-vis.stepped-bars", "Wave Stepped Bars"),
             self.get_locale_text("actions.touchbar-info.media-vis.wave-curves", "Wave Curves")
@@ -1756,7 +1833,16 @@ class TouchBarInfoAction(ActionBase):
         worldclock_outline_size = settings.setdefault("worldclock_outline_size", 2)
 
         # Media Player Defaults
-        media_player_idx = settings.setdefault("media_player_idx", 0)
+        media_player_id = settings.setdefault("media_player_id", "auto")
+        if media_player_id in self.media_player_ids:
+            media_player_idx = self.media_player_ids.index(media_player_id)
+        else:
+            media_player_idx = settings.setdefault("media_player_idx", 0)
+            if media_player_idx >= len(self.media_player_options):
+                media_player_idx = 0
+            if media_player_idx < len(self.media_player_ids):
+                settings["media_player_id"] = self.media_player_ids[media_player_idx]
+
         media_vis_style_idx = settings.setdefault("media_vis_style_idx", 0)
         media_color_mode_idx = settings.setdefault("media_color_mode_idx", 0)
         media_solid_color = settings.setdefault("media_solid_color", "#FFFFFFFF")
@@ -2667,7 +2753,9 @@ class TouchBarInfoAction(ActionBase):
             settings = self.get_settings()
             if settings is not None:
                 val = combo.get_selected()
+                pid = self.media_player_ids[val] if hasattr(self, "media_player_ids") and val < len(self.media_player_ids) else "auto"
                 settings["media_player_idx"] = val
+                settings["media_player_id"] = pid
                 for c in self.all_media_player_combos:
                     if c != combo and c.get_selected() != val: c.set_selected(val)
                 self.set_settings(settings)
@@ -3716,7 +3804,12 @@ class TouchBarInfoAction(ActionBase):
 
     # --- Media Player Drawers & Helpers ---
     def interpolate_color(self, c1: tuple, c2: tuple, t: float) -> tuple:
-            return (r, g, b, a)
+        t = max(0.0, min(1.0, float(t)))
+        r = int(c1[0] + (c2[0] - c1[0]) * t)
+        g = int(c1[1] + (c2[1] - c1[1]) * t)
+        b = int(c1[2] + (c2[2] - c1[2]) * t)
+        a = int(c1[3] + (c2[3] - c1[3]) * t) if len(c1) > 3 and len(c2) > 3 else 255
+        return (r, g, b, a)
 
     def update_media_state(self, poll_dbus: bool = True):
         now_ts = time.time()
@@ -3730,37 +3823,17 @@ class TouchBarInfoAction(ActionBase):
                 player_names = []
 
             settings = self.get_settings() or {}
-            player_idx = settings.get("media_player_idx", 0)
+            player_id = settings.get("media_player_id", "")
+            if not player_id:
+                player_idx = settings.get("media_player_idx", 0)
+                player_id = self.media_player_ids[player_idx] if hasattr(self, "media_player_ids") and player_idx < len(self.media_player_ids) else "auto"
 
             target_name = None
-            if player_idx == 1: # Spotify
+            if player_id and player_id != "auto":
                 for name in player_names:
-                    if "spotify" in name.lower():
+                    if player_id in name.lower():
                         target_name = name
                         break
-            elif player_idx == 2: # Chrome/Chromium
-                for name in player_names:
-                    if "chrome" in name.lower() or "chromium" in name.lower():
-                        target_name = name
-                        break
-            elif player_idx == 3: # Firefox
-                for name in player_names:
-                    if "firefox" in name.lower():
-                        target_name = name
-                        break
-            elif player_idx == 4: # VLC
-                for name in player_names:
-                    if "vlc" in name.lower():
-                        target_name = name
-                        break
-            elif player_idx == 5: # Rhythmbox
-                for name in player_names:
-                    if "rhythmbox" in name.lower():
-                        target_name = name
-                        break
-            elif player_idx == 6: # Generic
-                if player_names:
-                    target_name = player_names[0]
 
             # Auto-detect: search for active Playing player first, else Paused, else first available
             if target_name is None and player_names and self.session_bus:
