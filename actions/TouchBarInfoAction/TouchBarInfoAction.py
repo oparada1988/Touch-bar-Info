@@ -997,7 +997,7 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.media-solid-color.label", "Visualizer Color"),
                 subtitle=self.get_locale_text("actions.touchbar-info.media-solid-color.subtitle", "Color for visualizer bars or waves")
             )
-            solid_color_btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog.new())
+            solid_color_btn = Gtk.ColorButton()
             solid_color_btn.set_valign(Gtk.Align.CENTER)
             solid_color_row.add_suffix(solid_color_btn)
 
@@ -1006,7 +1006,7 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.media-grad-start.label", "Gradient Start Color"),
                 subtitle=self.get_locale_text("actions.touchbar-info.media-grad-start.subtitle", "Bottom for Stepped Bars / Left for Wave Curves")
             )
-            grad_start_btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog.new())
+            grad_start_btn = Gtk.ColorButton()
             grad_start_btn.set_valign(Gtk.Align.CENTER)
             grad_start_row.add_suffix(grad_start_btn)
 
@@ -1015,7 +1015,7 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.media-grad-end.label", "Gradient End Color"),
                 subtitle=self.get_locale_text("actions.touchbar-info.media-grad-end.subtitle", "Top for Stepped Bars / Right for Wave Curves")
             )
-            grad_end_btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog.new())
+            grad_end_btn = Gtk.ColorButton()
             grad_end_btn.set_valign(Gtk.Align.CENTER)
             grad_end_row.add_suffix(grad_end_btn)
 
@@ -1039,7 +1039,7 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Artist Fill Color"),
                 subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for artist text interior fill")
             )
-            artist_fill_color_btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog.new())
+            artist_fill_color_btn = Gtk.ColorButton()
             artist_fill_color_btn.set_valign(Gtk.Align.CENTER)
             artist_fill_color_row.add_suffix(artist_fill_color_btn)
 
@@ -1051,7 +1051,7 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Artist Outline Color"),
                 subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for artist text outline")
             )
-            artist_out_color_btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog.new())
+            artist_out_color_btn = Gtk.ColorButton()
             artist_out_color_btn.set_valign(Gtk.Align.CENTER)
             artist_out_color_row.add_suffix(artist_out_color_btn)
 
@@ -1079,7 +1079,7 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.fill-color.label", "Song Title Fill Color"),
                 subtitle=self.get_locale_text("actions.touchbar-info.fill-color.subtitle", "Color for song title interior fill")
             )
-            song_fill_color_btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog.new())
+            song_fill_color_btn = Gtk.ColorButton()
             song_fill_color_btn.set_valign(Gtk.Align.CENTER)
             song_fill_color_row.add_suffix(song_fill_color_btn)
 
@@ -1091,7 +1091,7 @@ class TouchBarInfoAction(ActionBase):
                 title=self.get_locale_text("actions.touchbar-info.outline-color.label", "Song Title Outline Color"),
                 subtitle=self.get_locale_text("actions.touchbar-info.outline-color.subtitle", "Color for song title outline")
             )
-            song_out_color_btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog.new())
+            song_out_color_btn = Gtk.ColorButton()
             song_out_color_btn.set_valign(Gtk.Align.CENTER)
             song_out_color_row.add_suffix(song_out_color_btn)
 
