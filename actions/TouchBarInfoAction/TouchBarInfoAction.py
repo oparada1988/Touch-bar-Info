@@ -75,6 +75,12 @@ class TouchBarInfoAction(ActionBase):
         self.process_count = 0
         self._was_locked = False
         self._active_highlight_slot = None
+        self._dial_css_provider = None
+        self._volume_hud_until = 0.0
+        self._current_vol_pct = 50
+        self._current_is_muted = False
+        self._vol_initialized = False
+
         try:
             sm = Adw.StyleManager.get_default()
             sm.connect("notify::accent-color", lambda *args: (setattr(self, "last_rendered_key", ""), self.update_display()))
@@ -82,6 +88,7 @@ class TouchBarInfoAction(ActionBase):
         except Exception:
             pass
         self.init_options()
+        self.setup_dial_interceptor()
 
     def get_locale_text(self, key: str, default: str) -> str:
         if hasattr(self.plugin_base, "lm") and self.plugin_base.lm is not None:
@@ -1800,16 +1807,59 @@ class TouchBarInfoAction(ActionBase):
         ]
 
     def _on_config_unmapped(self):
+        self.update_dialbox_glow([])
         if getattr(self, "_active_highlight_slot", None) is not None:
             self._active_highlight_slot = None
             self.last_rendered_key = ""
             self.update_display()
 
+    def update_dialbox_glow(self, active_dials: list[int]):
+        try:
+            if not hasattr(self, "deck_controller") or self.deck_controller is None:
+                return
+
+            dial_box = None
+            if hasattr(self.deck_controller, "own_deck_stack_child"):
+                child = self.deck_controller.own_deck_stack_child
+                if hasattr(child, "page_settings") and hasattr(child.page_settings, "deck_config"):
+                    dial_box = getattr(child.page_settings.deck_config, "dial_box", None)
+
+            if dial_box and hasattr(dial_box, "dials"):
+                if getattr(self, "_dial_css_provider", None) is None:
+                    ar, ag, ab = self.get_streamcontroller_accent_color()
+                    css = f"""
+                    .touchpulse-dial-glow {{
+                        border: 2px solid rgba({ar}, {ag}, {ab}, 0.95) !important;
+                        box-shadow: 0 0 10px rgba({ar}, {ag}, {ab}, 0.8), inset 0 0 6px rgba({ar}, {ag}, {ab}, 0.5) !important;
+                        border-radius: 9999px !important;
+                    }}
+                    """
+                    provider = Gtk.CssProvider()
+                    provider.load_from_data(css.encode())
+                    display = Gdk.Display.get_default()
+                    if display:
+                        Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 10)
+                    self._dial_css_provider = provider
+
+                for i, dial_widget in enumerate(dial_box.dials):
+                    if i in active_dials:
+                        dial_widget.add_css_class("touchpulse-dial-glow")
+                    else:
+                        dial_widget.remove_css_class("touchpulse-dial-glow")
+        except Exception as e:
+            log.warning(f"TouchPulse: error updating dialbox glow: {e}")
+
     def _update_active_highlight(self):
         new_slot = None
-        for prefix, (x1, x2) in [("sec_a", (2, 198)), ("sec_b", (202, 598)), ("sec_c", (602, 798))]:
+        active_dials = []
+        for prefix, (x1, x2), d_list in [
+            ("sec_a", (2, 198), [0]),
+            ("sec_b", (202, 598), [1, 2]),
+            ("sec_c", (602, 798), [3])
+        ]:
             exp = getattr(self, f"{prefix}_expander", None)
             if exp and exp.get_expanded():
+                active_dials = d_list
                 mode_combo = getattr(self, f"{prefix}_mode_combo", None)
                 is_split = (mode_combo.get_selected() == 1) if mode_combo else False
                 if not is_split:
@@ -1823,6 +1873,8 @@ class TouchBarInfoAction(ActionBase):
                         new_slot = (x1, 52, x2, 98)
                     else:
                         new_slot = (x1, 2, x2, 98)
+
+        self.update_dialbox_glow(active_dials)
 
         if getattr(self, "_active_highlight_slot", None) != new_slot:
             self._active_highlight_slot = new_slot
@@ -3090,13 +3142,131 @@ class TouchBarInfoAction(ActionBase):
 
         Thread(target=_run, daemon=True).start()
 
+    def query_system_volume(self):
+        try:
+            res = subprocess.run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"], capture_output=True, text=True, timeout=0.6)
+            if res.returncode == 0 and res.stdout:
+                line = res.stdout.strip()
+                parts = line.split()
+                if len(parts) >= 2:
+                    val = float(parts[1])
+                    self._current_vol_pct = int(round(val * 100))
+                    self._current_is_muted = "[MUTED]" in line
+                    self._vol_initialized = True
+                    return
+        except Exception:
+            pass
+
+        try:
+            res = subprocess.run(["pactl", "get-sink-volume", "@DEFAULT_SINK@"], capture_output=True, text=True, timeout=0.6)
+            if res.returncode == 0 and res.stdout:
+                import re
+                m = re.search(r"(\d+)%", res.stdout)
+                if m:
+                    self._current_vol_pct = int(m.group(1))
+                    self._vol_initialized = True
+        except Exception:
+            pass
+
+    def is_volume_hud_active(self) -> bool:
+        return time.time() < getattr(self, "_volume_hud_until", 0.0)
+
+    def _dismiss_volume_hud(self) -> bool:
+        if time.time() >= getattr(self, "_volume_hud_until", 0.0):
+            self._volume_hud_until = 0.0
+            self.last_rendered_key = ""
+            self.update_display()
+            return False
+        return True
+
+    def draw_volume_meter_bar(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], align: str = "left"):
+        x_min, y_min, x_max, y_max = box
+        bw = max(10, x_max - x_min)
+        bh = max(10, y_max - y_min)
+
+        vol = max(0, min(100, getattr(self, "_current_vol_pct", 50)))
+        is_muted = getattr(self, "_current_is_muted", False)
+        ar, ag, ab = self.get_streamcontroller_accent_color()
+
+        cy = y_min + bh / 2.0
+        track_h = max(8, int(bh * 0.50))
+        ty1 = int(cy - track_h / 2.0)
+        ty2 = int(cy + track_h / 2.0)
+
+        # 1. Left Speaker / Mute symbol
+        icon_w = int(bh * 0.75)
+        icon_col = (255, 80, 80, 255) if is_muted else (ar, ag, ab, 255)
+
+        spk_x1 = x_min + int(icon_w * 0.12)
+        spk_x2 = x_min + int(icon_w * 0.38)
+        spk_y1 = int(cy - track_h * 0.65)
+        spk_y2 = int(cy + track_h * 0.65)
+
+        draw.polygon([
+            (spk_x1, int(cy - track_h * 0.3)),
+            (spk_x2, int(cy - track_h * 0.3)),
+            (x_min + int(icon_w * 0.62), spk_y1),
+            (x_min + int(icon_w * 0.62), spk_y2),
+            (spk_x2, int(cy + track_h * 0.3)),
+            (spk_x1, int(cy + track_h * 0.3))
+        ], fill=icon_col)
+
+        if is_muted:
+            mx = x_min + int(icon_w * 0.82)
+            draw.line([(mx - 4, int(cy - 4)), (mx + 4, int(cy + 4))], fill=(255, 80, 80, 255), width=2)
+            draw.line([(mx - 4, int(cy + 4)), (mx + 4, int(cy - 4))], fill=(255, 80, 80, 255), width=2)
+        else:
+            if vol > 5:
+                draw.arc([x_min + int(icon_w * 0.50), int(cy - 5), x_min + int(icon_w * 0.74), int(cy + 5)], -55, 55, fill=icon_col, width=2)
+            if vol > 45:
+                draw.arc([x_min + int(icon_w * 0.50), int(cy - 9), x_min + int(icon_w * 0.94), int(cy + 9)], -55, 55, fill=icon_col, width=2)
+
+        # 2. Right text badge (Percentage or MUTED)
+        badge_text = "MUTED" if is_muted else f"{vol}%"
+        badge_font = self.get_font("DejaVu Sans Bold", max(11, int(bh * 0.46)))
+        bbox = draw.textbbox((0, 0), badge_text, font=badge_font)
+        badge_w = bbox[2] - bbox[0]
+        badge_x = x_max - badge_w / 2.0
+        self.render_styled_text(
+            draw, (badge_x, cy), badge_text, badge_font,
+            True, (255, 85, 85, 255) if is_muted else (255, 255, 255, 255),
+            True, (0, 0, 0, 255), 2, anchor="mm"
+        )
+
+        # 3. Middle Progress Bar Capsule Track
+        tx1 = x_min + icon_w + 6
+        tx2 = int(x_max - badge_w - 12)
+        if tx2 > tx1 + 10:
+            r_track = track_h // 2
+            # Dark background slot
+            draw.rounded_rectangle([tx1, ty1, tx2, ty2], radius=r_track, fill=(28, 28, 34, 230), outline=(55, 55, 65, 255), width=1)
+
+            # Filled level
+            fill_len = int((tx2 - tx1) * (vol / 100.0))
+            if fill_len > 2 and not is_muted:
+                fx2 = min(tx2, tx1 + fill_len)
+                fill_col = (ar, ag, ab, 255)
+                draw.rounded_rectangle([tx1, ty1, fx2, ty2], radius=r_track, fill=fill_col)
+                # Subtle highlight sheen on top edge of progress bar
+                if fx2 > tx1 + r_track:
+                    draw.line([(tx1 + r_track // 2, ty1 + 1), (fx2 - r_track // 2, ty1 + 1)], fill=(255, 255, 255, 120), width=1)
+
     def adjust_volume(self, delta_percent: int, vol_target: int = 0, target_player_id: str = "auto"):
+        if not getattr(self, "_vol_initialized", False):
+            self.query_system_volume()
+
+        self._current_vol_pct = max(0, min(100, getattr(self, "_current_vol_pct", 50) + delta_percent))
+        self._current_is_muted = False
+        self._volume_hud_until = time.time() + 3.0
+        self.last_rendered_key = ""
+        GLib.idle_add(self.update_display)
+        GLib.timeout_add(150, self._dismiss_volume_hud)
+
         def _run():
             try:
                 if vol_target == 0: # System Master Sink Volume
                     sign = "+" if delta_percent > 0 else "-"
                     amount = abs(delta_percent)
-                    # Try pactl
                     try:
                         subprocess.run(
                             ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{sign}{amount}%"],
@@ -3105,7 +3275,6 @@ class TouchBarInfoAction(ActionBase):
                         return
                     except Exception:
                         pass
-                    # Try wpctl
                     try:
                         step_str = f"{amount}%+" if delta_percent > 0 else f"{amount}%-"
                         subprocess.run(
@@ -3131,6 +3300,12 @@ class TouchBarInfoAction(ActionBase):
         Thread(target=_run, daemon=True).start()
 
     def toggle_audio_mute(self, vol_target: int = 0, target_player_id: str = "auto"):
+        self._current_is_muted = not getattr(self, "_current_is_muted", False)
+        self._volume_hud_until = time.time() + 3.0
+        self.last_rendered_key = ""
+        GLib.idle_add(self.update_display)
+        GLib.timeout_add(150, self._dismiss_volume_hud)
+
         def _run():
             try:
                 if vol_target == 0: # System Master Mute
@@ -3172,34 +3347,48 @@ class TouchBarInfoAction(ActionBase):
     def setup_dial_interceptor(self):
         if not hasattr(self, "deck_controller") or self.deck_controller is None:
             return
-        if getattr(self.deck_controller, "_touchpulse_dial_hooked", False):
-            return
 
-        original_dial_callback = getattr(self.deck_controller, "dial_event_callback", None)
-        if not original_dial_callback:
-            return
+        # 1. Hook deck_controller.dial_event_callback and underlying deck callback
+        if not getattr(self.deck_controller, "_touchpulse_dial_hooked", False):
+            original_dial_callback = getattr(self.deck_controller, "dial_event_callback", None)
 
-        def hooked_dial_callback(deck, dial, *args, **kwargs):
-            try:
-                self.handle_deck_dial_event(dial, *args, **kwargs)
-            except Exception as e:
-                log.error(f"TouchPulse: dial hook handler error: {e}")
-            if original_dial_callback:
-                return original_dial_callback(deck, dial, *args, **kwargs)
+            def hooked_dial_callback(deck, dial, *args, **kwargs):
+                try:
+                    self.handle_deck_dial_event(dial, *args, **kwargs)
+                except Exception as e:
+                    log.error(f"TouchPulse: dial hook handler error: {e}")
+                if original_dial_callback:
+                    return original_dial_callback(deck, dial, *args, **kwargs)
 
-        self.deck_controller.dial_event_callback = hooked_dial_callback
-        if hasattr(self.deck_controller, "deck") and self.deck_controller.deck is not None:
-            try:
-                self.deck_controller.deck.set_dial_callback(hooked_dial_callback)
-            except Exception as e:
-                log.warning(f"TouchPulse: Could not rebind deck dial callback: {e}")
-        self.deck_controller._touchpulse_dial_hooked = True
+            self.deck_controller.dial_event_callback = hooked_dial_callback
+            if hasattr(self.deck_controller, "deck") and self.deck_controller.deck is not None:
+                try:
+                    self.deck_controller.deck.set_dial_callback(hooked_dial_callback)
+                except Exception as e:
+                    log.warning(f"TouchPulse: Could not rebind deck dial callback: {e}")
+            self.deck_controller._touchpulse_dial_hooked = True
+
+        # 2. ALSO hook each individual ControllerDial input directly
+        if hasattr(self.deck_controller, "inputs") and hasattr(Input, "Dial") and Input.Dial in self.deck_controller.inputs:
+            for dial_input in self.deck_controller.inputs[Input.Dial]:
+                if not getattr(dial_input, "_touchpulse_hooked", False):
+                    orig_input_cb = dial_input.event_callback
+                    dial_num = getattr(dial_input.identifier, "index", getattr(dial_input.identifier, "key", 0))
+
+                    def make_input_hook(d_idx, original_fn):
+                        def _hook(*args, **kwargs):
+                            try:
+                                self.handle_deck_dial_event(d_idx, *args, **kwargs)
+                            except Exception as e:
+                                log.error(f"TouchPulse: dial input hook error: {e}")
+                            if original_fn:
+                                return original_fn(*args, **kwargs)
+                        return _hook
+
+                    dial_input.event_callback = make_input_hook(dial_num, orig_input_cb)
+                    dial_input._touchpulse_hooked = True
 
     def handle_deck_dial_event(self, dial_index, *args, **kwargs):
-        if hasattr(self, "page") and hasattr(self, "deck_controller"):
-            if getattr(self.deck_controller, "active_page", None) != self.page:
-                return
-
         try:
             dial_idx = int(dial_index)
         except Exception:
@@ -3301,6 +3490,8 @@ class TouchBarInfoAction(ActionBase):
 
         if action_mode is None or action_mode == 2:
             return
+
+        log.info(f"TouchPulse: Dial #{dial_idx} event={event_type} val={value} -> Action Mode: {action_mode}")
 
         if action_mode == 0: # Media Player Control
             if is_turn:
@@ -3698,9 +3889,11 @@ class TouchBarInfoAction(ActionBase):
             self.draw_marquee_text(image, draw, (content_x, artist_y), avail_w, artist, font_artist, artist_fill_en, artist_fill_col, artist_out_en, artist_out_col, artist_out_sz)
         self.draw_marquee_text(image, draw, (content_x, song_y), avail_w, title, font_song, song_fill_en, song_fill_col, song_out_en, song_out_col, song_out_sz)
 
-        # Visualizer
+        # Visualizer or Volume Meter HUD
         vis_box = (content_x, y_min + int(bh * 0.58), content_max_x, y_max - int(bh * 0.08))
-        if vis_style == 1:
+        if self.is_volume_hud_active():
+            self.draw_volume_meter_bar(image, draw, vis_box, align=align)
+        elif vis_style == 1:
             self.draw_wave_curves(image, draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, mid_col, end_col, self.vis_tick * 0.15)
         else:
             self.draw_stepped_bars(draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, mid_col, end_col)
@@ -3720,12 +3913,14 @@ class TouchBarInfoAction(ActionBase):
         if art_img:
             image.paste(art_img, (art_x, art_y), art_img)
 
-        # 2. Right: Full Height Visualizer
+        # 2. Right: Full Height Visualizer or Volume Meter HUD
         vis_x_min = art_x + art_size + int(bw * 0.04)
         vis_x_max = x_max - margin_x
         vis_box = (vis_x_min, y_min + 4, vis_x_max, y_max - 4)
 
-        if vis_style == 1:
+        if self.is_volume_hud_active():
+            self.draw_volume_meter_bar(image, draw, vis_box, align=align)
+        elif vis_style == 1:
             self.draw_wave_curves(image, draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, mid_col, end_col, self.vis_tick * 0.15)
         else:
             self.draw_stepped_bars(draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, mid_col, end_col)
