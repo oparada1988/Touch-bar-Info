@@ -30,7 +30,7 @@ class TouchBarInfoPlugin(PluginBase):
         # Register plugin
         self.register(
             plugin_name = "TouchPulse",
-            github_repo = "https://github.com/oparada1988/Touch-bar-Info",
+            github_repo = "https://github.com/oparada1988/TouchPulse",
             plugin_version = "1.0.0",
             app_version = "1.5.0-beta"
         )
