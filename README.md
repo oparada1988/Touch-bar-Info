@@ -148,12 +148,39 @@ Displays a real-time clock for any global location with automatic time differenc
 - **Custom Background Wallpapers**: Set custom PNG or JPG wallpaper images behind all Touch Bar widgets.
 - **Deep Typography & Color Styling**: Full font selectors, custom fill colors, and outline strokes across clock, date, weather, and media typography.
 - **Power-Saving Lock Blanking**: Automatically blanks the display when your computer screen locks.
-- **Multi-Input Support**: Works seamlessly across Touchscreen (`sd-plus`), Dials, and Keys.
+---
+
+## 🏗️ Codebase Architecture & Developer Guide
+
+TouchPulse is built with a clean, modular architecture designed for easy modification and extension. If you want to fork the repository or add new widgets, here is a quick overview of how the codebase is structured:
+
+```text
+TouchPulse/
+├── main.py                                  # Plugin entry point & ActionHolder registration
+├── manifest.json                            # StreamController store metadata & permissions
+├── locales/                                 # Localization dictionaries (en_US, de_DE)
+├── assets/                                  # Icons (cpu, ram, disk, net, media) & weather SVGs
+└── actions/
+    └── TouchBarInfoAction/
+        └── TouchBarInfoAction.py            # Main action engine (~4500 lines)
+            ├── SECTION 1: Base & State Storage
+            ├── SECTION 2: System Discovery & Option Providers
+            ├── SECTION 3: GTK4 / Libadwaita Preferences UI Builders
+            ├── SECTION 4: Typography & Pango Font Resolution
+            ├── SECTION 5: Canvas Drawing Engines (Clocks, Graphs, Visualizers)
+            ├── SECTION 6: Dial Interception, Volume HUD & Media Controls
+            └── SECTION 7: Display Update Loop & 1:1 ScreenBar UI Mirroring
+```
+
+### 💡 How to Add a New Widget in 3 Steps:
+1. **Register the Widget ID**: Add your widget name to `self.full_widget_options` and `self.sub_widget_options` in `init_options()` in `TouchBarInfoAction.py`.
+2. **Build Settings UI**: Add a `build_<widget>_controls(slot_key)` function in `SECTION 3` and include it in `update_group_vis()`.
+3. **Add the Canvas Renderer**: Implement `draw_<widget>()` in `SECTION 5` and dispatch it inside `render_slot_widget()` in `SECTION 7`.
 
 ---
 
 ## Acknowledgments
 
-This plugin and its documentation were developed with AI assistance (Google DeepMind Antigravity AI) for code architecture, performance optimization, and clear documentation.
+This plugin and its documentation were developed with pair-programming assistance (Google DeepMind Antigravity AI) for code architecture, performance optimization, and clear documentation.
 
 ---

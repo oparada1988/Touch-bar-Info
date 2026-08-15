@@ -1,3 +1,45 @@
+"""
+TouchPulse Action Engine (`TouchBarInfoAction.py`)
+=================================================
+Author: Oscar Parada
+Repository: https://github.com/oparada1988/TouchPulse
+
+ARCHITECTURE & DEVELOPER GUIDE:
+-------------------------------
+1. CANVAS & SECTION COORDINATE SPACE (800x100 RGBA Canvas):
+   The physical Stream Deck + touch bar has an 800x100 pixel LCD display.
+   TouchPulse divides this canvas into three configurable sections:
+     * Section A (Left):   [X: 0..200,   Y: 0..100] -> Full: 200x100 | Split: 200x50 Top / 200x50 Bot
+     * Section B (Center): [X: 200..600, Y: 0..100] -> Full: 400x100 | Split: 400x50 Top / 400x50 Bot
+     * Section C (Right):  [X: 600..800, Y: 0..100] -> Full: 200x100 | Split: 200x50 Top / 200x50 Bot
+
+2. MODULAR WIDGET IDENTIFIER REGISTRY:
+   Each section slot can host any of the following 10 widgets:
+     * 0: Blank / None (renders transparent overlay)
+     * 1: CPU Usage (Percentage, Percentage + Process count, or Live scrolling graph)
+     * 2: Date (Custom format strings & font sizes)
+     * 3: Disk Usage (Host filesystem capacity via flatpak-spawn, percentages, or mini bar)
+     * 4: Media Player (MPRIS D-Bus listener, album art, marquee text & audio visualizer)
+     * 5: Network Activity (Real-time download/upload speed rates or bandwidth graph)
+     * 6: RAM Usage (Memory percentage, Used/Total GB, or live memory graph)
+     * 7: Stacked Date & Time (Full section only: Date stacked above Time)
+     * 8: Time (12h/24h with optional live seconds, dynamic split font scaling)
+     * 9: Weather (Open-Meteo geocoded weather with temperature & WMO status icons)
+     * 10: World Clock (Multi-city timezone converter with Analog and Digital clock views)
+
+3. HARDWARE ROTARY DIAL ROUTING:
+   * Dial 0: Controls Section A (single full widget or top/bottom split selection)
+   * Dial 1 & Dial 2: Control Section B (Dial 1 for left/top, Dial 2 for right/bottom)
+   * Dial 3: Controls Section C (single full widget or top/bottom split selection)
+   * Turning adjusts volume / skips tracks; pressing toggles mute / play-pause.
+
+4. REAL-TIME RENDERING PIPELINE:
+   * 1 Hz background worker: polls system hardware stats, DBus player metadata, and weather.
+   * 30 Hz animation loop (`_anim_tick`): renders fluid multi-octave equalizer visualizers.
+   * 1:1 Mirroring: every frame is rendered to the hardware USB deck and mirrored
+     directly to StreamController's desktop GUI ScreenBar (`ScreenBarImage`).
+"""
+
 # Import StreamController modules
 from src.backend.PluginManager.ActionBase import ActionBase
 from src.backend.DeckManagement.InputIdentifier import Input
