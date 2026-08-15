@@ -143,6 +143,11 @@ class TouchBarInfoAction(ActionBase):
         self.init_options()
         self.setup_dial_interceptor()
         try:
+            if hasattr(self, "plugin_base") and hasattr(self.plugin_base, "active_actions"):
+                self.plugin_base.active_actions.add(self)
+        except Exception:
+            pass
+        try:
             if hasattr(gl, "signal_manager") and gl.signal_manager is not None:
                 gl.signal_manager.connect_signal(signal=ChangePage, callback=self.on_change_page)
         except Exception as e:
@@ -4104,11 +4109,28 @@ class TouchBarInfoAction(ActionBase):
     # ==============================================================================
     # SECTION 7: DISPLAY UPDATE LOOP, 1:1 CANVAS MIRRORING & LIFECYCLE MANAGEMENT
     # ==============================================================================
+    def get_anim_interval_ms(self) -> int:
+        fps = 18
+        try:
+            if hasattr(self, "plugin_base") and self.plugin_base is not None:
+                fps = self.plugin_base.get_settings().get("animation_fps", 18)
+        except Exception:
+            fps = 18
+        return 55 if fps == 18 else 33
+
+    def on_fps_setting_changed(self, new_fps: int):
+        log.info(f"TouchPulse: Action instance updated animation refresh rate to {new_fps} FPS")
+        if self._anim_timer_id is not None:
+            self.stop_anim_timer()
+            if self.get_is_present() and (self.is_media_active_and_playing() or self.is_volume_hud_active()):
+                self.start_anim_timer()
+
     def start_anim_timer(self):
         if not self.get_is_present():
             return
         if self._anim_timer_id is None:
-            self._anim_timer_id = GLib.timeout_add(33, self._anim_tick) # ~30 FPS fluid animation
+            interval_ms = self.get_anim_interval_ms()
+            self._anim_timer_id = GLib.timeout_add(interval_ms, self._anim_tick)
 
     def stop_anim_timer(self):
         if self._anim_timer_id is not None:
