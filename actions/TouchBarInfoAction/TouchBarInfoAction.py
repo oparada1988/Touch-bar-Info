@@ -43,6 +43,7 @@ ARCHITECTURE & DEVELOPER GUIDE:
 # Import StreamController modules
 from src.backend.PluginManager.ActionBase import ActionBase
 from src.backend.DeckManagement.InputIdentifier import Input
+from src.Signals.Signals import Signals
 
 try:
     from StreamDeck.Devices.StreamDeck import DialEventType
@@ -141,6 +142,25 @@ class TouchBarInfoAction(ActionBase):
             pass
         self.init_options()
         self.setup_dial_interceptor()
+        try:
+            if hasattr(gl, "signal_manager") and gl.signal_manager is not None:
+                gl.signal_manager.connect_signal(signal=Signals.ChangePage, callback=self.on_change_page)
+        except Exception as e:
+            log.warning(f"TouchPulse: Could not connect to ChangePage signal: {e}")
+
+    def on_change_page(self, deck_controller, old_path: str, new_path: str):
+        try:
+            if not hasattr(self, "page") or self.page is None:
+                return
+            if getattr(self.page, "json_path", None) == new_path:
+                self.last_rendered_key = ""
+                GLib.idle_add(self.update_display)
+                if self.is_media_active_and_playing():
+                    GLib.idle_add(self.start_anim_timer)
+            else:
+                GLib.idle_add(self.stop_anim_timer)
+        except Exception as e:
+            log.error(f"TouchPulse: Error handling ChangePage signal: {e}")
 
     def get_session_bus(self, force_refresh: bool = False) -> dbus.SessionBus | None:
         """
@@ -3534,6 +3554,8 @@ class TouchBarInfoAction(ActionBase):
             self.deck_controller._touchpulse_dial_hooked = True
 
     def handle_deck_dial_event(self, dial_index, *args, **kwargs):
+        if not self.get_is_present():
+            return
         try:
             dial_idx = int(dial_index)
         except Exception:
@@ -4083,6 +4105,8 @@ class TouchBarInfoAction(ActionBase):
     # SECTION 7: DISPLAY UPDATE LOOP, 1:1 CANVAS MIRRORING & LIFECYCLE MANAGEMENT
     # ==============================================================================
     def start_anim_timer(self):
+        if not self.get_is_present():
+            return
         if self._anim_timer_id is None:
             self._anim_timer_id = GLib.timeout_add(33, self._anim_tick) # ~30 FPS fluid animation
 
@@ -4095,7 +4119,7 @@ class TouchBarInfoAction(ActionBase):
             self._anim_timer_id = None
 
     def _anim_tick(self) -> bool:
-        if self._was_locked:
+        if not self.get_is_present() or self._was_locked:
             self._anim_timer_id = None
             return False
 
@@ -4167,6 +4191,8 @@ class TouchBarInfoAction(ActionBase):
     def render_to_input(self, image: Image.Image) -> None:
         if not hasattr(self, "page") or self.page is None:
             return
+        if not self.get_is_present():
+            return
 
         final_image = image
         try:
@@ -4230,6 +4256,8 @@ class TouchBarInfoAction(ActionBase):
         self.update_screenbar_ui(final_image)
 
     def update_screenbar_ui(self, image: Image.Image):
+        if not self.get_is_present():
+            return
         try:
             # 1. Update via deck_controller
             dc = getattr(self, "deck_controller", None)
@@ -4293,6 +4321,7 @@ class TouchBarInfoAction(ActionBase):
             log.error(f"TouchPulse: Error updating system stats: {e}")
 
     def on_ready(self):
+        self.last_rendered_key = ""
         self.setup_dial_interceptor()
         self.fetch_weather_async()
         self.update_system_stats()
@@ -4307,6 +4336,10 @@ class TouchBarInfoAction(ActionBase):
                 while True:
                     time.sleep(1.0)
                     try:
+                        if not self.get_is_present():
+                            if self._anim_timer_id is not None:
+                                GLib.idle_add(self.stop_anim_timer)
+                            continue
                         if not self.handle_lock_blanking():
                             self.update_system_stats()
                             self.update_media_state(poll_dbus=True)
@@ -4332,6 +4365,8 @@ class TouchBarInfoAction(ActionBase):
         self.update_display()
 
     def schedule_update_display(self):
+        if not self.get_is_present():
+            return
         if getattr(self, "_update_scheduled", False):
             return
         self._update_scheduled = True
@@ -4344,6 +4379,8 @@ class TouchBarInfoAction(ActionBase):
         GLib.timeout_add(50, _do_update)
 
     def update_display(self):
+        if not self.get_is_present():
+            return
         if self.handle_lock_blanking():
             return
 
