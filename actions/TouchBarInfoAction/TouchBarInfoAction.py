@@ -134,6 +134,15 @@ class TouchBarInfoAction(ActionBase):
         self._vol_initialized = False
         self._last_dial_event = (None, None, None, 0.0)
 
+        # Subsection Focus & Glow Tracking (Model 2)
+        self.sec_a_focus = "top"
+        self.sec_c_focus = "top"
+        self.sec_a_glow_until = 0.0
+        self.sec_c_glow_until = 0.0
+        self.sec_b_top_glow_until = 0.0
+        self.sec_b_bot_glow_until = 0.0
+        self._glow_timer_id = None
+
         try:
             sm = Adw.StyleManager.get_default()
             sm.connect("notify::accent-color", lambda *args: (setattr(self, "last_rendered_key", ""), self.update_display()))
@@ -3558,6 +3567,167 @@ class TouchBarInfoAction(ActionBase):
                     log.warning(f"TouchPulse: Could not rebind deck dial callback: {e}")
             self.deck_controller._touchpulse_dial_hooked = True
 
+    def trigger_glow_feedback(self, duration: float = 1.4):
+        def _clear_glow():
+            now_ts = time.time()
+            if (getattr(self, "sec_a_glow_until", 0.0) <= now_ts and 
+                getattr(self, "sec_c_glow_until", 0.0) <= now_ts and 
+                getattr(self, "sec_b_top_glow_until", 0.0) <= now_ts and 
+                getattr(self, "sec_b_bot_glow_until", 0.0) <= now_ts):
+                self.trigger_redraw()
+                return False
+            return True
+
+        self.trigger_redraw()
+        if getattr(self, "_glow_timer_id", None) is not None:
+            try:
+                GLib.source_remove(self._glow_timer_id)
+            except Exception:
+                pass
+        self._glow_timer_id = GLib.timeout_add(150, _clear_glow)
+
+    def adjust_deck_brightness(self, delta: int):
+        try:
+            if hasattr(self, "deck_controller") and self.deck_controller is not None:
+                curr = getattr(self.deck_controller, "brightness", 80)
+                new_val = max(5, min(100, curr + delta))
+                self.deck_controller.set_brightness(new_val)
+                log.info(f"TouchPulse: Adjusted deck brightness to {new_val}%")
+        except Exception as e:
+            log.warning(f"TouchPulse: Error adjusting deck brightness: {e}")
+
+    def launch_host_app(self, command: str):
+        try:
+            subprocess.Popen(f"flatpak-spawn --host {command}", shell=True, start_new_session=True)
+        except Exception:
+            try:
+                subprocess.Popen(command, shell=True, start_new_session=True)
+            except Exception as e:
+                log.warning(f"TouchPulse: Could not launch '{command}': {e}")
+
+    def handle_widget_dial_action(self, widget: int, slot_key: str, is_turn: bool, is_push: bool, value):
+        settings = self.get_settings() or {}
+        step = 1 if (isinstance(value, (int, float)) and value > 0) else -1
+
+        if widget == 1: # CPU Monitor
+            if is_turn:
+                mode = (self.get_slot_setting(settings, slot_key, "cpu_mode_idx", 0) + step) % 3
+                self.set_slot_setting(slot_key, "cpu_mode_idx", mode)
+            elif is_push:
+                self.launch_host_app("gnome-system-monitor")
+
+        elif widget == 2: # Date
+            if is_turn:
+                num_fmts = len(getattr(self, "date_format_options", [])) or 5
+                idx = (self.get_slot_setting(settings, slot_key, "date_format_idx", 0) + step) % num_fmts
+                self.set_slot_setting(slot_key, "date_format_idx", idx)
+            elif is_push:
+                self.launch_host_app("gnome-calendar")
+
+        elif widget == 3: # Disk Usage
+            if is_turn:
+                mounts = getattr(self, "available_disk_mounts", [])
+                if mounts:
+                    curr_p = self.get_slot_setting(settings, slot_key, "disk_mount_path", "/")
+                    paths = [p for p, _ in mounts]
+                    curr_idx = paths.index(curr_p) if curr_p in paths else 0
+                    next_p = paths[(curr_idx + step) % len(paths)]
+                    self.set_slot_setting(slot_key, "disk_mount_path", next_p)
+            elif is_push:
+                mode = (self.get_slot_setting(settings, slot_key, "disk_mode_idx", 0) + 1) % 3
+                self.set_slot_setting(slot_key, "disk_mode_idx", mode)
+
+        elif widget == 5: # Network Activity
+            if is_turn:
+                mode = (self.get_slot_setting(settings, slot_key, "net_mode_idx", 0) + step) % 4
+                self.set_slot_setting(slot_key, "net_mode_idx", mode)
+            elif is_push:
+                unit = (self.get_slot_setting(settings, slot_key, "net_unit_idx", 0) + 1) % 2
+                self.set_slot_setting(slot_key, "net_unit_idx", unit)
+
+        elif widget == 6: # RAM Usage
+            if is_turn:
+                mode = (self.get_slot_setting(settings, slot_key, "ram_mode_idx", 0) + step) % 3
+                self.set_slot_setting(slot_key, "ram_mode_idx", mode)
+            elif is_push:
+                self.launch_host_app("gnome-system-monitor")
+
+        elif widget == 7: # Stacked Date & Time (full) or Time (split)
+            if is_turn:
+                self.adjust_deck_brightness(5 * step)
+            elif is_push:
+                curr_24h = self.get_slot_setting(settings, slot_key, "use_24h", False)
+                self.set_slot_setting(slot_key, "use_24h", not curr_24h)
+
+        elif widget == 8: # Time (full) or Weather (split)
+            is_full = slot_key.endswith("_full")
+            if is_full: # Time
+                if is_turn:
+                    self.adjust_deck_brightness(5 * step)
+                elif is_push:
+                    curr_24h = self.get_slot_setting(settings, slot_key, "use_24h", False)
+                    self.set_slot_setting(slot_key, "use_24h", not curr_24h)
+            else: # Weather
+                if is_turn:
+                    curr_u = self.get_slot_setting(settings, slot_key, "weather_unit_idx", 0)
+                    self.set_slot_setting(slot_key, "weather_unit_idx", (curr_u + 1) % 2)
+                elif is_push:
+                    self.fetch_weather_async(force=True)
+
+        elif widget == 9: # Weather (full) or World Clock (split)
+            is_full = slot_key.endswith("_full")
+            if is_full: # Weather
+                if is_turn:
+                    curr_u = self.get_slot_setting(settings, slot_key, "weather_unit_idx", 0)
+                    self.set_slot_setting(slot_key, "weather_unit_idx", (curr_u + 1) % 2)
+                elif is_push:
+                    self.fetch_weather_async(force=True)
+            else: # World Clock
+                if is_turn:
+                    num_cities = len(getattr(self, "worldclock_preset_cities", [])) or 10
+                    idx = (self.get_slot_setting(settings, slot_key, "worldclock_city_idx", 0) + step) % num_cities
+                    self.set_slot_setting(slot_key, "worldclock_city_idx", idx)
+                elif is_push:
+                    view = 1 if self.get_slot_setting(settings, slot_key, "worldclock_view", 0) == 0 else 0
+                    self.set_slot_setting(slot_key, "worldclock_view", view)
+
+        elif widget == 10: # World Clock (full)
+            if is_turn:
+                num_cities = len(getattr(self, "worldclock_preset_cities", [])) or 10
+                idx = (self.get_slot_setting(settings, slot_key, "worldclock_city_idx", 0) + step) % num_cities
+                self.set_slot_setting(slot_key, "worldclock_city_idx", idx)
+            elif is_push:
+                view = 1 if self.get_slot_setting(settings, slot_key, "worldclock_view", 0) == 0 else 0
+                self.set_slot_setting(slot_key, "worldclock_view", view)
+
+    def _dispatch_dial_to_slot(self, slot_key: str, widget: int, is_turn: bool, is_push: bool, value, dial_mode_key: str = "media_dial_single"):
+        settings = self.get_settings() or {}
+        if widget == 4: # Media Player
+            default_mode = 1 if dial_mode_key == "media_dial_right" else 0
+            action_mode = self.get_slot_setting(settings, slot_key, dial_mode_key, default_mode)
+            vol_step = self.get_slot_setting(settings, slot_key, "media_vol_step", 5)
+            vol_target = self.get_slot_setting(settings, slot_key, "media_vol_target", 0)
+            target_player = self.get_slot_setting(settings, slot_key, "media_player_id", "auto")
+
+            if action_mode == 0: # Media Track Control
+                if is_turn:
+                    if value < 0:
+                        self.send_media_command("previous", target_player)
+                    elif value > 0:
+                        self.send_media_command("next", target_player)
+                elif is_push and bool(value):
+                    self.send_media_command("play_pause", target_player)
+
+            elif action_mode == 1: # Volume Control
+                if is_turn:
+                    step_mult = int(value) if isinstance(value, (int, float)) and value != 0 else (1 if value > 0 else -1)
+                    delta = vol_step * step_mult
+                    self.adjust_volume(delta, vol_target, target_player)
+                elif is_push and bool(value):
+                    self.toggle_audio_mute(vol_target, target_player)
+        else:
+            self.handle_widget_dial_action(widget, slot_key, is_turn, is_push, value)
+
     def handle_deck_dial_event(self, dial_index, *args, **kwargs):
         if not self.get_is_present():
             return
@@ -3585,110 +3755,84 @@ class TouchBarInfoAction(ActionBase):
         self._last_dial_event = (dial_idx, event_type, value, now_ts)
 
         settings = self.get_settings() or {}
-        action_mode = None # 0: Media Control, 1: Volume Control, 2: Disabled
-        vol_step = 5
-        vol_target = 0
-        target_player = "auto"
 
-        if dial_idx == 0: # Section A
+        # ----------------------------------------------------
+        # DIAL 0 -> SECTION A (Left 200px)
+        # ----------------------------------------------------
+        if dial_idx == 0:
             sec_mode = self.get_slot_setting(settings, "sec_a", "mode", 0)
-            if sec_mode == 0:
-                widget = self.get_slot_setting(settings, "sec_a", "full_widget", 0)
+            if sec_mode == 0: # Full mode
                 sk = "sec_a_full"
-            else:
-                widget = self.get_slot_setting(settings, "sec_a", "top_widget", 0)
-                sk = "sec_a_top"
-                if widget != 4:
-                    widget = self.get_slot_setting(settings, "sec_a", "bottom_widget", 0)
-                    sk = "sec_a_bot"
-            if widget == 4:
-                action_mode = self.get_slot_setting(settings, sk, "media_dial_single", 0)
-                vol_step = self.get_slot_setting(settings, sk, "media_vol_step", 5)
-                vol_target = self.get_slot_setting(settings, sk, "media_vol_target", 0)
-                target_player = self.get_slot_setting(settings, sk, "media_player_id", "auto")
+                widget = self.get_slot_setting(settings, "sec_a", "full_widget", 0)
+                self._dispatch_dial_to_slot(sk, widget, is_turn, is_push, value, dial_mode_key="media_dial_single")
+            else: # Split mode (Model 2: Push toggles focus, Turn operates focused widget)
+                if is_push and bool(value):
+                    self.sec_a_focus = "bot" if getattr(self, "sec_a_focus", "top") == "top" else "top"
+                    self.sec_a_glow_until = time.time() + 1.4
+                    self.trigger_glow_feedback(1.4)
+                    log.info(f"TouchPulse: Section A switched subsection focus to '{self.sec_a_focus}'")
+                    return
+                elif is_turn:
+                    focus = getattr(self, "sec_a_focus", "top")
+                    sk = f"sec_a_{focus}"
+                    widget_key = "top_widget" if focus == "top" else "bottom_widget"
+                    widget = self.get_slot_setting(settings, "sec_a", widget_key, 0)
+                    self._dispatch_dial_to_slot(sk, widget, is_turn=True, is_push=False, value=value, dial_mode_key="media_dial_single")
 
-        elif dial_idx == 1: # Section B Left
+        # ----------------------------------------------------
+        # DIAL 1 -> SECTION B (Center Left / Top in Split)
+        # ----------------------------------------------------
+        elif dial_idx == 1:
             sec_mode = self.get_slot_setting(settings, "sec_b", "mode", 0)
-            if sec_mode == 0: # Full mode
-                widget = self.get_slot_setting(settings, "sec_b", "full_widget", 0)
+            if sec_mode == 0: # Full mode (Left dial of Center Section)
                 sk = "sec_b_full"
-                if widget == 4:
-                    action_mode = self.get_slot_setting(settings, sk, "media_dial_left", 0)
-                    vol_step = self.get_slot_setting(settings, sk, "media_vol_step", 5)
-                    vol_target = self.get_slot_setting(settings, sk, "media_vol_target", 0)
-                    target_player = self.get_slot_setting(settings, sk, "media_player_id", "auto")
-            else: # Split mode
-                widget = self.get_slot_setting(settings, "sec_b", "top_widget", 0)
+                widget = self.get_slot_setting(settings, "sec_b", "full_widget", 0)
+                self._dispatch_dial_to_slot(sk, widget, is_turn, is_push, value, dial_mode_key="media_dial_left")
+            else: # Split mode (Dedicated to Top sub-slot)
                 sk = "sec_b_top"
-                if widget != 4:
-                    widget = self.get_slot_setting(settings, "sec_b", "bottom_widget", 0)
-                    sk = "sec_b_bot"
-                if widget == 4:
-                    action_mode = self.get_slot_setting(settings, sk, "media_dial_left", 0)
-                    vol_step = self.get_slot_setting(settings, sk, "media_vol_step", 5)
-                    vol_target = self.get_slot_setting(settings, sk, "media_vol_target", 0)
-                    target_player = self.get_slot_setting(settings, sk, "media_player_id", "auto")
+                widget = self.get_slot_setting(settings, "sec_b", "top_widget", 0)
+                self.sec_b_top_glow_until = time.time() + 1.0
+                self.trigger_glow_feedback(1.0)
+                self._dispatch_dial_to_slot(sk, widget, is_turn, is_push, value, dial_mode_key="media_dial_left")
 
-        elif dial_idx == 2: # Section B Right
+        # ----------------------------------------------------
+        # DIAL 2 -> SECTION B (Center Right / Bottom in Split)
+        # ----------------------------------------------------
+        elif dial_idx == 2:
             sec_mode = self.get_slot_setting(settings, "sec_b", "mode", 0)
-            if sec_mode == 0: # Full mode
-                widget = self.get_slot_setting(settings, "sec_b", "full_widget", 0)
+            if sec_mode == 0: # Full mode (Right dial of Center Section)
                 sk = "sec_b_full"
-                if widget == 4:
-                    action_mode = self.get_slot_setting(settings, sk, "media_dial_right", 1)
-                    vol_step = self.get_slot_setting(settings, sk, "media_vol_step", 5)
-                    vol_target = self.get_slot_setting(settings, sk, "media_vol_target", 0)
-                    target_player = self.get_slot_setting(settings, sk, "media_player_id", "auto")
-            else: # Split mode
-                widget = self.get_slot_setting(settings, "sec_b", "top_widget", 0)
-                sk = "sec_b_top"
-                if widget != 4:
-                    widget = self.get_slot_setting(settings, "sec_b", "bottom_widget", 0)
-                    sk = "sec_b_bot"
-                if widget == 4:
-                    action_mode = self.get_slot_setting(settings, sk, "media_dial_right", 1)
-                    vol_step = self.get_slot_setting(settings, sk, "media_vol_step", 5)
-                    vol_target = self.get_slot_setting(settings, sk, "media_vol_target", 0)
-                    target_player = self.get_slot_setting(settings, sk, "media_player_id", "auto")
+                widget = self.get_slot_setting(settings, "sec_b", "full_widget", 0)
+                self._dispatch_dial_to_slot(sk, widget, is_turn, is_push, value, dial_mode_key="media_dial_right")
+            else: # Split mode (Dedicated to Bottom sub-slot)
+                sk = "sec_b_bot"
+                widget = self.get_slot_setting(settings, "sec_b", "bottom_widget", 0)
+                self.sec_b_bot_glow_until = time.time() + 1.0
+                self.trigger_glow_feedback(1.0)
+                self._dispatch_dial_to_slot(sk, widget, is_turn, is_push, value, dial_mode_key="media_dial_right")
 
-        elif dial_idx == 3: # Section C
+        # ----------------------------------------------------
+        # DIAL 3 -> SECTION C (Right 200px)
+        # ----------------------------------------------------
+        elif dial_idx == 3:
             sec_mode = self.get_slot_setting(settings, "sec_c", "mode", 0)
-            if sec_mode == 0:
-                widget = self.get_slot_setting(settings, "sec_c", "full_widget", 0)
+            if sec_mode == 0: # Full mode
                 sk = "sec_c_full"
-            else:
-                widget = self.get_slot_setting(settings, "sec_c", "top_widget", 0)
-                sk = "sec_c_top"
-                if widget != 4:
-                    widget = self.get_slot_setting(settings, "sec_c", "bottom_widget", 0)
-                    sk = "sec_c_bot"
-            if widget == 4:
-                action_mode = self.get_slot_setting(settings, sk, "media_dial_single", 0)
-                vol_step = self.get_slot_setting(settings, sk, "media_vol_step", 5)
-                vol_target = self.get_slot_setting(settings, sk, "media_vol_target", 0)
-                target_player = self.get_slot_setting(settings, sk, "media_player_id", "auto")
-
-        if action_mode is None or action_mode == 2:
-            return
-
-        log.info(f"TouchPulse: Dial #{dial_idx} event={event_type} val={value} -> Action Mode: {action_mode}")
-
-        if action_mode == 0: # Media Player Control
-            if is_turn:
-                if value < 0:
-                    self.send_media_command("previous", target_player)
-                elif value > 0:
-                    self.send_media_command("next", target_player)
-            elif is_push and bool(value):
-                self.send_media_command("play_pause", target_player)
-
-        elif action_mode == 1: # Volume Control
-            if is_turn:
-                step_mult = int(value) if isinstance(value, (int, float)) and value != 0 else (1 if value > 0 else -1)
-                delta = vol_step * step_mult
-                self.adjust_volume(delta, vol_target, target_player)
-            elif is_push and bool(value):
-                self.toggle_audio_mute(vol_target, target_player)
+                widget = self.get_slot_setting(settings, "sec_c", "full_widget", 0)
+                self._dispatch_dial_to_slot(sk, widget, is_turn, is_push, value, dial_mode_key="media_dial_single")
+            else: # Split mode (Model 2: Push toggles focus, Turn operates focused widget)
+                if is_push and bool(value):
+                    self.sec_c_focus = "bot" if getattr(self, "sec_c_focus", "top") == "top" else "top"
+                    self.sec_c_glow_until = time.time() + 1.4
+                    self.trigger_glow_feedback(1.4)
+                    log.info(f"TouchPulse: Section C switched subsection focus to '{self.sec_c_focus}'")
+                    return
+                elif is_turn:
+                    focus = getattr(self, "sec_c_focus", "top")
+                    sk = f"sec_c_{focus}"
+                    widget_key = "top_widget" if focus == "top" else "bottom_widget"
+                    widget = self.get_slot_setting(settings, "sec_c", widget_key, 0)
+                    self._dispatch_dial_to_slot(sk, widget, is_turn=True, is_push=False, value=value, dial_mode_key="media_dial_single")
 
     def update_media_state(self, poll_dbus: bool = True):
         now_ts = time.time()
@@ -4684,7 +4828,23 @@ class TouchBarInfoAction(ActionBase):
                 render_slot_widget(f"{prefix}_top", top_choice, top_box, is_full=False, align=align)
                 render_slot_widget(f"{prefix}_bot", bot_choice, bot_box, is_full=False, align=align)
 
-        # Draw highlight neon glow border with inward fade around currently expanded slot
+        now_ts = time.time()
+        # Draw temporary subsection glow when switching or adjusting subsections (Model 2)
+        if getattr(self, "sec_a_glow_until", 0.0) > now_ts:
+            box = (0, 0, 200, 50) if getattr(self, "sec_a_focus", "top") == "top" else (0, 50, 200, 100)
+            self.draw_slot_glow(image, box)
+
+        if getattr(self, "sec_b_top_glow_until", 0.0) > now_ts:
+            self.draw_slot_glow(image, (200, 0, 600, 50))
+
+        if getattr(self, "sec_b_bot_glow_until", 0.0) > now_ts:
+            self.draw_slot_glow(image, (200, 50, 600, 100))
+
+        if getattr(self, "sec_c_glow_until", 0.0) > now_ts:
+            box = (600, 0, 800, 50) if getattr(self, "sec_c_focus", "top") == "top" else (600, 50, 800, 100)
+            self.draw_slot_glow(image, box)
+
+        # Draw highlight neon glow border with inward fade around currently expanded slot in settings
         if getattr(self, "_active_highlight_slot", None) is not None:
             self.draw_slot_glow(image, self._active_highlight_slot)
 
