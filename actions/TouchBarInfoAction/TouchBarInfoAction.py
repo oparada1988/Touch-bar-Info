@@ -26,7 +26,7 @@ import hashlib
 from urllib.parse import urlparse, unquote, quote
 import dbus
 import time
-from threading import Thread, Timer
+from threading import Thread
 from PIL import Image, ImageDraw, ImageFont
 
 # Import GTK modules
@@ -39,7 +39,14 @@ from gi.repository import Gtk, Adw, Gdk, GLib, Pango
 from loguru import logger as log
 import globals as gl
 
+# ==============================================================================
+# SECTION 1: ACTION BASE & STATE INITIALIZATION
+# ==============================================================================
 class TouchBarInfoAction(ActionBase):
+    """
+    TouchPulse Action for Stream Deck + LCD Touchscreen.
+    Supports modular tri-section layout with 10 customizable widgets.
+    """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.has_configuration = True
@@ -92,6 +99,9 @@ class TouchBarInfoAction(ActionBase):
         self.init_options()
         self.setup_dial_interceptor()
 
+    # ==============================================================================
+    # SECTION 2: SYSTEM DISCOVERY, LOCALIZATION & OPTION PROVIDERS
+    # ==============================================================================
     def get_locale_text(self, key: str, default: str) -> str:
         if hasattr(self.plugin_base, "lm") and self.plugin_base.lm is not None:
             try:
@@ -538,11 +548,14 @@ class TouchBarInfoAction(ActionBase):
                             self.last_rendered_key = ""
                             GLib.idle_add(self.trigger_redraw)
                     except Exception as e:
-                        log.error(f"TouchBarInfo: Failed to fetch weather for {t_name}: {e}")
+                        log.error(f"TouchPulse: Failed to fetch weather for {t_name}: {e}")
                 return task
 
             Thread(target=make_task(), daemon=True).start()
 
+    # ==============================================================================
+    # SECTION 3: GTK4 & LIBADWAITA PREFERENCES UI BUILDERS
+    # ==============================================================================
     def get_config_rows(self) -> "list[Adw.PreferencesRow]":
         self.update_vis_callbacks = []
         self.slot_controls = {}
@@ -861,7 +874,7 @@ class TouchBarInfoAction(ActionBase):
                         else:
                             GLib.idle_add(lambda: search_btn.set_sensitive(True))
                     except Exception as e:
-                        log.error(f"TouchBarInfo: Location search error: {e}")
+                        log.error(f"TouchPulse: Location search error: {e}")
                         GLib.idle_add(lambda: search_btn.set_sensitive(True))
                 Thread(target=search_task, daemon=True).start()
 
@@ -2175,7 +2188,7 @@ class TouchBarInfoAction(ActionBase):
         elif hasattr(gl, "asset_manager") and gl.asset_manager is not None and hasattr(gl.asset_manager, "show_for_path"):
             GLib.idle_add(gl.asset_manager.show_for_path, curr_path, self.on_custom_bg_asset_selected)
         else:
-            log.warning("TouchBarInfo: gl.app.let_user_select_asset is not available")
+            log.warning("TouchPulse: gl.app.let_user_select_asset is not available")
 
     def on_custom_bg_asset_selected(self, file_path: str):
         if not file_path:
@@ -2207,7 +2220,9 @@ class TouchBarInfoAction(ActionBase):
             else:
                 self.bg_image_row.set_subtitle(self.get_locale_text("actions.touchbar-info.bg-image.subtitle", "Select custom wallpaper from StreamController Asset Manager to render behind all Touch Bar widgets"))
 
-    # --- Pango Font Resolver for PIL ---
+    # ==============================================================================
+    # SECTION 4: TYPOGRAPHY & PANGO FONT RESOLUTION ENGINE
+    # ==============================================================================
     def get_font_from_desc(self, font_str: str, default_size: int = 25, scale_factor: float = 1.0) -> ImageFont.FreeTypeFont:
         if not font_str or not isinstance(font_str, str):
             font_str = "DejaVu Sans Bold 25"
@@ -2254,7 +2269,7 @@ class TouchBarInfoAction(ActionBase):
                 except Exception:
                     pass
         except Exception as e:
-            log.error(f"TouchBarInfo: Error resolving font '{font_str}': {e}")
+            log.error(f"TouchPulse: Error resolving font '{font_str}': {e}")
 
         if font_obj is None:
             for fallback in [
@@ -2314,6 +2329,9 @@ class TouchBarInfoAction(ActionBase):
         except Exception:
             return font_obj
 
+    # ==============================================================================
+    # SECTION 5: CANVAS DRAWING ENGINES (CLOCKS, GRAPHS, METERS & VISUALIZERS)
+    # ==============================================================================
     def draw_history_graph(self, draw: ImageDraw.ImageDraw, graph_box: tuple[int, int, int, int], history: list[float], max_val: float = 100.0, color=(0, 200, 255, 255)):
         gx_min, gy_min, gx_max, gy_max = graph_box
         gw = gx_max - gx_min
@@ -2388,7 +2406,7 @@ class TouchBarInfoAction(ActionBase):
                 target_w = int(target_h * aspect)
                 return raw_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
             except Exception as e:
-                log.error(f"TouchBarInfo: Error loading icon {icon_path}: {e}")
+                log.error(f"TouchPulse: Error loading icon {icon_path}: {e}")
         return None
 
     def draw_weather(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_weather, font_location, fill_en, fill_col, out_en, out_col, out_sz, cache: dict = None, align: str = "left", default_location: str = "Miami"):
@@ -3134,6 +3152,9 @@ class TouchBarInfoAction(ActionBase):
             return paused_candidates[0]
         return player_names[0]
 
+    # ==============================================================================
+    # SECTION 6: HARDWARE DIAL INTERCEPTOR, VOLUME HUD & MEDIA CONTROLS
+    # ==============================================================================
     def send_media_command(self, cmd: str, target_player_id: str = "auto"):
         def _run():
             try:
@@ -3734,7 +3755,7 @@ class TouchBarInfoAction(ActionBase):
                                     self.last_rendered_key = ""
                                     GLib.idle_add(self.schedule_update_display)
                             except Exception as e:
-                                log.warning(f"TouchBarInfo: Failed to download media art {target_url}: {e}")
+                                log.warning(f"TouchPulse: Failed to download media art {target_url}: {e}")
                             finally:
                                 self.media_fetching_urls.discard(target_url)
                         Thread(target=_fetch, daemon=True).start()
@@ -3961,6 +3982,9 @@ class TouchBarInfoAction(ActionBase):
         else:
             self.draw_stepped_bars(draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, mid_col, end_col)
 
+    # ==============================================================================
+    # SECTION 7: DISPLAY UPDATE LOOP, 1:1 CANVAS MIRRORING & LIFECYCLE MANAGEMENT
+    # ==============================================================================
     def start_anim_timer(self):
         if self._anim_timer_id is None:
             self._anim_timer_id = GLib.timeout_add(33, self._anim_tick) # ~30 FPS fluid animation
@@ -4083,7 +4107,7 @@ class TouchBarInfoAction(ActionBase):
             else:
                 final_image = image
         except Exception as e:
-            log.error(f"TouchBarInfo: Error compositing custom background image: {e}")
+            log.error(f"TouchPulse: Error compositing custom background image: {e}")
 
         assets_dir = os.path.join(self.plugin_base.PATH, "assets")
         os.makedirs(assets_dir, exist_ok=True)
@@ -4095,7 +4119,7 @@ class TouchBarInfoAction(ActionBase):
             os.replace(tmp_path, render_path)
             self.page.set_background_image(self.input_ident, self.state, render_path, update=False)
         except Exception as e:
-            log.error(f"TouchBarInfo: Error saving touchscreen background: {e}")
+            log.error(f"TouchPulse: Error saving touchscreen background: {e}")
 
         if hasattr(self, "deck_controller") and self.deck_controller is not None:
             c_input = self.deck_controller.get_input(self.input_ident)
@@ -4103,7 +4127,7 @@ class TouchBarInfoAction(ActionBase):
                 try:
                     c_input.update()
                 except Exception as e:
-                    log.error(f"TouchBarInfo: Error updating touchscreen controller: {e}")
+                    log.error(f"TouchPulse: Error updating touchscreen controller: {e}")
 
         # Realtime 1:1 Desktop App Canvas Mirroring
         self.update_screenbar_ui(final_image)
@@ -4143,7 +4167,7 @@ class TouchBarInfoAction(ActionBase):
                         if sb and hasattr(sb, "image") and sb.image:
                             GLib.idle_add(sb.image.set_image, image)
         except Exception as e:
-            log.error(f"TouchBarInfo: Error updating screenbar UI: {e}")
+            log.error(f"TouchPulse: Error updating screenbar UI: {e}")
 
     def update_system_stats(self):
         try:
@@ -4169,7 +4193,7 @@ class TouchBarInfoAction(ActionBase):
                 self.net_history.append(total_rate_kb)
             self.last_net_io = (now, net.bytes_sent, net.bytes_recv)
         except Exception as e:
-            log.error(f"TouchBarInfo: Error updating system stats: {e}")
+            log.error(f"TouchPulse: Error updating system stats: {e}")
 
     def on_ready(self):
         self.setup_dial_interceptor()
@@ -4196,7 +4220,7 @@ class TouchBarInfoAction(ActionBase):
                                 GLib.idle_add(self.stop_anim_timer)
                             GLib.idle_add(self.update_display)
                     except Exception as e:
-                        log.error(f"TouchBarInfo: Exception in background_timer: {e}")
+                        log.error(f"TouchPulse: Exception in background_timer: {e}")
 
             Thread(target=background_timer, daemon=True).start()
 
