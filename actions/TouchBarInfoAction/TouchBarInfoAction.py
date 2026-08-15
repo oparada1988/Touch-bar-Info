@@ -109,6 +109,7 @@ class TouchBarInfoAction(ActionBase):
         self.vis_phases = [random.uniform(0, 6.28) for _ in range(self.num_vis_bars)]
         self.vis_tick = 0
         self.session_bus = None
+        self._last_active_player_name = None
         self._anim_timer_id = None
         self._last_dbus_poll = 0.0
         self._cached_bg_path = None
@@ -140,6 +141,26 @@ class TouchBarInfoAction(ActionBase):
             pass
         self.init_options()
         self.setup_dial_interceptor()
+
+    def get_session_bus(self, force_refresh: bool = False) -> dbus.SessionBus | None:
+        """
+        Retrieves or dynamically reconnects to the D-Bus session bus.
+        Ensures resilience against stale/invalidated sockets after prolonged idle periods.
+        """
+        if not force_refresh and self.session_bus is not None:
+            try:
+                self.session_bus.get_connection()
+                return self.session_bus
+            except Exception:
+                self.session_bus = None
+
+        try:
+            self.session_bus = dbus.SessionBus()
+            return self.session_bus
+        except Exception as e:
+            log.error(f"TouchPulse: Failed to connect to DBus session bus: {e}")
+            self.session_bus = None
+            return None
 
     # ==============================================================================
     # SECTION 2: SYSTEM DISCOVERY, LOCALIZATION & OPTION PROVIDERS
@@ -3159,27 +3180,36 @@ class TouchBarInfoAction(ActionBase):
             return self.interpolate_color(c_mid, c_end, local_t)
 
     def _resolve_target_player_name(self, player_id: str = "auto") -> str | None:
+        bus = self.get_session_bus()
+        if not bus:
+            return None
+
         try:
-            if not self.session_bus:
-                self.session_bus = dbus.SessionBus()
-            player_names = [name for name in self.session_bus.list_names() if name.startswith("org.mpris.MediaPlayer2.")]
+            player_names = [name for name in bus.list_names() if name.startswith("org.mpris.MediaPlayer2.")]
         except Exception:
-            player_names = []
+            bus = self.get_session_bus(force_refresh=True)
+            if not bus:
+                return None
+            try:
+                player_names = [name for name in bus.list_names() if name.startswith("org.mpris.MediaPlayer2.")]
+            except Exception:
+                player_names = []
 
         if not player_names:
             return None
 
+        # 1. Explicit Player Selection
         if player_id and player_id != "auto":
             for name in player_names:
                 if player_id.lower() in name.lower():
                     return name
 
-        # Auto-detect: search for active Playing player first, else Paused, else first available
+        # 2. Auto-detect: Prioritize actively playing media players
         playing_candidates = []
         paused_candidates = []
         for name in player_names:
             try:
-                obj = self.session_bus.get_object(name, "/org/mpris/MediaPlayer2")
+                obj = bus.get_object(name, "/org/mpris/MediaPlayer2")
                 props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
                 status = str(props.Get("org.mpris.MediaPlayer2.Player", "PlaybackStatus"))
                 if status == "Playing":
@@ -3188,10 +3218,21 @@ class TouchBarInfoAction(ActionBase):
                     paused_candidates.append(name)
             except Exception:
                 pass
+
         if playing_candidates:
+            self._last_active_player_name = playing_candidates[0]
             return playing_candidates[0]
-        elif paused_candidates:
+
+        # 3. If no player is actively playing, prefer the last active player remembered
+        if hasattr(self, "_last_active_player_name") and self._last_active_player_name in player_names:
+            return self._last_active_player_name
+
+        # 4. Fallback to first paused player or first available player on the bus
+        if paused_candidates:
+            self._last_active_player_name = paused_candidates[0]
             return paused_candidates[0]
+
+        self._last_active_player_name = player_names[0]
         return player_names[0]
 
     # ==============================================================================
@@ -3199,19 +3240,27 @@ class TouchBarInfoAction(ActionBase):
     # ==============================================================================
     def send_media_command(self, cmd: str, target_player_id: str = "auto"):
         def _run():
-            try:
-                if not self.session_bus:
-                    self.session_bus = dbus.SessionBus()
-                target_name = self._resolve_target_player_name(target_player_id)
-                if target_name:
-                    obj = self.session_bus.get_object(target_name, "/org/mpris/MediaPlayer2")
+            for attempt in range(2): # 2 attempts: regular execution and reconnect retry
+                try:
+                    bus = self.get_session_bus(force_refresh=(attempt > 0))
+                    if not bus:
+                        continue
+                    target_name = self._resolve_target_player_name(target_player_id)
+                    if not target_name:
+                        continue
+
+                    obj = bus.get_object(target_name, "/org/mpris/MediaPlayer2")
                     player_iface = dbus.Interface(obj, "org.mpris.MediaPlayer2.Player")
                     if cmd == "next":
                         player_iface.Next()
                     elif cmd == "previous":
                         player_iface.Previous()
                     elif cmd == "play_pause":
-                        player_iface.PlayPause()
+                        try:
+                            player_iface.PlayPause()
+                        except Exception:
+                            # If PlayPause is ignored on sleeping daemon, issue direct Play()
+                            player_iface.Play()
                     elif cmd == "play":
                         player_iface.Play()
                     elif cmd == "pause":
@@ -3222,8 +3271,13 @@ class TouchBarInfoAction(ActionBase):
                     time.sleep(0.12)
                     self.update_media_state(poll_dbus=True)
                     GLib.idle_add(self.schedule_update_display)
-            except Exception as e:
-                log.error(f"TouchPulse: Error executing media command '{cmd}': {e}")
+                    return # Successfully dispatched!
+                except Exception as e:
+                    if attempt == 0:
+                        log.warning(f"TouchPulse: First media command attempt '{cmd}' failed ({e}), refreshing D-Bus session...")
+                        time.sleep(0.1)
+                    else:
+                        log.error(f"TouchPulse: Error executing media command '{cmd}' after retry: {e}")
 
         Thread(target=_run, daemon=True).start()
 
@@ -3621,6 +3675,7 @@ class TouchBarInfoAction(ActionBase):
             player_id = str(player_id) if isinstance(player_id, str) else "auto"
 
             target_name = self._resolve_target_player_name(player_id)
+            bus = self.get_session_bus()
 
             title = ""
             artist = ""
@@ -3628,9 +3683,9 @@ class TouchBarInfoAction(ActionBase):
             art_url = ""
             playback_status = "Stopped"
 
-            if target_name and self.session_bus:
+            if target_name and bus:
                 try:
-                    obj = self.session_bus.get_object(target_name, "/org/mpris/MediaPlayer2")
+                    obj = bus.get_object(target_name, "/org/mpris/MediaPlayer2")
                     props = dbus.Interface(obj, "org.freedesktop.DBus.Properties")
                     playback_status = str(props.Get("org.mpris.MediaPlayer2.Player", "PlaybackStatus"))
                     metadata = props.Get("org.mpris.MediaPlayer2.Player", "Metadata")
@@ -3652,7 +3707,7 @@ class TouchBarInfoAction(ActionBase):
 
             if not title and not artist:
                 title = "No Media Playing"
-                artist = "Touch-bar Info"
+                artist = "TouchPulse"
                 playback_status = "Stopped"
 
             # Normalize Spotify / Web art URLs
