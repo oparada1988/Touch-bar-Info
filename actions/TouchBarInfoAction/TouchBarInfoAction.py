@@ -43,7 +43,7 @@ ARCHITECTURE & DEVELOPER GUIDE:
 # Import StreamController modules
 from src.backend.PluginManager.ActionBase import ActionBase
 from src.backend.DeckManagement.InputIdentifier import Input
-from src.Signals.Signals import Signals
+from src.Signals.Signals import ChangePage
 
 try:
     from StreamDeck.Devices.StreamDeck import DialEventType
@@ -144,7 +144,7 @@ class TouchBarInfoAction(ActionBase):
         self.setup_dial_interceptor()
         try:
             if hasattr(gl, "signal_manager") and gl.signal_manager is not None:
-                gl.signal_manager.connect_signal(signal=Signals.ChangePage, callback=self.on_change_page)
+                gl.signal_manager.connect_signal(signal=ChangePage, callback=self.on_change_page)
         except Exception as e:
             log.warning(f"TouchPulse: Could not connect to ChangePage signal: {e}")
 
