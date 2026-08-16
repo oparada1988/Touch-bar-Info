@@ -4300,6 +4300,7 @@ class TouchBarInfoAction(ActionBase):
                 else:
                     self.vis_heights[i] = max(0.05, self.vis_heights[i] * 0.86 + target * 0.14)
         else:
+            self.vis_tick = 0
             # Smoothly ease down to flat baseline when paused or stopped
             all_flat = True
             for i in range(num_bars):
@@ -4431,7 +4432,8 @@ class TouchBarInfoAction(ActionBase):
 
         gap = 40
         loop_w = tw + gap
-        scroll_offset = (self.vis_tick * 1.2) % loop_w
+        is_playing = (self.media_state.get("status") == "Playing")
+        scroll_offset = ((self.vis_tick * 1.2) % loop_w) if is_playing else 0.0
 
         surf_w = int(max_w)
         surf_h = int(th + max(4, out_sz * 4) + 4)
@@ -4440,7 +4442,8 @@ class TouchBarInfoAction(ActionBase):
 
         text_y = surf_h / 2.0
         self.render_styled_text(sub_draw, (-scroll_offset, text_y), text, font, fill_en, fill_col, out_en, out_col, out_sz, anchor="lm")
-        self.render_styled_text(sub_draw, (-scroll_offset + loop_w, text_y), text, font, fill_en, fill_col, out_en, out_col, out_sz, anchor="lm")
+        if is_playing:
+            self.render_styled_text(sub_draw, (-scroll_offset + loop_w, text_y), text, font, fill_en, fill_col, out_en, out_col, out_sz, anchor="lm")
 
         paste_y = int(y - (surf_h - th) / 2.0)
         image.paste(sub_img, (int(x), paste_y), sub_img)
