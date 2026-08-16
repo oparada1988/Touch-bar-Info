@@ -1,6 +1,6 @@
 {
     "version": "1.0.0",
-    "thumbnail": "assets/icon.png",
+    "thumbnail": "assets/thumbnail.png",
     "id": "com_oparada_TouchBarInfo",
     "name": "TouchPulse",
     "descriptions": {

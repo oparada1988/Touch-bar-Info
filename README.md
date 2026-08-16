@@ -1,5 +1,7 @@
 # TouchPulse Plugin for StreamController
 
+![TouchPulse Store Banner](assets/thumbnail.png)
+
 TouchPulse is a modular information display plugin built for StreamController on the Elgato Stream Deck +. It is designed specifically for the device's 800x100 touch strip, allowing you to arrange and customize multiple real-time widgets across the display.
 
 Widgets can be combined to show media playback with animated equalizers, system hardware metrics, world clocks, local weather, and date/time displays. Each section can be styled with custom fonts, colors, and background wallpapers.
