@@ -762,12 +762,17 @@ class TouchBarInfoAction(ActionBase):
                 out_size_spin.set_subtitle(self.get_locale_text("actions.touchbar-info.outline-size.subtitle", "Stroke thickness in pixels (1-10px)"))
                 out_size_spin.connect("notify::value", lambda spin, pspec, sk=slot_key: self.set_slot_setting(sk, "date_outline_size", int(spin.get_value())))
 
-                rows_list = [fmt_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin]
+                cal_app_entry = Adw.EntryRow(
+                    title=self.get_locale_text("actions.touchbar-info.calendar-cmd.label", "Calendar App Command")
+                )
+                cal_app_entry.connect("changed", lambda entry, sk=slot_key: self.set_slot_setting(sk, "date_app_cmd", entry.get_text()))
+
+                rows_list = [fmt_combo, font_row, fill_sw, fill_color_row, out_sw, out_color_row, out_size_spin, cal_app_entry]
                 return {
                     "fmt_combo": fmt_combo, "font_btn": font_btn,
                     "fill_sw": fill_sw, "fill_color_btn": fill_color_btn, "fill_color_row": fill_color_row,
                     "out_sw": out_sw, "out_color_btn": out_color_btn, "out_color_row": out_color_row,
-                    "out_size_spin": out_size_spin, "rows_list": rows_list
+                    "out_size_spin": out_size_spin, "cal_app_entry": cal_app_entry, "rows_list": rows_list
                 }
 
             flat_ctrls = _create_date_rows()
@@ -2171,6 +2176,8 @@ class TouchBarInfoAction(ActionBase):
                     grp["out_size_spin"].set_sensitive(date_out_en)
                     self.set_color_button_rgba(grp["out_color_btn"], self.get_slot_setting(settings, slot_key, "date_outline_color", "#000000FF"))
                     grp["out_size_spin"].set_value(self.get_slot_setting(settings, slot_key, "date_outline_size", 2))
+                    if "cal_app_entry" in grp:
+                        grp["cal_app_entry"].set_text(self.get_slot_setting(settings, slot_key, "date_app_cmd", "flatpak run org.gnome.Calendar"))
 
                 # Time
                 t = ctrls["time"]
@@ -2516,6 +2523,63 @@ class TouchBarInfoAction(ActionBase):
             fill_color = (color[0], color[1], color[2], 60)
             draw.polygon(fill_poly, fill=fill_color)
             draw.line(points, fill=color, width=2)
+
+    def draw_standalone_date(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], now: datetime.datetime, font_weekday, font_date, fill_en, fill_col, out_en, out_col, out_sz, align: str = "left", date_fmt_idx: int = 0):
+        x_min, y_min, x_max, y_max = box
+        box_w = x_max - x_min
+        box_h = y_max - y_min
+
+        ar, ag, ab = self.get_streamcontroller_accent_color()
+
+        # Left Calendar Day Tile
+        badge_sz = int(box_h * 0.70)
+        margin_x = int(box_w * 0.06)
+        cal_x = x_min + margin_x
+        cal_y = y_min + int((box_h - badge_sz) / 2)
+
+        # 1. Draw Calendar Icon Tile
+        banner_h = max(5, int(badge_sz * 0.28))
+        draw.rounded_rectangle([cal_x, cal_y, cal_x + badge_sz, cal_y + badge_sz], radius=4, fill=(ar, ag, ab, 35), outline=(ar, ag, ab, 190), width=1)
+        draw.rectangle([cal_x, cal_y, cal_x + badge_sz, cal_y + banner_h], fill=(ar, ag, ab, 220))
+        
+        # Day of Month in center of tile
+        day_num_str = str(now.day)
+        font_day_num = self.get_font_from_desc(f"DejaVu Sans Bold {max(8, int(badge_sz * 0.45))}", default_size=max(8, int(badge_sz * 0.45)))
+        draw.text((cal_x + (badge_sz / 2.0), cal_y + banner_h + ((badge_sz - banner_h) / 2.0)), day_num_str, font=font_day_num, fill=(255, 255, 255, 255), anchor="mm")
+
+        # 2. Text Column (Right of Tile)
+        left_text_x = cal_x + badge_sz + int(box_w * 0.04)
+        avail_w = max(20.0, float((x_max - margin_x) - left_text_x))
+
+        weekday_str = now.strftime("%A") # e.g. "Sunday"
+        fmt_options = getattr(self, "date_format_options", [])
+        if fmt_options and date_fmt_idx < len(fmt_options):
+            fmt_str = fmt_options[date_fmt_idx][0]
+            date_str = now.strftime(fmt_str)
+        else:
+            date_str = now.strftime("%B %d, %Y").upper()
+
+        font_top_fit = self.fit_font_to_width(draw, weekday_str, font_weekday, avail_w, min_size=9)
+        font_bot_fit = self.fit_font_to_width(draw, date_str, font_date, avail_w, min_size=8)
+
+        bbox_t = draw.textbbox((0, 0), weekday_str, font=font_top_fit)
+        bbox_b = draw.textbbox((0, 0), date_str, font=font_bot_fit)
+        th, bh = bbox_t[3] - bbox_t[1], bbox_b[3] - bbox_b[1]
+
+        spacing = max(1, int(box_h * 0.04))
+        total_h = th + spacing + bh
+        start_y = y_min + (box_h - total_h) / 2.0
+        top_y = start_y + (th / 2.0)
+        bot_y = start_y + th + spacing + (bh / 2.0)
+
+        center_text_x = left_text_x + (avail_w / 2.0) if align == "center" else left_text_x
+
+        if align == "center":
+            self.render_styled_text(draw, (center_text_x, top_y), weekday_str, font_top_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            self.render_styled_text(draw, (center_text_x, bot_y), date_str, font_bot_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+        else:
+            self.render_styled_text(draw, (left_text_x, top_y), weekday_str, font_top_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="lm")
+            self.render_styled_text(draw, (left_text_x, bot_y), date_str, font_bot_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="lm")
 
     def draw_stacked(self, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], date_str: str, time_str: str, font_date, font_time, date_fill_en, date_fill_col, date_out_en, date_out_col, date_out_sz, time_fill_en, time_fill_col, time_out_en, time_out_col, time_out_sz, align: str = "left"):
         x_min, y_min, x_max, y_max = box
@@ -3741,7 +3805,10 @@ class TouchBarInfoAction(ActionBase):
                 idx = (self.get_slot_setting(settings, slot_key, "date_format_idx", 0) + step) % num_fmts
                 self.set_slot_setting(slot_key, "date_format_idx", idx)
             elif is_push:
-                self.launch_host_app("gnome-calendar")
+                cal_cmd = self.get_slot_setting(settings, slot_key, "date_app_cmd", "flatpak run org.gnome.Calendar")
+                if cal_cmd:
+                    self.launch_host_app(cal_cmd)
+                    log.info(f"TouchPulse: Launching calendar application: {cal_cmd}")
 
         elif widget == 3: # Disk Usage
             if is_turn:
@@ -3992,6 +4059,19 @@ class TouchBarInfoAction(ActionBase):
                             album = str(metadata["xesam:album"])
                         if "mpris:artUrl" in metadata:
                             art_url = str(metadata["mpris:artUrl"])
+
+                    length_us = 0
+                    if metadata and "mpris:length" in metadata:
+                        try:
+                            length_us = int(metadata["mpris:length"])
+                        except Exception:
+                            length_us = 0
+
+                    position_us = 0
+                    try:
+                        position_us = int(props.Get("org.mpris.MediaPlayer2.Player", "Position"))
+                    except Exception:
+                        position_us = 0
                 except Exception:
                     pass
 
@@ -4012,13 +4092,24 @@ class TouchBarInfoAction(ActionBase):
                 raw_ident = target_name.replace("org.mpris.MediaPlayer2.", "")
                 clean_identity = raw_ident.split(".")[0].capitalize()
 
+            length_sec = length_us / 1000000.0 if length_us > 0 else 0.0
+            position_sec = position_us / 1000000.0 if position_us > 0 else 0.0
+            progress_ratio = max(0.0, min(1.0, position_sec / max(1.0, length_sec))) if length_sec > 0 else 0.0
+            pos_str = f"{int(position_sec // 60)}:{int(position_sec % 60):02d}"
+            len_str = f"{int(length_sec // 60)}:{int(length_sec % 60):02d}" if length_sec > 0 else "--:--"
+
             self.media_state = {
                 "title": title,
                 "artist": artist,
                 "album": album,
                 "art_url": art_url,
                 "status": playback_status,
-                "identity": clean_identity
+                "identity": clean_identity,
+                "position_sec": position_sec,
+                "length_sec": length_sec,
+                "progress_ratio": progress_ratio,
+                "pos_str": pos_str,
+                "len_str": len_str
             }
 
         # Advance visualizer tick and simulate organic multi-octave equalizer spectrum
@@ -4341,7 +4432,7 @@ class TouchBarInfoAction(ActionBase):
         else:
             artist_display = ""
 
-        # Volume badge in upper-right corner of Section B
+        # Volume badge in upper-right corner of Section B with high-contrast backplate
         vol_pct = getattr(self, "_current_vol_pct", 50)
         text_avail_w = avail_w
         if not self.is_volume_hud_active():
@@ -4350,31 +4441,68 @@ class TouchBarInfoAction(ActionBase):
             bbox_v = draw.textbbox((0, 0), vol_str, font=font_badge)
             vw = bbox_v[2] - bbox_v[0]
             vh = bbox_v[3] - bbox_v[1]
-            vb_w = vw + 10
-            vb_h = vh + 5
+            vb_w = vw + 14
+            vb_h = vh + 6
             vb_x = content_max_x - vb_w
             vb_y = y_min + int(bh * 0.08)
 
             ar, ag, ab = self.get_streamcontroller_accent_color()
-            draw.rounded_rectangle([vb_x, vb_y, vb_x + vb_w, vb_y + vb_h], radius=3, fill=(ar, ag, ab, 35), outline=(ar, ag, ab, 150), width=1)
-            draw.text((vb_x + 5, vb_y + 2), vol_str, font=font_badge, fill=(min(255, ar + 45), min(255, ag + 45), min(255, ab + 45), 255))
+            # Solid high-contrast dark plate + accent outline
+            draw.rounded_rectangle([vb_x, vb_y, vb_x + vb_w, vb_y + vb_h], radius=4, fill=(10, 14, 24, 235), outline=(ar, ag, ab, 220), width=1)
+            draw.text((vb_x + 7, vb_y + 3), vol_str, font=font_badge, fill=(255, 255, 255, 255))
             text_avail_w = max(20.0, float(vb_x - 8 - content_x))
 
         artist_y = y_min + int(bh * 0.10)
-        song_y = y_min + int(bh * 0.35)
+        song_y = y_min + int(bh * 0.33)
 
         if artist_display:
             self.draw_marquee_text(image, draw, (content_x, artist_y), text_avail_w, artist_display, font_artist, artist_fill_en, artist_fill_col, artist_out_en, artist_out_col, artist_out_sz)
         self.draw_marquee_text(image, draw, (content_x, song_y), avail_w, title, font_song, song_fill_en, song_fill_col, song_out_en, song_out_col, song_out_sz)
 
-        # Visualizer or Volume Meter HUD
-        vis_box = (content_x, y_min + int(bh * 0.58), content_max_x, y_max - int(bh * 0.08))
+        # Visualizer (Spans y: 52 to 74 -> 22px height)
+        # Dedicated 6px gap from y: 74 to 80
+        # Media Progress Time Bar (Spans y: 82 to 94)
+        is_playing_or_paused = (self.media_state.get("status") in ["Playing", "Paused"])
+        if is_playing_or_paused and not self.is_volume_hud_active():
+            vis_box = (content_x, y_min + 52, content_max_x, y_min + 74)
+        else:
+            vis_box = (content_x, y_min + int(bh * 0.56), content_max_x, y_max - int(bh * 0.08))
+
         if self.is_volume_hud_active():
             self.draw_volume_meter_bar(image, draw, vis_box, align=align)
         elif vis_style == 1:
             self.draw_wave_curves(image, draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, mid_col, end_col, self.vis_tick * 0.15)
         else:
             self.draw_stepped_bars(draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, mid_col, end_col)
+
+        # Media Time Progress Bar with 6px Gap
+        if is_playing_or_paused and not self.is_volume_hud_active():
+            ar, ag, ab = self.get_streamcontroller_accent_color()
+            pos_str = self.media_state.get("pos_str", "0:00")
+            len_str = self.media_state.get("len_str", "0:00")
+            time_label = f"{pos_str} / {len_str}"
+            font_time = self.get_font_from_desc("DejaVu Sans Bold 9", default_size=9)
+            bbox_t = draw.textbbox((0, 0), time_label, font=font_time)
+            tw = bbox_t[2] - bbox_t[0]
+
+            bar_x1 = content_x
+            bar_x2 = max(bar_x1 + 30, content_max_x - tw - 10)
+            bar_y = y_min + 86
+
+            # Background Track Trough
+            draw.line([(bar_x1, bar_y), (bar_x2, bar_y)], fill=(255, 255, 255, 40), width=3)
+
+            # Active Accent Fill Line
+            prog_ratio = self.media_state.get("progress_ratio", 0.0)
+            fill_x = bar_x1 + int((bar_x2 - bar_x1) * prog_ratio)
+            if fill_x > bar_x1:
+                draw.line([(bar_x1, bar_y), (fill_x, bar_y)], fill=(ar, ag, ab, 240), width=3)
+
+            # Glowing Playhead Scrubber Dot
+            draw.ellipse([fill_x - 3, bar_y - 3, fill_x + 3, bar_y + 3], fill=(255, 255, 255, 255), outline=(ar, ag, ab, 255), width=1)
+
+            # Timestamp Label
+            draw.text((bar_x2 + 8, bar_y - 5), time_label, font=font_time, fill=(180, 195, 220, 240))
 
     def draw_media_sub(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], player_idx: int, vis_style: int, color_mode: int, solid_col: tuple, start_col: tuple, mid_col: tuple, end_col: tuple, align: str = "left"):
         x_min, y_min, x_max, y_max = box
@@ -4674,6 +4802,30 @@ class TouchBarInfoAction(ActionBase):
             Thread(target=background_timer, daemon=True).start()
 
     def on_key_down(self):
+        settings = self.get_settings() or {}
+        # If any active slot is currently showing Date, launch configured calendar app
+        for prefix in ["sec_a", "sec_b", "sec_c"]:
+            sec_mode = self.get_slot_setting(settings, prefix, "mode", 0)
+            if sec_mode == 0:
+                if self.get_slot_setting(settings, prefix, "full_widget", 0) == 2:
+                    cal_cmd = self.get_slot_setting(settings, f"{prefix}_full", "date_app_cmd", "flatpak run org.gnome.Calendar")
+                    if cal_cmd:
+                        self.launch_host_app(cal_cmd)
+                    break
+            else:
+                top_w = self.get_slot_setting(settings, prefix, "top_widget", 0)
+                bot_w = self.get_slot_setting(settings, prefix, "bottom_widget", 0)
+                if top_w == 2:
+                    cal_cmd = self.get_slot_setting(settings, f"{prefix}_top", "date_app_cmd", "flatpak run org.gnome.Calendar")
+                    if cal_cmd:
+                        self.launch_host_app(cal_cmd)
+                    break
+                elif bot_w == 2:
+                    cal_cmd = self.get_slot_setting(settings, f"{prefix}_bot", "date_app_cmd", "flatpak run org.gnome.Calendar")
+                    if cal_cmd:
+                        self.launch_host_app(cal_cmd)
+                    break
+
         self.fetch_weather_async(force=True)
         self.update_display()
 
@@ -4803,19 +4955,18 @@ class TouchBarInfoAction(ActionBase):
                 font_sub = font_mon_sub_full if is_full else font_mon_sub_sub
                 self.draw_cpu_widget(image, draw, box, font_main, font_sub, True, white_col, False, white_col, 2, cpu_mode_idx, align=align)
 
-            elif widget_choice == 2: # Date
+            elif widget_choice == 2: # Date (Thumbnail-Style Standalone Date Widget)
                 date_fmt_idx = self.get_slot_setting(settings, slot_key, "date_format_idx", 0)
-                fmt_str = self.date_format_options[min(date_fmt_idx, len(self.date_format_options) - 1)][0]
-                date_str = now.strftime(fmt_str)
-                default_date_font = "DejaVu Sans Bold 25" if is_full else "DejaVu Sans Bold 23"
+                default_date_font = "DejaVu Sans Bold 20" if is_full else "DejaVu Sans Bold 14"
                 date_font_str = self.get_slot_setting(settings, slot_key, "date_font_str", default_date_font)
-                font_date = self.get_font_from_desc(date_font_str, default_size=25 if is_full else 23)
+                font_weekday = self.get_font_from_desc(date_font_str, default_size=24 if is_full else 15, scale_factor=1.1 if is_full else 1.0)
+                font_date = self.get_font_from_desc(date_font_str, default_size=18 if is_full else 11, scale_factor=0.8 if is_full else 0.75)
                 fill_en = self.get_slot_setting(settings, slot_key, "date_fill_enabled", True)
-                fill_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "date_font_color", "#AAC8E6FF"), (170, 200, 230, 255))
+                fill_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "date_font_color", "#FFFFFFFF"), (255, 255, 255, 255))
                 out_en = self.get_slot_setting(settings, slot_key, "date_outline_enabled", False)
                 out_col = self.hex_to_rgba_tuple(self.get_slot_setting(settings, slot_key, "date_outline_color", "#000000FF"), (0, 0, 0, 255))
                 out_sz = self.get_slot_setting(settings, slot_key, "date_outline_size", 2)
-                self.draw_single(draw, box, date_str, font_date, fill_en, fill_col, out_en, out_col, out_sz, align=align)
+                self.draw_standalone_date(image, draw, box, now, font_weekday, font_date, fill_en, fill_col, out_en, out_col, out_sz, align=align, date_fmt_idx=date_fmt_idx)
 
             elif widget_choice == 3: # Disk Usage
                 disk_mode_idx = self.get_slot_setting(settings, slot_key, "disk_mode_idx", 0)
