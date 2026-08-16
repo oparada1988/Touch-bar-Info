@@ -3865,13 +3865,32 @@ class TouchBarInfoAction(ActionBase):
             log.warning(f"TouchPulse: Error adjusting deck brightness: {e}")
 
     def launch_host_app(self, command: str):
+        if not command:
+            return
+        import shlex
         try:
-            subprocess.Popen(f"flatpak-spawn --host {command}", shell=True, start_new_session=True)
+            cmd_args = shlex.split(command.strip())
         except Exception:
-            try:
-                subprocess.Popen(command, shell=True, start_new_session=True)
-            except Exception as e:
-                log.warning(f"TouchPulse: Could not launch '{command}': {e}")
+            cmd_args = command.strip().split(" ")
+
+        is_flatpak = os.path.exists("/.flatpak-info") or os.environ.get("FLATPAK_ID") is not None
+        if is_flatpak and not cmd_args[0].startswith("flatpak-spawn"):
+            argv = ["flatpak-spawn", "--host"] + cmd_args
+        else:
+            argv = cmd_args
+
+        try:
+            subprocess.Popen(
+                argv,
+                start_new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                cwd=os.path.expanduser("~")
+            )
+            log.info(f"TouchPulse: Successfully launched host app: {' '.join(argv)}")
+        except Exception as e:
+            log.error(f"TouchPulse: Failed to launch host app: {e}")
 
     def handle_widget_dial_action(self, widget: int, slot_key: str, is_turn: bool, is_push: bool, value):
         settings = self.get_settings() or {}
@@ -4017,15 +4036,16 @@ class TouchBarInfoAction(ActionBase):
         if not is_turn and not is_push:
             return
 
-        # Dedicated Debounce Windows: 250ms for button click/push, 30ms for rotary turn
+        # Dedicated Debounce Windows: 50ms for button click/push, 30ms for rotary turn
         now_ts = time.time()
         last_dial, last_event, last_val, last_time = getattr(self, "_last_dial_event", (None, None, None, 0.0))
-        debounce_window = 0.25 if is_push else 0.03
+        debounce_window = 0.05 if is_push else 0.03
         if dial_idx == last_dial and event_str == str(last_event).upper() and (now_ts - last_time < debounce_window):
             return
         self._last_dial_event = (dial_idx, event_type, value, now_ts)
 
         settings = self.get_settings() or {}
+        is_press_down = is_push and (value is True or value == 1 or value is None)
 
         # ----------------------------------------------------
         # DIAL 0 -> SECTION A (Left 200px)
@@ -4037,10 +4057,10 @@ class TouchBarInfoAction(ActionBase):
                 widget = self.get_slot_setting(settings, "sec_a", "full_widget", 0)
                 self._dispatch_dial_to_slot(sk, widget, is_turn, is_push, value, dial_mode_key="media_dial_single")
             else: # Split mode (Double-Click: Toggle Subsection Focus; Single-Click: Trigger Focused Widget Action)
-                if is_push and bool(value):
+                if is_press_down:
                     last_push = getattr(self, "_last_dial_push_0", 0.0)
                     now_ts = time.time()
-                    if (now_ts - last_push) < 0.38:
+                    if (now_ts - last_push) < 0.38 and (now_ts - last_push) > 0.06:
                         # Double Click -> Toggle focus
                         self._last_dial_push_0 = 0.0
                         if getattr(self, "_dial_single_timer_0", None):
@@ -4062,6 +4082,7 @@ class TouchBarInfoAction(ActionBase):
                             sk = f"sec_a_{focus}"
                             widget_key = "top_widget" if focus == "top" else "bottom_widget"
                             widget = self.get_slot_setting(self.get_settings() or {}, "sec_a", widget_key, 0)
+                            log.info(f"TouchPulse: Executing single push on Section A focus '{focus}' (widget={widget})")
                             self._dispatch_dial_to_slot(sk, widget, is_turn=False, is_push=True, value=1, dial_mode_key="media_dial_single")
                             return False
                         if getattr(self, "_dial_single_timer_0", None):
@@ -4120,10 +4141,10 @@ class TouchBarInfoAction(ActionBase):
                 widget = self.get_slot_setting(settings, "sec_c", "full_widget", 0)
                 self._dispatch_dial_to_slot(sk, widget, is_turn, is_push, value, dial_mode_key="media_dial_single")
             else: # Split mode (Double-Click: Toggle Subsection Focus; Single-Click: Trigger Focused Widget Action)
-                if is_push and bool(value):
+                if is_press_down:
                     last_push = getattr(self, "_last_dial_push_3", 0.0)
                     now_ts = time.time()
-                    if (now_ts - last_push) < 0.38:
+                    if (now_ts - last_push) < 0.38 and (now_ts - last_push) > 0.06:
                         # Double Click -> Toggle focus
                         self._last_dial_push_3 = 0.0
                         if getattr(self, "_dial_single_timer_3", None):
@@ -4145,6 +4166,7 @@ class TouchBarInfoAction(ActionBase):
                             sk = f"sec_c_{focus}"
                             widget_key = "top_widget" if focus == "top" else "bottom_widget"
                             widget = self.get_slot_setting(self.get_settings() or {}, "sec_c", widget_key, 0)
+                            log.info(f"TouchPulse: Executing single push on Section C focus '{focus}' (widget={widget})")
                             self._dispatch_dial_to_slot(sk, widget, is_turn=False, is_push=True, value=1, dial_mode_key="media_dial_single")
                             return False
                         if getattr(self, "_dial_single_timer_3", None):
@@ -4823,7 +4845,7 @@ class TouchBarInfoAction(ActionBase):
         except Exception as e:
             log.error(f"TouchPulse: Error compositing custom background image: {e}")
 
-        assets_dir = os.path.join(self.plugin_base.PATH, "assets")
+        assets_dir = os.path.expanduser(os.path.join(self.plugin_base.PATH, "assets"))
         os.makedirs(assets_dir, exist_ok=True)
         render_path = os.path.join(assets_dir, f"touchbar_render_{self.state}.png")
 
