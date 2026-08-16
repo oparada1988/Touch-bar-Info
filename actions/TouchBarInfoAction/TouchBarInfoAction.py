@@ -162,6 +162,67 @@ class TouchBarInfoAction(ActionBase):
         except Exception as e:
             log.warning(f"TouchPulse: Could not connect to ChangePage signal: {e}")
 
+        # Check for first-run unconfigured state to apply Master Preset
+        try:
+            settings = self.get_settings()
+            if settings is not None and not settings:
+                bg_path = "/mnt/Stuff/Streamdeck Icons/bitmap2.png"
+                if not os.path.isfile(bg_path):
+                    bundled_bg = os.path.expanduser(os.path.join(self.plugin_base.PATH, "assets", "bitmap2.png"))
+                    if os.path.isfile(bundled_bg):
+                        bg_path = bundled_bg
+
+                default_preset = {
+                    # Section A (Left): Split Mode
+                    "sec_a_mode": 1,
+                    "sec_a_top_widget": 7,                              # Digital Clock
+                    "sec_a_top_show_seconds": True,
+                    "sec_a_top_time_font_str": "DejaVu Sans Bold 25",
+                    "sec_a_bottom_widget": 8,                           # Live Weather
+                    "sec_a_bot_weather_location_name": "Woodbridge",
+                    "sec_a_bot_weather_lat": "38.65817",
+                    "sec_a_bot_weather_lon": "-77.2497",
+
+                    # Section B (Center): Full Media Player
+                    "sec_b_mode": 0,
+                    "sec_b_full_widget": 4,                             # Media Player
+                    "sec_b_full_media_player_id": "spotify",
+                    "sec_b_full_media_vol_target": 1,
+                    "sec_b_full_media_song_font_str": "DejaVu Sans Bold 20",
+                    "sec_b_full_media_dial_single": 0,                  # Track Control
+                    "sec_b_full_media_dial_left": 0,                    # Prev/Next
+                    "sec_b_full_media_dial_right": 1,                   # Volume
+
+                    # Section C (Right): Split Mode
+                    "sec_c_mode": 1,
+                    "sec_c_top_widget": 2,                              # Standalone Date Widget
+                    "sec_c_top_date_font_color": "#FFFFFFFF",
+                    "sec_c_top_date_app_cmd": "flatpak run org.gnome.Calendar",
+                    "sec_c_bottom_widget": 5,                           # Network Activity Widget
+                    "sec_c_bot_net_mode_idx": 1,                        # Live Bandwidth Graph
+                    "sec_c_bot_net_unit_idx": 0,                        # Bytes/s (KB/s, MB/s)
+
+                    # Background & Dividers
+                    "custom_bg_path": bg_path,
+                    "general_show_section_separators": True,
+                }
+                self.set_settings(default_preset)
+                log.info("TouchPulse: First-run master preset successfully applied!")
+
+                # Automatically focus TouchPulse action in StreamController sidebar
+                def _focus_sidebar():
+                    try:
+                        if hasattr(gl, "app") and hasattr(gl.app, "main_win") and hasattr(gl.app.main_win, "sidebar"):
+                            if hasattr(self, "input_ident") and self.input_ident is not None:
+                                gl.app.main_win.sidebar.load_for_identifier(self.input_ident, getattr(self, "state", 0))
+                    except Exception as ex:
+                        log.debug(f"TouchPulse: Could not auto-focus sidebar: {ex}")
+                    return False
+
+                GLib.idle_add(_focus_sidebar)
+        except Exception as e:
+            log.warning(f"TouchPulse: Error checking/applying first-run preset: {e}")
+
     def on_change_page(self, deck_controller, old_path: str, new_path: str):
         try:
             if not hasattr(self, "page") or self.page is None:
