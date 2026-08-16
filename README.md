@@ -1,10 +1,10 @@
 # TouchPulse Plugin for StreamController
 
-![TouchPulse Store Banner](assets/thumbnail.png)
+<img src="assets/thumbnail.png" width="1000" height="360" alt="TouchPulse Store Banner" />
 
 TouchPulse is a modular information display plugin built for StreamController on the Elgato Stream Deck +. It is designed specifically for the device's 800x100 touch strip, allowing you to arrange and customize multiple real-time widgets across the display.
 
-Widgets can be combined to show media playback with animated equalizers, system hardware metrics, world clocks, local weather, and date/time displays. Each section can be styled with custom fonts, colors, and background wallpapers.
+Widgets can be combined to show media playback with animated equalizers and playback progress, system hardware metrics, world clocks, local weather, live network activity graphs, and date/time displays. Each section can be styled with custom fonts, colors, and background wallpapers.
 
 > **Development Notice**: This plugin is under active development. Features and rendering options may receive updates and refinements.
 
@@ -18,11 +18,11 @@ The 800x100 Touch Bar canvas is divided into three customizable sections: **Sect
 
 Each section can be configured in one of two ways:
 - **Full Slot (Single Widget)**: Uses the entire 100px height of the section for larger displays, such as full-height media equalizers, performance graphs, or stacked date and time.
-- **Split Slot (Dual Sub-slots)**: Splits the section vertically into two independent 50px Top and Bottom sub-slots, letting you stack two separate widgets (such as Date on top and Weather on bottom, or a mini media player on top and RAM monitor on bottom).
+- **Split Slot (Dual Sub-slots)**: Splits the section vertically into two independent 50px Top and Bottom sub-slots, letting you stack two separate widgets (such as Date on top and Weather on bottom, or a mini media player on top and Network monitor on bottom).
 
 <img width="415" height="75" alt="Screenshot From 2026-08-11 20-26-51" src="https://github.com/user-attachments/assets/53001dd6-c877-4764-b15c-17b506baae2c" />
 <img width="415" height="75" alt="Screenshot From 2026-08-11 20-38-17" src="https://github.com/user-attachments/assets/860ef11c-8d20-46dc-a2c9-cfc7e51c778b" />
-<img width="414" height="82" alt="Screenshot From 2026-08-12 18-20-20" src="https://github.com/user-attachments/assets/ec44ed2d-4510-4ca5-9e4d-7908a511d236" />
+<img width="415" height="82" alt="Screenshot From 2026-08-12 18-20-20" src="https://github.com/user-attachments/assets/ec44ed2d-4510-4ca5-9e4d-7908a511d236" />
 <img width="414" height="82" alt="Screencast From 2026-08-14 12-31-26" src="https://github.com/user-attachments/assets/70673705-c0ff-4837-ab22-379f1476c7be" />
 
 ---
@@ -42,35 +42,41 @@ TouchPulse maps the Stream Deck +'s four rotary push-encoders directly to the To
        └───────┘             └───────┘       └───────┘             └───────┘
 ```
 
-### Section-by-Section Dial Mapping
+### Section-by-Section Dial & Touch Interactions
 
 #### 1. Left Section — Section A (Dial 1)
-* **Full Section Mode**: Dial 1 controls the 100px widget.
-* **Split Mode (Top & Bottom Sub-sections)**: Pressing/clicking Dial 1 switches active control between the **Top** and **Bottom** sub-sections.
+* **Full Section Mode**: Dial 1 turn controls the 100px widget (e.g. cycle display modes); single click triggers the widget's primary action.
+* **Split Mode (Top & Bottom Sub-sections)**:
+  * **Double-Click Dial 1**: Instantly toggles active hardware focus between the **Top** and **Bottom** sub-sections with a glowing LCD feedback highlight.
+  * **Single-Click Dial 1**: Triggers the action for whichever sub-section currently has active focus.
 
 #### 2. Center Section — Section B (Dials 2 & 3)
 * **Full Section Mode**: Dials 2 and 3 operate together for the 400px widget:
-  * **Dial 2 (Left)**: Primary control (e.g. track skipping).
-  * **Dial 3 (Right)**: Secondary control (e.g. volume adjustment with on-screen HUD, mute/unmute).
+  * **Dial 2 (Left)**: Turn to skip Previous / Next track; press to Play / Pause.
+  * **Dial 3 (Right)**: Turn to adjust Volume (brings up a temporary volume HUD on the touch bar); press to Mute / Unmute.
 * **Split Mode (Top & Bottom Sub-sections)**:
   * **Dial 2** controls the **Top** sub-section widget.
   * **Dial 3** controls the **Bottom** sub-section widget.
+  * **Double-Click**: In Split Mode, double-clicking Dial 2 or Dial 3 toggles active focus between the Top and Bottom sub-sections.
 
 #### 3. Right Section — Section C (Dial 4)
-* **Full Section Mode**: Dial 4 controls the 100px widget.
-* **Split Mode (Top & Bottom Sub-sections)**: Pressing/clicking Dial 4 switches active control between the **Top** and **Bottom** sub-sections.
+* **Full Section Mode**: Dial 4 turn controls the 100px widget; single click triggers the widget's primary action.
+* **Split Mode (Top & Bottom Sub-sections)**:
+  * **Double-Click Dial 4**: Instantly toggles active hardware focus between the **Top** and **Bottom** sub-sections with glowing LCD feedback.
+  * **Single-Click Dial 4**: Triggers the action for the focused sub-section (such as launching the desktop Calendar app on the Date widget).
 
 ---
 
-### Example Dial Actions
+### Example Dial & Touch Actions
 
 * **Media Player (Center Full Mode)**:
   * **Dial 2**: Turn to skip Previous / Next track; press to Play / Pause.
-  * **Dial 3**: Turn to adjust Volume (brings up a temporary volume HUD on the touch bar); press to Mute / Unmute.
-* **Media Player (Split Mode / Section A or C)**:
-  * Control mapped to the active sub-slot via dial push toggle.
-* **Weather & Clocks**:
-  * Press dials to trigger a background data refresh or toggle display details.
+  * **Dial 3**: Turn to adjust Volume (displays the on-screen volume badge); press to Mute / Unmute.
+  * **LCD Touchscreen**: Tap directly on the media player area to toggle Play / Pause.
+* **Standalone Date Widget**:
+  * **Single Click / LCD Tap**: Directly launches your desktop calendar application (e.g., GNOME Calendar `flatpak run org.gnome.Calendar` or custom command).
+* **Weather & System Clocks**:
+  * **Single Click**: Triggers a background weather data refresh or toggles display details.
 
 ---
 
