@@ -200,18 +200,20 @@ class TouchBarInfoAction(ActionBase):
     # SECTION 2: SYSTEM DISCOVERY, LOCALIZATION & OPTION PROVIDERS
     # ==============================================================================
     def get_locale_text(self, key: str, default: str) -> str:
-        if hasattr(self.plugin_base, "lm") and self.plugin_base.lm is not None:
-            try:
-                val = self.plugin_base.lm.get(key)
-                if isinstance(val, str) and val and val != key: return val
-            except Exception:
-                pass
-        if hasattr(self.plugin_base, "locale_manager") and self.plugin_base.locale_manager is not None:
-            try:
-                val = self.plugin_base.locale_manager.get(key)
-                if isinstance(val, str) and val and val != key: return val
-            except Exception:
-                pass
+        pb = getattr(self, "plugin_base", None)
+        if pb is not None:
+            if hasattr(pb, "lm") and pb.lm is not None:
+                try:
+                    val = pb.lm.get(key)
+                    if isinstance(val, str) and val and val != key: return val
+                except Exception:
+                    pass
+            if hasattr(pb, "locale_manager") and pb.locale_manager is not None:
+                try:
+                    val = pb.locale_manager.get(key)
+                    if isinstance(val, str) and val and val != key: return val
+                except Exception:
+                    pass
         return default
 
     def get_available_media_players(self) -> list[tuple[str, str]]:
@@ -553,6 +555,24 @@ class TouchBarInfoAction(ActionBase):
         elif wmo_code in [95, 96, 99]:
             return "thunderstorm.png"
         return "sunny.png" if is_day == 1 else "clear_night.png"
+
+    def get_weather_condition_text(self, wmo_code: int) -> str:
+        if wmo_code == 0: return self.get_locale_text("actions.touchbar-info.weather.clear_sky", "Clear Sky")
+        elif wmo_code == 1: return self.get_locale_text("actions.touchbar-info.weather.mainly_clear", "Mainly Clear")
+        elif wmo_code == 2: return self.get_locale_text("actions.touchbar-info.weather.partly_cloudy", "Partly Cloudy")
+        elif wmo_code == 3: return self.get_locale_text("actions.touchbar-info.weather.overcast", "Overcast")
+        elif wmo_code in [45, 48]: return self.get_locale_text("actions.touchbar-info.weather.foggy", "Foggy")
+        elif wmo_code in [51, 53, 55]: return self.get_locale_text("actions.touchbar-info.weather.drizzle", "Drizzle")
+        elif wmo_code in [56, 57]: return self.get_locale_text("actions.touchbar-info.weather.freezing_drizzle", "Freezing Drizzle")
+        elif wmo_code in [61, 63]: return self.get_locale_text("actions.touchbar-info.weather.rain", "Rain")
+        elif wmo_code == 65: return self.get_locale_text("actions.touchbar-info.weather.heavy_rain", "Heavy Rain")
+        elif wmo_code in [66, 67]: return self.get_locale_text("actions.touchbar-info.weather.freezing_rain", "Freezing Rain")
+        elif wmo_code in [71, 73, 75]: return self.get_locale_text("actions.touchbar-info.weather.snow", "Snow")
+        elif wmo_code == 77: return self.get_locale_text("actions.touchbar-info.weather.snow_grains", "Snow Grains")
+        elif wmo_code in [80, 81, 82]: return self.get_locale_text("actions.touchbar-info.weather.rain_showers", "Rain Showers")
+        elif wmo_code in [85, 86]: return self.get_locale_text("actions.touchbar-info.weather.snow_showers", "Snow Showers")
+        elif wmo_code in [95, 96, 99]: return self.get_locale_text("actions.touchbar-info.weather.thunderstorm", "Thunderstorm")
+        return self.get_locale_text("actions.touchbar-info.weather.clear", "Clear")
 
     def get_slot_setting(self, settings: dict, slot_key: str, sub_key: str, default):
         if settings is None:
@@ -1921,11 +1941,23 @@ class TouchBarInfoAction(ActionBase):
         self.bg_image_row.add_suffix(bg_image_btn)
         self.bg_image_row.add_suffix(bg_clear_btn)
 
+        # Floating Section Separators Switch
+        self.show_separators_row = Adw.SwitchRow(
+            title=self.get_locale_text("actions.touchbar-info.separators.label", "Show Section Separators"),
+            subtitle=self.get_locale_text("actions.touchbar-info.separators.subtitle", "Display floating vertical luminescent accent lines between sections")
+        )
+        self.show_separators_row.connect("notify::active", lambda sw, pspec: (
+            self.set_slot_setting("general", "show_section_separators", sw.get_active()),
+            setattr(self, "last_rendered_key", ""),
+            self.update_display()
+        ))
+
         self.load_config_defaults()
         self.notify_visibility_change()
 
         return [
             self.bg_image_row,
+            self.show_separators_row,
             self.sec_a_expander,
             self.sec_b_expander,
             self.sec_c_expander
@@ -2050,6 +2082,38 @@ class TouchBarInfoAction(ActionBase):
         # Composite inward fade glow over main image
         image.alpha_composite(glow_layer)
 
+    def draw_section_separators(self, image: Image.Image):
+        """
+        Renders floating vertical luminescent accent separators at x=200 and x=600.
+        Uses StreamController's accent color with smooth top and bottom vertical alpha fade.
+        """
+        ar, ag, ab = self.get_streamcontroller_accent_color()
+        core_r = min(255, int(ar * 1.25 + 35))
+        core_g = min(255, int(ag * 1.25 + 35))
+        core_b = min(255, int(ab * 1.25 + 35))
+
+        sep_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        sep_draw = ImageDraw.Draw(sep_layer)
+
+        y_top = 18
+        y_bot = 82
+        fade_len = 10.0
+
+        for div_x in [200, 600]:
+            for y in range(y_top, y_bot + 1):
+                dist_from_edge = min(y - y_top, y_bot - y)
+                factor = min(1.0, dist_from_edge / fade_len)
+
+                alpha_glow = int(35 * factor)
+                alpha_core = int(195 * factor)
+
+                # Diffuse soft glow halo (3px wide)
+                sep_draw.line([(div_x - 1, y), (div_x + 1, y)], fill=(ar, ag, ab, alpha_glow), width=1)
+                # Crisp luminescent center point
+                sep_draw.point((div_x, y), fill=(core_r, core_g, core_b, alpha_core))
+
+        image.alpha_composite(sep_layer)
+
     def notify_visibility_change(self):
         for cb in getattr(self, "update_vis_callbacks", []):
             try:
@@ -2066,6 +2130,9 @@ class TouchBarInfoAction(ActionBase):
 
         self._syncing_controls = True
         try:
+            if hasattr(self, "show_separators_row"):
+                self.show_separators_row.set_active(self.get_slot_setting(settings, "general", "show_section_separators", True))
+
             # Section selections
             self.sec_a_mode_combo.set_selected(self.get_slot_setting(settings, "sec_a", "mode", 0))
             self.sec_a_full_combo.set_selected(self.get_slot_setting(settings, "sec_a", "full_widget", 0))
@@ -2516,48 +2583,47 @@ class TouchBarInfoAction(ActionBase):
         wmo_code = c.get("wmo_code", 0)
         is_day = c.get("is_day", 1)
         location_str = c.get("location") or default_location
+        condition_str = self.get_weather_condition_text(wmo_code)
 
         icon_file = self.get_weather_icon_filename(wmo_code, is_day)
-        target_icon_h = int(box_h * 0.70)
+        target_icon_h = int(box_h * 0.74)
         icon_img = self.load_widget_icon(os.path.join("weather-icons", icon_file), target_icon_h)
 
-        bbox_temp = draw.textbbox((0, 0), temp_str, font=font_weather)
-        bbox_loc = draw.textbbox((0, 0), location_str, font=font_location)
-
-        temp_w = bbox_temp[2] - bbox_temp[0]
-        temp_h = bbox_temp[3] - bbox_temp[1]
-        loc_w = bbox_loc[2] - bbox_loc[0]
-        loc_h = bbox_loc[3] - bbox_loc[1]
-
-        text_col_w = max(temp_w, loc_w)
-        icon_w = icon_img.width if icon_img else 0
-        gap = int(box_w * 0.05) if icon_img else 0
-        content_w = icon_w + (gap if icon_img else 0) + text_col_w
-
-        if align == "center":
-            start_x = x_min + max(0, (box_w - content_w) / 2)
-        else:
-            start_x = x_min + int(box_w * 0.08)
-
+        margin_x = int(box_w * 0.06)
         if icon_img is not None:
-            icon_x = int(start_x)
+            icon_x = x_min + margin_x
             icon_y = y_min + int((box_h - target_icon_h) / 2)
             image.paste(icon_img, (icon_x, icon_y), icon_img)
-            left_text_x = icon_x + icon_w + gap
+            left_text_x = icon_x + icon_img.width + int(box_w * 0.04)
         else:
-            left_text_x = start_x
+            left_text_x = x_min + margin_x
 
-        center_text_x = left_text_x + (text_col_w / 2)
+        avail_w = max(20.0, float((x_max - margin_x) - left_text_x))
+
+        top_str = f"{temp_str} • {location_str}" if location_str else temp_str
+        bot_str = condition_str
+
+        font_top_fit = self.fit_font_to_width(draw, top_str, font_weather, avail_w, min_size=9)
+        font_bot_fit = self.fit_font_to_width(draw, bot_str, font_location, avail_w, min_size=8)
+
+        bbox_t = draw.textbbox((0, 0), top_str, font=font_top_fit)
+        bbox_b = draw.textbbox((0, 0), bot_str, font=font_bot_fit)
+        th, bh = bbox_t[3] - bbox_t[1], bbox_b[3] - bbox_b[1]
 
         spacing = max(1, int(box_h * 0.04))
-        total_h = temp_h + spacing + loc_h
-        start_y = y_min + (box_h - total_h) / 2
+        total_h = th + spacing + bh
+        start_y = y_min + (box_h - total_h) / 2.0
+        top_y = start_y + (th / 2.0)
+        bot_y = start_y + th + spacing + (bh / 2.0)
 
-        temp_y = start_y + (temp_h / 2)
-        loc_y = start_y + temp_h + spacing + (loc_h / 2)
+        center_text_x = left_text_x + (avail_w / 2.0) if align == "center" else left_text_x
 
-        self.render_styled_text(draw, (center_text_x, temp_y), temp_str, font_weather, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
-        self.render_styled_text(draw, (center_text_x, loc_y), location_str, font_location, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+        if align == "center":
+            self.render_styled_text(draw, (center_text_x, top_y), top_str, font_top_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            self.render_styled_text(draw, (center_text_x, bot_y), bot_str, font_bot_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+        else:
+            self.render_styled_text(draw, (left_text_x, top_y), top_str, font_top_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="lm")
+            self.render_styled_text(draw, (left_text_x, bot_y), bot_str, font_bot_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="lm")
 
     def draw_cpu_widget(self, image: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], font_main, font_sub, fill_en, fill_col, out_en, out_col, out_sz, cpu_mode: int, align: str = "left"):
         x_min, y_min, x_max, y_max = box
@@ -2900,6 +2966,13 @@ class TouchBarInfoAction(ActionBase):
             disp_name = base.capitalize() if base else mount_path
 
         pct, used_gb, free_gb = self.get_disk_usage_host(mount_path)
+        total_gb = used_gb + free_gb
+        if total_gb >= 1000:
+            used_str = f"{used_gb / 1024:.1f}TB" if used_gb >= 1000 else f"{used_gb:.0f}GB"
+            total_str = f"{total_gb / 1024:.1f}TB"
+        else:
+            used_str = f"{used_gb:.0f}GB"
+            total_str = f"{total_gb:.0f}GB"
 
         margin_x = int(box_w * 0.08)
         if icon_img is not None:
@@ -2912,35 +2985,77 @@ class TouchBarInfoAction(ActionBase):
 
         max_avail_w = max(20.0, float((x_max - margin_x) - content_x))
 
-        if disk_mode == 2: # Mini bar graph
-            top_str = f"{disp_name} — {round(pct)}%"
-            font_sub_fit = self.fit_font_to_width(draw, top_str, font_sub, max_avail_w, min_size=8)
-            bbox_t = draw.textbbox((0, 0), top_str, font=font_sub_fit)
-            th = bbox_t[3] - bbox_t[1]
+        if disk_mode == 2: # Mini bar graph with Used / Total stats
+            top_str = f"{disp_name}" if box_h >= 60 else f"{disp_name} • {used_str}/{total_str}"
+            sub_str = f"{used_str} / {total_str} ({round(pct)}%)"
 
-            bar_h = max(8, int(box_h * 0.22))
-            spacing = max(2, int(box_h * 0.06))
-            total_h = th + spacing + bar_h
+            if box_h >= 60: # Full mode
+                font_top_fit = self.fit_font_to_width(draw, top_str, font_main, max_avail_w, min_size=9)
+                font_sub_fit = self.fit_font_to_width(draw, sub_str, font_sub, max_avail_w, min_size=8)
+                bbox_t = draw.textbbox((0, 0), top_str, font=font_top_fit)
+                bbox_s = draw.textbbox((0, 0), sub_str, font=font_sub_fit)
+                th = bbox_t[3] - bbox_t[1]
+                sh = bbox_s[3] - bbox_s[1]
 
-            start_y = y_min + (box_h - total_h) / 2
-            top_y = start_y + (th / 2)
-            bar_y_min = int(start_y + th + spacing)
-            bar_y_max = bar_y_min + bar_h
+                bar_h = max(6, int(box_h * 0.16))
+                spacing = max(2, int(box_h * 0.04))
+                total_h = th + spacing + sh + spacing + bar_h
 
-            gx_min = content_x
-            gx_max = x_max - margin_x
-            gw = gx_max - gx_min
+                start_y = y_min + (box_h - total_h) / 2.0
+                top_y = start_y + (th / 2.0)
+                sub_y = start_y + th + spacing + (sh / 2.0)
+                bar_y_min = int(start_y + th + spacing + sh + spacing)
+                bar_y_max = bar_y_min + bar_h
 
-            self.render_styled_text(draw, (gx_min + (gw / 2), top_y), top_str, font_sub_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
-            draw.rectangle([gx_min, bar_y_min, gx_max, bar_y_max], fill=(46, 204, 113, 220))
-            fill_w = int(gw * (pct / 100.0))
-            if fill_w > 0:
-                draw.rectangle([gx_min, bar_y_min, gx_min + fill_w, bar_y_max], fill=(231, 76, 60, 220))
-            draw.rectangle([gx_min, bar_y_min, gx_max, bar_y_max], outline=(200, 200, 200, 255), width=1)
+                gx_min = content_x
+                gx_max = x_max - margin_x
+                gw = gx_max - gx_min
+                center_x = gx_min + (gw / 2.0) if align == "center" else gx_min
+
+                if align == "center":
+                    self.render_styled_text(draw, (center_x, top_y), top_str, font_top_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+                    self.render_styled_text(draw, (center_x, sub_y), sub_str, font_sub_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+                else:
+                    self.render_styled_text(draw, (gx_min, top_y), top_str, font_top_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="lm")
+                    self.render_styled_text(draw, (gx_min, sub_y), sub_str, font_sub_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="lm")
+
+                ar, ag, ab = self.get_streamcontroller_accent_color()
+                draw.rounded_rectangle([gx_min, bar_y_min, gx_max, bar_y_max], radius=2, fill=(255, 255, 255, 30), outline=(ar, ag, ab, 90), width=1)
+                fill_w = int(gw * (pct / 100.0))
+                if fill_w > 0:
+                    draw.rounded_rectangle([gx_min, bar_y_min, gx_min + fill_w, bar_y_max], radius=2, fill=(ar, ag, ab, 220))
+            else: # Split mode (box_h = 50)
+                font_sub_fit = self.fit_font_to_width(draw, top_str, font_sub, max_avail_w, min_size=8)
+                bbox_t = draw.textbbox((0, 0), top_str, font=font_sub_fit)
+                th = bbox_t[3] - bbox_t[1]
+
+                bar_h = max(5, int(box_h * 0.16))
+                spacing = max(2, int(box_h * 0.06))
+                total_h = th + spacing + bar_h
+
+                start_y = y_min + (box_h - total_h) / 2.0
+                top_y = start_y + (th / 2.0)
+                bar_y_min = int(start_y + th + spacing)
+                bar_y_max = bar_y_min + bar_h
+
+                gx_min = content_x
+                gx_max = x_max - margin_x
+                gw = gx_max - gx_min
+                center_x = gx_min + (gw / 2.0) if align == "center" else gx_min
+
+                if align == "center":
+                    self.render_styled_text(draw, (center_x, top_y), top_str, font_sub_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+                else:
+                    self.render_styled_text(draw, (gx_min, top_y), top_str, font_sub_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="lm")
+
+                ar, ag, ab = self.get_streamcontroller_accent_color()
+                draw.rounded_rectangle([gx_min, bar_y_min, gx_max, bar_y_max], radius=2, fill=(255, 255, 255, 30), outline=(ar, ag, ab, 90), width=1)
+                fill_w = int(gw * (pct / 100.0))
+                if fill_w > 0:
+                    draw.rounded_rectangle([gx_min, bar_y_min, gx_min + fill_w, bar_y_max], radius=2, fill=(ar, ag, ab, 220))
         elif disk_mode == 1: # Used / Total GB
             top_str = f"{disp_name}"
-            total_gb = used_gb + free_gb
-            bot_str = f"{used_gb:.0f}GB/{total_gb:.0f}GB"
+            bot_str = f"{used_str} / {total_str} ({round(pct)}%)"
 
             font_main_fit = self.fit_font_to_width(draw, top_str, font_main, max_avail_w, min_size=9)
             font_sub_fit = self.fit_font_to_width(draw, bot_str, font_sub, max_avail_w, min_size=8)
@@ -2948,7 +3063,7 @@ class TouchBarInfoAction(ActionBase):
             bbox_t = draw.textbbox((0, 0), top_str, font=font_main_fit)
             bbox_b = draw.textbbox((0, 0), bot_str, font=font_sub_fit)
             th, bh = bbox_t[3] - bbox_t[1], bbox_b[3] - bbox_b[1]
-            center_x = content_x + (max_avail_w / 2.0)
+            center_x = content_x + (max_avail_w / 2.0) if align == "center" else content_x
 
             spacing = max(1, int(box_h * 0.04))
             total_h = th + spacing + bh
@@ -2956,8 +3071,12 @@ class TouchBarInfoAction(ActionBase):
             top_y = start_y + (th / 2.0)
             bot_y = start_y + th + spacing + (bh / 2.0)
 
-            self.render_styled_text(draw, (center_x, top_y), top_str, font_main_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
-            self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            if align == "center":
+                self.render_styled_text(draw, (center_x, top_y), top_str, font_main_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+                self.render_styled_text(draw, (center_x, bot_y), bot_str, font_sub_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="mm")
+            else:
+                self.render_styled_text(draw, (content_x, top_y), top_str, font_main_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="lm")
+                self.render_styled_text(draw, (content_x, bot_y), bot_str, font_sub_fit, fill_en, fill_col, out_en, out_col, out_sz, anchor="lm")
         else: # Percentage %
             top_str = f"{disp_name}"
             bot_str = f"{round(pct)}% Used"
@@ -3888,12 +4007,18 @@ class TouchBarInfoAction(ActionBase):
                 elif "open.spotify.com/image/" in art_url:
                     art_url = "https://i.scdn.co/image/" + art_url.split("/")[-1]
 
+            clean_identity = ""
+            if target_name:
+                raw_ident = target_name.replace("org.mpris.MediaPlayer2.", "")
+                clean_identity = raw_ident.split(".")[0].capitalize()
+
             self.media_state = {
                 "title": title,
                 "artist": artist,
                 "album": album,
                 "art_url": art_url,
-                "status": playback_status
+                "status": playback_status,
+                "identity": clean_identity
             }
 
         # Advance visualizer tick and simulate organic multi-octave equalizer spectrum
@@ -4206,12 +4331,40 @@ class TouchBarInfoAction(ActionBase):
 
         artist = self.media_state.get("artist", "")
         title = self.media_state.get("title", "No Media Playing")
+        identity = self.media_state.get("identity", "")
+
+        # Format artist with music source
+        if artist:
+            artist_display = f"{artist} • {identity}" if identity and identity.lower() not in artist.lower() else artist
+        elif identity:
+            artist_display = identity
+        else:
+            artist_display = ""
+
+        # Volume badge in upper-right corner of Section B
+        vol_pct = getattr(self, "_current_vol_pct", 50)
+        text_avail_w = avail_w
+        if not self.is_volume_hud_active():
+            vol_str = f"VOL: {vol_pct}%"
+            font_badge = self.get_font_from_desc("DejaVu Sans Bold 9", default_size=9)
+            bbox_v = draw.textbbox((0, 0), vol_str, font=font_badge)
+            vw = bbox_v[2] - bbox_v[0]
+            vh = bbox_v[3] - bbox_v[1]
+            vb_w = vw + 10
+            vb_h = vh + 5
+            vb_x = content_max_x - vb_w
+            vb_y = y_min + int(bh * 0.08)
+
+            ar, ag, ab = self.get_streamcontroller_accent_color()
+            draw.rounded_rectangle([vb_x, vb_y, vb_x + vb_w, vb_y + vb_h], radius=3, fill=(ar, ag, ab, 35), outline=(ar, ag, ab, 150), width=1)
+            draw.text((vb_x + 5, vb_y + 2), vol_str, font=font_badge, fill=(min(255, ar + 45), min(255, ag + 45), min(255, ab + 45), 255))
+            text_avail_w = max(20.0, float(vb_x - 8 - content_x))
 
         artist_y = y_min + int(bh * 0.10)
         song_y = y_min + int(bh * 0.35)
 
-        if artist:
-            self.draw_marquee_text(image, draw, (content_x, artist_y), avail_w, artist, font_artist, artist_fill_en, artist_fill_col, artist_out_en, artist_out_col, artist_out_sz)
+        if artist_display:
+            self.draw_marquee_text(image, draw, (content_x, artist_y), text_avail_w, artist_display, font_artist, artist_fill_en, artist_fill_col, artist_out_en, artist_out_col, artist_out_sz)
         self.draw_marquee_text(image, draw, (content_x, song_y), avail_w, title, font_song, song_fill_en, song_fill_col, song_out_en, song_out_col, song_out_sz)
 
         # Visualizer or Volume Meter HUD
@@ -4827,6 +4980,10 @@ class TouchBarInfoAction(ActionBase):
                 bot_choice = self.get_slot_setting(settings, prefix, "bottom_widget", 0)
                 render_slot_widget(f"{prefix}_top", top_choice, top_box, is_full=False, align=align)
                 render_slot_widget(f"{prefix}_bot", bot_choice, bot_box, is_full=False, align=align)
+
+        # Draw floating vertical accent separators at x=200 and x=600
+        if self.get_slot_setting(settings, "general", "show_section_separators", True):
+            self.draw_section_separators(image)
 
         now_ts = time.time()
         # Draw temporary subsection glow when switching or adjusting subsections (Model 2)
