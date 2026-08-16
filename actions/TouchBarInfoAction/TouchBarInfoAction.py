@@ -2537,15 +2537,23 @@ class TouchBarInfoAction(ActionBase):
         cal_x = x_min + margin_x
         cal_y = y_min + int((box_h - badge_sz) / 2)
 
-        # 1. Draw Calendar Icon Tile
-        banner_h = max(5, int(badge_sz * 0.28))
-        draw.rounded_rectangle([cal_x, cal_y, cal_x + badge_sz, cal_y + badge_sz], radius=4, fill=(ar, ag, ab, 35), outline=(ar, ag, ab, 190), width=1)
-        draw.rectangle([cal_x, cal_y, cal_x + badge_sz, cal_y + banner_h], fill=(ar, ag, ab, 220))
+        # 1. Draw Calendar Icon Tile with Theme Background & Inset Dark Plate
+        banner_h = max(6, int(badge_sz * 0.28))
+        # Solid accent outer frame and top banner
+        draw.rounded_rectangle([cal_x, cal_y, cal_x + badge_sz, cal_y + badge_sz], radius=4, fill=(ar, ag, ab, 240), outline=(ar, ag, ab, 255), width=1)
+        # Inner dark slate plate inset
+        inner_pad = max(2, int(badge_sz * 0.06))
+        inner_top = cal_y + banner_h
+        inner_bottom = cal_y + badge_sz - inner_pad
+        inner_left = cal_x + inner_pad
+        inner_right = cal_x + badge_sz - inner_pad
+        draw.rounded_rectangle([inner_left, inner_top, inner_right, inner_bottom], radius=3, fill=(24, 26, 38, 255))
         
-        # Day of Month in center of tile
+        # Day of Month in center of inner plate
         day_num_str = str(now.day)
         font_day_num = self.get_font_from_desc(f"DejaVu Sans Bold {max(8, int(badge_sz * 0.45))}", default_size=max(8, int(badge_sz * 0.45)))
-        draw.text((cal_x + (badge_sz / 2.0), cal_y + banner_h + ((badge_sz - banner_h) / 2.0)), day_num_str, font=font_day_num, fill=(255, 255, 255, 255), anchor="mm")
+        center_num_y = inner_top + ((inner_bottom - inner_top) / 2.0)
+        draw.text((cal_x + (badge_sz / 2.0), center_num_y), day_num_str, font=font_day_num, fill=(255, 255, 255, 255), anchor="mm")
 
         # 2. Text Column (Right of Tile)
         left_text_x = cal_x + badge_sz + int(box_w * 0.04)
@@ -3750,6 +3758,83 @@ class TouchBarInfoAction(ActionBase):
                     log.warning(f"TouchPulse: Could not rebind deck dial callback: {e}")
             self.deck_controller._touchpulse_dial_hooked = True
 
+        if not getattr(self.deck_controller, "_touchpulse_touch_hooked", False):
+            original_touch_cb = getattr(self.deck_controller, "touchscreen_event_callback", None)
+
+            def hooked_touchscreen_callback(deck, *args, **kwargs):
+                try:
+                    self.handle_deck_touchscreen_event(*args, **kwargs)
+                except Exception as e:
+                    log.error(f"TouchPulse: touchscreen hook handler error: {e}")
+                if original_touch_cb:
+                    return original_touch_cb(deck, *args, **kwargs)
+
+            self.deck_controller.touchscreen_event_callback = hooked_touchscreen_callback
+            if hasattr(self.deck_controller, "deck") and self.deck_controller.deck is not None:
+                try:
+                    self.deck_controller.deck.set_touchscreen_callback(hooked_touchscreen_callback)
+                except Exception as e:
+                    log.warning(f"TouchPulse: Could not rebind touchscreen callback: {e}")
+            self.deck_controller._touchpulse_touch_hooked = True
+
+    def handle_deck_touchscreen_event(self, *args, **kwargs):
+        if not self.get_is_present():
+            return
+        event_type = args[0] if len(args) > 0 else kwargs.get("event_type", None)
+        value = args[1] if len(args) > 1 else kwargs.get("value", {})
+
+        event_str = str(event_type).upper()
+        if "SHORT" not in event_str and "CLICK" not in event_str and "PRESS" not in event_str:
+            return
+
+        tx = value.get("x", 0) if isinstance(value, dict) else 0
+        ty = value.get("y", 0) if isinstance(value, dict) else 0
+
+        settings = self.get_settings() or {}
+
+        if tx < 200: # Section A
+            sec_mode = self.get_slot_setting(settings, "sec_a", "mode", 0)
+            if sec_mode == 0:
+                sk = "sec_a_full"
+                widget = self.get_slot_setting(settings, "sec_a", "full_widget", 0)
+            else:
+                is_top = (ty < 50)
+                self.sec_a_focus = "top" if is_top else "bot"
+                self.sec_a_glow_until = time.time() + 1.2
+                self.trigger_glow_feedback(1.2)
+                sk = "sec_a_top" if is_top else "sec_a_bot"
+                widget_key = "top_widget" if is_top else "bottom_widget"
+                widget = self.get_slot_setting(settings, "sec_a", widget_key, 0)
+            self._dispatch_dial_to_slot(sk, widget, is_turn=False, is_push=True, value=1, dial_mode_key="media_dial_single")
+
+        elif tx < 600: # Section B
+            sec_mode = self.get_slot_setting(settings, "sec_b", "mode", 0)
+            if sec_mode == 0:
+                sk = "sec_b_full"
+                widget = self.get_slot_setting(settings, "sec_b", "full_widget", 0)
+                self._dispatch_dial_to_slot(sk, widget, is_turn=False, is_push=True, value=1, dial_mode_key="media_dial_left")
+            else:
+                is_top = (ty < 50)
+                sk = "sec_b_top" if is_top else "sec_b_bot"
+                widget_key = "top_widget" if is_top else "bottom_widget"
+                widget = self.get_slot_setting(settings, "sec_b", widget_key, 0)
+                self._dispatch_dial_to_slot(sk, widget, is_turn=False, is_push=True, value=1, dial_mode_key="media_dial_left" if is_top else "media_dial_right")
+
+        else: # Section C
+            sec_mode = self.get_slot_setting(settings, "sec_c", "mode", 0)
+            if sec_mode == 0:
+                sk = "sec_c_full"
+                widget = self.get_slot_setting(settings, "sec_c", "full_widget", 0)
+            else:
+                is_top = (ty < 50)
+                self.sec_c_focus = "top" if is_top else "bot"
+                self.sec_c_glow_until = time.time() + 1.2
+                self.trigger_glow_feedback(1.2)
+                sk = "sec_c_top" if is_top else "sec_c_bot"
+                widget_key = "top_widget" if is_top else "bottom_widget"
+                widget = self.get_slot_setting(settings, "sec_c", widget_key, 0)
+            self._dispatch_dial_to_slot(sk, widget, is_turn=False, is_push=True, value=1, dial_mode_key="media_dial_single")
+
     def trigger_glow_feedback(self, duration: float = 1.4):
         def _clear_glow():
             now_ts = time.time()
@@ -3951,13 +4036,41 @@ class TouchBarInfoAction(ActionBase):
                 sk = "sec_a_full"
                 widget = self.get_slot_setting(settings, "sec_a", "full_widget", 0)
                 self._dispatch_dial_to_slot(sk, widget, is_turn, is_push, value, dial_mode_key="media_dial_single")
-            else: # Split mode (Model 2: Push toggles focus, Turn operates focused widget)
+            else: # Split mode (Double-Click: Toggle Subsection Focus; Single-Click: Trigger Focused Widget Action)
                 if is_push and bool(value):
-                    self.sec_a_focus = "bot" if getattr(self, "sec_a_focus", "top") == "top" else "top"
-                    self.sec_a_glow_until = time.time() + 1.4
-                    self.trigger_glow_feedback(1.4)
-                    log.info(f"TouchPulse: Section A switched subsection focus to '{self.sec_a_focus}'")
-                    return
+                    last_push = getattr(self, "_last_dial_push_0", 0.0)
+                    now_ts = time.time()
+                    if (now_ts - last_push) < 0.38:
+                        # Double Click -> Toggle focus
+                        self._last_dial_push_0 = 0.0
+                        if getattr(self, "_dial_single_timer_0", None):
+                            try:
+                                GLib.source_remove(self._dial_single_timer_0)
+                            except Exception:
+                                pass
+                            self._dial_single_timer_0 = None
+                        self.sec_a_focus = "bot" if getattr(self, "sec_a_focus", "top") == "top" else "top"
+                        self.sec_a_glow_until = time.time() + 1.4
+                        self.trigger_glow_feedback(1.4)
+                        log.info(f"TouchPulse: Section A double-click switched subsection focus to '{self.sec_a_focus}'")
+                        return
+                    else:
+                        self._last_dial_push_0 = now_ts
+                        def _exec_single_push_0():
+                            self._dial_single_timer_0 = None
+                            focus = getattr(self, "sec_a_focus", "top")
+                            sk = f"sec_a_{focus}"
+                            widget_key = "top_widget" if focus == "top" else "bottom_widget"
+                            widget = self.get_slot_setting(self.get_settings() or {}, "sec_a", widget_key, 0)
+                            self._dispatch_dial_to_slot(sk, widget, is_turn=False, is_push=True, value=1, dial_mode_key="media_dial_single")
+                            return False
+                        if getattr(self, "_dial_single_timer_0", None):
+                            try:
+                                GLib.source_remove(self._dial_single_timer_0)
+                            except Exception:
+                                pass
+                        self._dial_single_timer_0 = GLib.timeout_add(320, _exec_single_push_0)
+                        return
                 elif is_turn:
                     focus = getattr(self, "sec_a_focus", "top")
                     sk = f"sec_a_{focus}"
@@ -4006,13 +4119,41 @@ class TouchBarInfoAction(ActionBase):
                 sk = "sec_c_full"
                 widget = self.get_slot_setting(settings, "sec_c", "full_widget", 0)
                 self._dispatch_dial_to_slot(sk, widget, is_turn, is_push, value, dial_mode_key="media_dial_single")
-            else: # Split mode (Model 2: Push toggles focus, Turn operates focused widget)
+            else: # Split mode (Double-Click: Toggle Subsection Focus; Single-Click: Trigger Focused Widget Action)
                 if is_push and bool(value):
-                    self.sec_c_focus = "bot" if getattr(self, "sec_c_focus", "top") == "top" else "top"
-                    self.sec_c_glow_until = time.time() + 1.4
-                    self.trigger_glow_feedback(1.4)
-                    log.info(f"TouchPulse: Section C switched subsection focus to '{self.sec_c_focus}'")
-                    return
+                    last_push = getattr(self, "_last_dial_push_3", 0.0)
+                    now_ts = time.time()
+                    if (now_ts - last_push) < 0.38:
+                        # Double Click -> Toggle focus
+                        self._last_dial_push_3 = 0.0
+                        if getattr(self, "_dial_single_timer_3", None):
+                            try:
+                                GLib.source_remove(self._dial_single_timer_3)
+                            except Exception:
+                                pass
+                            self._dial_single_timer_3 = None
+                        self.sec_c_focus = "bot" if getattr(self, "sec_c_focus", "top") == "top" else "top"
+                        self.sec_c_glow_until = time.time() + 1.4
+                        self.trigger_glow_feedback(1.4)
+                        log.info(f"TouchPulse: Section C double-click switched subsection focus to '{self.sec_c_focus}'")
+                        return
+                    else:
+                        self._last_dial_push_3 = now_ts
+                        def _exec_single_push_3():
+                            self._dial_single_timer_3 = None
+                            focus = getattr(self, "sec_c_focus", "top")
+                            sk = f"sec_c_{focus}"
+                            widget_key = "top_widget" if focus == "top" else "bottom_widget"
+                            widget = self.get_slot_setting(self.get_settings() or {}, "sec_c", widget_key, 0)
+                            self._dispatch_dial_to_slot(sk, widget, is_turn=False, is_push=True, value=1, dial_mode_key="media_dial_single")
+                            return False
+                        if getattr(self, "_dial_single_timer_3", None):
+                            try:
+                                GLib.source_remove(self._dial_single_timer_3)
+                            except Exception:
+                                pass
+                        self._dial_single_timer_3 = GLib.timeout_add(320, _exec_single_push_3)
+                        return
                 elif is_turn:
                     focus = getattr(self, "sec_c_focus", "top")
                     sk = f"sec_c_{focus}"
