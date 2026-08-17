@@ -1,0 +1,14 @@
+name: Update Store Manifest
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  update-store:
+    uses: oparada1988/streamcontroller-workflows/.github/workflows/update-store.yml@main
+    secrets: inherit

@@ -4532,6 +4532,29 @@ class TouchBarInfoAction(ActionBase):
 
         return rounded_img
 
+    def get_media_source_icon(self, identity: str, size: tuple[int, int] = (16, 16)) -> Image.Image | None:
+        if not identity:
+            return None
+        cache_key = (identity.lower(), size[0], size[1])
+        if not hasattr(self, "_source_icon_cache"):
+            self._source_icon_cache = {}
+        if cache_key in self._source_icon_cache:
+            return self._source_icon_cache[cache_key]
+
+        icon_img = None
+        ident_lower = identity.lower()
+        if "spotify" in ident_lower:
+            icon_path = os.path.join(self.plugin_base.PATH, "assets", "spotify_icon.png")
+            if os.path.isfile(icon_path):
+                try:
+                    raw = Image.open(icon_path).convert("RGBA")
+                    icon_img = raw.resize(size, Image.Resampling.LANCZOS)
+                except Exception as e:
+                    log.error(f"Failed to load spotify icon: {e}")
+
+        self._source_icon_cache[cache_key] = icon_img
+        return icon_img
+
     def draw_marquee_text(self, image: Image.Image, draw: ImageDraw.ImageDraw, pos: tuple[float, float], max_w: float, text: str, font, fill_en: bool = True, fill_col: tuple = (255, 255, 255, 255), out_en: bool = False, out_col: tuple = (0, 0, 0, 255), out_sz: int = 2):
         if not text:
             return
@@ -4683,13 +4706,8 @@ class TouchBarInfoAction(ActionBase):
         title = self.media_state.get("title", "No Media Playing")
         identity = self.media_state.get("identity", "")
 
-        # Format artist with music source
-        if artist:
-            artist_display = f"{artist} • {identity}" if identity and identity.lower() not in artist.lower() else artist
-        elif identity:
-            artist_display = identity
-        else:
-            artist_display = ""
+        # Format artist (clean artist name only, media source text removed)
+        artist_display = artist if artist else ""
 
         # Volume badge in upper-right corner of Section B with high-contrast backplate
         vol_pct = getattr(self, "_current_vol_pct", 50)
@@ -4711,12 +4729,20 @@ class TouchBarInfoAction(ActionBase):
             draw.text((vb_x + 7, vb_y + 3), vol_str, font=font_badge, fill=(255, 255, 255, 255))
             text_avail_w = max(20.0, float(vb_x - 8 - content_x))
 
+            # Media source icon aligned center underneath the volume badge
+            src_icon = self.get_media_source_icon(identity, size=(16, 16))
+            if src_icon:
+                icon_w, icon_h = src_icon.size
+                icon_x = vb_x + (vb_w - icon_w) // 2
+                icon_y = vb_y + vb_h + 3
+                image.paste(src_icon, (icon_x, icon_y), src_icon)
+
         artist_y = y_min + int(bh * 0.10)
         song_y = y_min + int(bh * 0.33)
 
         if artist_display:
             self.draw_marquee_text(image, draw, (content_x, artist_y), text_avail_w, artist_display, font_artist, artist_fill_en, artist_fill_col, artist_out_en, artist_out_col, artist_out_sz)
-        self.draw_marquee_text(image, draw, (content_x, song_y), avail_w, title, font_song, song_fill_en, song_fill_col, song_out_en, song_out_col, song_out_sz)
+        self.draw_marquee_text(image, draw, (content_x, song_y), text_avail_w, title, font_song, song_fill_en, song_fill_col, song_out_en, song_out_col, song_out_sz)
 
         # Visualizer (Spans y: 52 to 74 -> 22px height)
         # Dedicated 6px gap from y: 74 to 80
