@@ -4295,6 +4295,8 @@ class TouchBarInfoAction(ActionBase):
             album = ""
             art_url = ""
             playback_status = "Stopped"
+            length_us = 0
+            position_us = 0
 
             if target_name and bus:
                 try:
@@ -4316,14 +4318,12 @@ class TouchBarInfoAction(ActionBase):
                         if "mpris:artUrl" in metadata:
                             art_url = str(metadata["mpris:artUrl"])
 
-                    length_us = 0
                     if metadata and "mpris:length" in metadata:
                         try:
                             length_us = int(metadata["mpris:length"])
                         except Exception:
                             length_us = 0
 
-                    position_us = 0
                     try:
                         position_us = int(props.Get("org.mpris.MediaPlayer2.Player", "Position"))
                     except Exception:
