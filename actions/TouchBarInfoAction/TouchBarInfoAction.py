@@ -177,6 +177,8 @@ class TouchBarInfoAction(ActionBase):
         self.sec_b_top_glow_until = 0.0
         self.sec_b_bot_glow_until = 0.0
         self._glow_timer_id = None
+        self._is_removed = False
+        self._bg_timer_running = True
 
         try:
             sm = Adw.StyleManager.get_default()
@@ -4898,6 +4900,8 @@ class TouchBarInfoAction(ActionBase):
             return False
 
     def render_to_input(self, image: Image.Image) -> None:
+        if getattr(self, "_is_removed", False):
+            return
         if not hasattr(self, "page") or self.page is None:
             return
         if not self.get_is_present():
@@ -4964,24 +4968,21 @@ class TouchBarInfoAction(ActionBase):
         # Realtime 1:1 Desktop App Canvas Mirroring
         self.update_screenbar_ui(final_image)
 
-    def update_screenbar_ui(self, image: Image.Image):
-        if not self.get_is_present():
+    def update_screenbar_ui(self, image: Image.Image, force: bool = False):
+        if not force and (not self.get_is_present() or getattr(self, "_is_removed", False)):
             return
         try:
             # 1. Update via deck_controller
             dc = getattr(self, "deck_controller", None)
             if dc is not None:
-                c_input = dc.get_input(self.input_ident) if hasattr(dc, "get_input") else None
-                if c_input is not None and hasattr(c_input, "set_ui_image"):
-                    c_input.set_ui_image(image)
-
                 dsc = dc.get_own_deck_stack_child() if hasattr(dc, "get_own_deck_stack_child") else getattr(dc, "own_deck_stack_child", None)
                 if dsc is not None:
                     ps = getattr(dsc, "page_settings", None)
                     dcfg = getattr(ps, "deck_config", None)
                     sb = getattr(dcfg, "screenbar", None)
                     if sb and hasattr(sb, "image") and sb.image:
-                        GLib.idle_add(sb.image.set_image, image)
+                        img_copy = image.copy()
+                        GLib.idle_add(sb.image.set_image, img_copy)
 
             # 2. Update via gl.app.main_win
             if hasattr(gl, "app") and getattr(gl.app, "main_win", None) is not None:
@@ -4999,7 +5000,8 @@ class TouchBarInfoAction(ActionBase):
                         dcfg = getattr(ps, "deck_config", None)
                         sb = getattr(dcfg, "screenbar", None)
                         if sb and hasattr(sb, "image") and sb.image:
-                            GLib.idle_add(sb.image.set_image, image)
+                            img_copy = image.copy()
+                            GLib.idle_add(sb.image.set_image, img_copy)
         except Exception as e:
             log.error(f"TouchPulse: Error updating screenbar UI: {e}")
 
@@ -5041,9 +5043,12 @@ class TouchBarInfoAction(ActionBase):
 
         if not getattr(self, "_bg_timer_started", False):
             self._bg_timer_started = True
+            self._bg_timer_running = True
             def background_timer():
-                while True:
+                while getattr(self, "_bg_timer_running", True) and not getattr(self, "_is_removed", False):
                     time.sleep(1.0)
+                    if not getattr(self, "_bg_timer_running", True) or getattr(self, "_is_removed", False):
+                        break
                     try:
                         if not self.get_is_present():
                             if self._anim_timer_id is not None:
@@ -5062,6 +5067,119 @@ class TouchBarInfoAction(ActionBase):
                         log.error(f"TouchPulse: Exception in background_timer: {e}")
 
             Thread(target=background_timer, daemon=True).start()
+
+    def _refresh_sidebar_ui(self):
+        try:
+            if hasattr(gl, "app") and getattr(gl.app, "main_win", None) is not None:
+                sidebar = getattr(gl.app.main_win, "sidebar", None)
+                if sidebar is not None:
+                    active_ident = getattr(sidebar, "active_identifier", None)
+                    if active_ident == getattr(self, "input_ident", None) and hasattr(sidebar, "load_for_identifier"):
+                        sidebar.load_for_identifier(self.input_ident, getattr(self, "state", 0))
+        except Exception as e:
+            log.warning(f"TouchPulse: Error refreshing sidebar UI on removal: {e}")
+
+    def on_remove(self) -> None:
+        """
+        Lifecycle cleanup hook invoked when TouchPulse is removed from the page.
+        Gracefully tears down background timers, signals, hardware listeners,
+        and wipes the touchscreen background image so it does not persist.
+        """
+        log.info("TouchPulse: Action on_remove invoked, tearing down and clearing background...")
+        self._is_removed = True
+        self._bg_timer_running = False
+
+        # 1. Stop all GTK / GLib timers
+        self.stop_anim_timer()
+        if getattr(self, "_volume_hud_timer_id", None) is not None:
+            try:
+                GLib.source_remove(self._volume_hud_timer_id)
+            except Exception:
+                pass
+            self._volume_hud_timer_id = None
+
+        if getattr(self, "_glow_timer_id", None) is not None:
+            try:
+                GLib.source_remove(self._glow_timer_id)
+            except Exception:
+                pass
+            self._glow_timer_id = None
+
+        if getattr(self, "_dial_single_timer_0", None) is not None:
+            try:
+                GLib.source_remove(self._dial_single_timer_0)
+            except Exception:
+                pass
+            self._dial_single_timer_0 = None
+
+        if getattr(self, "_dial_single_timer_3", None) is not None:
+            try:
+                GLib.source_remove(self._dial_single_timer_3)
+            except Exception:
+                pass
+            self._dial_single_timer_3 = None
+
+        # 2. Disconnect ChangePage signal
+        try:
+            if hasattr(gl, "signal_manager") and gl.signal_manager is not None:
+                gl.signal_manager.disconnect_signal(signal=ChangePage, callback=self.on_change_page)
+        except Exception:
+            pass
+
+        # 3. Remove from plugin active actions tracking
+        try:
+            if hasattr(self, "plugin_base") and hasattr(self.plugin_base, "active_actions"):
+                self.plugin_base.active_actions.discard(self)
+        except Exception:
+            pass
+
+        # 4. Clear Touch Bar background image in Page dict if it points to TouchPulse render
+        if hasattr(self, "page") and self.page is not None and hasattr(self, "input_ident"):
+            try:
+                current_bg = self.page.get_background_image(self.input_ident, self.state)
+                if current_bg and ("touchbar_render" in current_bg or "assets" in current_bg):
+                    self.page.set_background_image(self.input_ident, self.state, None, update=True)
+                    self.page.save()
+            except Exception as e:
+                log.error(f"TouchPulse: Error clearing page background image on removal: {e}")
+
+        # 5. Clear hardware touchscreen display
+        if hasattr(self, "deck_controller") and self.deck_controller is not None and hasattr(self, "input_ident"):
+            try:
+                c_input = self.deck_controller.get_input(self.input_ident)
+                if c_input is not None and hasattr(c_input, "update"):
+                    c_input.update()
+            except Exception as e:
+                log.error(f"TouchPulse: Error updating touchscreen controller on removal: {e}")
+
+        # 6. Clear desktop StreamController UI ScreenBar preview
+        try:
+            empty_img = Image.new("RGBA", (800, 100), (0, 0, 0, 0))
+            self.update_screenbar_ui(empty_img, force=True)
+        except Exception as e:
+            log.error(f"TouchPulse: Error clearing ScreenBar UI preview on removal: {e}")
+
+        # 7. Notify sidebar BackgroundEditor to refresh preview if currently open
+        GLib.idle_add(self._refresh_sidebar_ui)
+
+        # 8. Clean up disk render files
+        try:
+            if hasattr(self, "plugin_base") and hasattr(self.plugin_base, "PATH"):
+                assets_dir = os.path.expanduser(os.path.join(self.plugin_base.PATH, "assets"))
+                render_file = os.path.join(assets_dir, f"touchbar_render_{self.state}.png")
+                if os.path.isfile(render_file):
+                    os.remove(render_file)
+                tmp_file = render_file + ".tmp"
+                if os.path.isfile(tmp_file):
+                    os.remove(tmp_file)
+        except Exception:
+            pass
+
+    def on_removed_from_cache(self) -> None:
+        """
+        StreamController cache eviction lifecycle hook.
+        """
+        self.on_remove()
 
     def on_key_down(self):
         settings = self.get_settings() or {}
