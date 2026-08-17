@@ -4532,7 +4532,7 @@ class TouchBarInfoAction(ActionBase):
 
         return rounded_img
 
-    def get_media_source_icon(self, identity: str, size: tuple[int, int] = (16, 16)) -> Image.Image | None:
+    def get_media_source_icon(self, identity: str, size: tuple[int, int] = (27, 27)) -> Image.Image | None:
         if not identity:
             return None
         cache_key = (identity.lower(), size[0], size[1])
@@ -4729,12 +4729,12 @@ class TouchBarInfoAction(ActionBase):
             draw.text((vb_x + 7, vb_y + 3), vol_str, font=font_badge, fill=(255, 255, 255, 255))
             text_avail_w = max(20.0, float(vb_x - 8 - content_x))
 
-            # Media source icon aligned center underneath the volume badge
-            src_icon = self.get_media_source_icon(identity, size=(16, 16))
+            # Media source icon aligned center underneath the volume badge (27x27 px, +70% size)
+            src_icon = self.get_media_source_icon(identity, size=(27, 27))
             if src_icon:
                 icon_w, icon_h = src_icon.size
                 icon_x = vb_x + (vb_w - icon_w) // 2
-                icon_y = vb_y + vb_h + 3
+                icon_y = vb_y + vb_h + 2
                 image.paste(src_icon, (icon_x, icon_y), src_icon)
 
         artist_y = y_min + int(bh * 0.10)
@@ -4744,12 +4744,12 @@ class TouchBarInfoAction(ActionBase):
             self.draw_marquee_text(image, draw, (content_x, artist_y), text_avail_w, artist_display, font_artist, artist_fill_en, artist_fill_col, artist_out_en, artist_out_col, artist_out_sz)
         self.draw_marquee_text(image, draw, (content_x, song_y), text_avail_w, title, font_song, song_fill_en, song_fill_col, song_out_en, song_out_col, song_out_sz)
 
-        # Visualizer (Spans y: 52 to 74 -> 22px height)
+        # Visualizer (Spans y: 55 to 74 -> 19px height)
         # Dedicated 6px gap from y: 74 to 80
         # Media Progress Time Bar (Spans y: 82 to 94)
         is_playing_or_paused = (self.media_state.get("status") in ["Playing", "Paused"])
         if is_playing_or_paused and not self.is_volume_hud_active():
-            vis_box = (content_x, y_min + 52, content_max_x, y_min + 74)
+            vis_box = (content_x, y_min + 55, content_max_x, y_min + 74)
         else:
             vis_box = (content_x, y_min + int(bh * 0.56), content_max_x, y_max - int(bh * 0.08))
 
