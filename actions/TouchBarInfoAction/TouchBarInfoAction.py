@@ -230,6 +230,7 @@ class TouchBarInfoAction(ActionBase):
                 return
             if getattr(self.page, "json_path", None) == new_path:
                 self.last_rendered_key = ""
+                self.setup_dial_interceptor()
                 GLib.idle_add(self.update_display)
                 if self.is_media_active_and_playing():
                     GLib.idle_add(self.start_anim_timer)
@@ -3805,43 +3806,67 @@ class TouchBarInfoAction(ActionBase):
         if not hasattr(self, "deck_controller") or self.deck_controller is None:
             return
 
-        if not getattr(self.deck_controller, "_touchpulse_dial_hooked", False):
-            original_dial_callback = getattr(self.deck_controller, "dial_event_callback", None)
+        # Ensure active instance is tracked in plugin_base
+        if hasattr(self, "plugin_base") and hasattr(self.plugin_base, "active_actions"):
+            self.plugin_base.active_actions.add(self)
 
-            def hooked_dial_callback(deck, dial, *args, **kwargs):
+        dc = self.deck_controller
+
+        # Hook deck_controller dial_event_callback with dynamic action dispatcher
+        if not getattr(dc, "_touchpulse_dial_hooked", False):
+            orig_dial_cb = getattr(dc, "dial_event_callback", None)
+
+            def dynamic_dial_callback(deck, dial, *args, **kwargs):
                 try:
-                    self.handle_deck_dial_event(dial, *args, **kwargs)
+                    pb = getattr(gl, "plugin_manager", None)
+                    plugin = pb.get_plugin_by_id("com_oparada_TouchBarInfo") if pb else None
+                    if plugin and hasattr(plugin, "active_actions"):
+                        for act in list(plugin.active_actions):
+                            if getattr(act, "deck_controller", None) == dc and act.get_is_present():
+                                act.handle_deck_dial_event(dial, *args, **kwargs)
+                                break
                 except Exception as e:
-                    log.error(f"TouchPulse: dial hook handler error: {e}")
-                if original_dial_callback:
-                    return original_dial_callback(deck, dial, *args, **kwargs)
+                    log.error(f"TouchPulse: dynamic dial handler error: {e}")
+                if orig_dial_cb:
+                    return orig_dial_cb(deck, dial, *args, **kwargs)
 
-            self.deck_controller.dial_event_callback = hooked_dial_callback
-            if hasattr(self.deck_controller, "deck") and self.deck_controller.deck is not None:
+            dc.dial_event_callback = dynamic_dial_callback
+            dc._touchpulse_dial_hooked = True
+
+        # Always re-assert dial callback on the physical hardware deck object
+        if hasattr(dc, "deck") and dc.deck is not None:
+            try:
+                dc.deck.set_dial_callback(dc.dial_event_callback)
+            except Exception as e:
+                log.warning(f"TouchPulse: Could not rebind deck dial callback: {e}")
+
+        # Hook deck_controller touchscreen_event_callback with dynamic action dispatcher
+        if not getattr(dc, "_touchpulse_touch_hooked", False):
+            orig_touch_cb = getattr(dc, "touchscreen_event_callback", None)
+
+            def dynamic_touch_callback(deck, *args, **kwargs):
                 try:
-                    self.deck_controller.deck.set_dial_callback(hooked_dial_callback)
+                    pb = getattr(gl, "plugin_manager", None)
+                    plugin = pb.get_plugin_by_id("com_oparada_TouchBarInfo") if pb else None
+                    if plugin and hasattr(plugin, "active_actions"):
+                        for act in list(plugin.active_actions):
+                            if getattr(act, "deck_controller", None) == dc and act.get_is_present():
+                                act.handle_deck_touchscreen_event(*args, **kwargs)
+                                break
                 except Exception as e:
-                    log.warning(f"TouchPulse: Could not rebind deck dial callback: {e}")
-            self.deck_controller._touchpulse_dial_hooked = True
+                    log.error(f"TouchPulse: dynamic touchscreen handler error: {e}")
+                if orig_touch_cb:
+                    return orig_touch_cb(deck, *args, **kwargs)
 
-        if not getattr(self.deck_controller, "_touchpulse_touch_hooked", False):
-            original_touch_cb = getattr(self.deck_controller, "touchscreen_event_callback", None)
+            dc.touchscreen_event_callback = dynamic_touch_callback
+            dc._touchpulse_touch_hooked = True
 
-            def hooked_touchscreen_callback(deck, *args, **kwargs):
-                try:
-                    self.handle_deck_touchscreen_event(*args, **kwargs)
-                except Exception as e:
-                    log.error(f"TouchPulse: touchscreen hook handler error: {e}")
-                if original_touch_cb:
-                    return original_touch_cb(deck, *args, **kwargs)
-
-            self.deck_controller.touchscreen_event_callback = hooked_touchscreen_callback
-            if hasattr(self.deck_controller, "deck") and self.deck_controller.deck is not None:
-                try:
-                    self.deck_controller.deck.set_touchscreen_callback(hooked_touchscreen_callback)
-                except Exception as e:
-                    log.warning(f"TouchPulse: Could not rebind touchscreen callback: {e}")
-            self.deck_controller._touchpulse_touch_hooked = True
+        # Always re-assert touchscreen callback on the physical hardware deck object
+        if hasattr(dc, "deck") and dc.deck is not None:
+            try:
+                dc.deck.set_touchscreen_callback(dc.touchscreen_event_callback)
+            except Exception as e:
+                log.warning(f"TouchPulse: Could not rebind deck touchscreen callback: {e}")
 
     def handle_deck_touchscreen_event(self, *args, **kwargs):
         if not self.get_is_present():
@@ -4855,16 +4880,21 @@ class TouchBarInfoAction(ActionBase):
 
     def handle_lock_blanking(self) -> bool:
         if self.is_screen_locked():
-            if not self._was_locked:
+            if not getattr(self, "_was_locked", False):
                 self._was_locked = True
                 blank_img = Image.new("RGBA", (800, 100), (0, 0, 0, 255))
                 self.render_to_input(blank_img)
             return True
         else:
-            if self._was_locked:
+            if getattr(self, "_was_locked", False):
                 self._was_locked = False
                 self.last_rendered_key = ""
+                # Re-verify dial interceptor and session bus upon unlocking / waking
+                self.setup_dial_interceptor()
+                self.get_session_bus(force_refresh=True)
                 self.trigger_redraw()
+                if self.is_media_active_and_playing():
+                    self.start_anim_timer()
             return False
 
     def render_to_input(self, image: Image.Image) -> None:
