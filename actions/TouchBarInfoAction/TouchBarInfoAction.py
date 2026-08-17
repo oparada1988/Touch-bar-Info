@@ -4603,7 +4603,7 @@ class TouchBarInfoAction(ActionBase):
 
         for i in range(num_cols):
             val = heights[i % len(heights)]
-            norm_h = max(0.0, min(1.0, float(val)))
+            norm_h = max(0.0, min(1.0, float(val) ** 0.82))
             exact_steps = norm_h * num_steps
             full_steps = int(exact_steps)
             frac = exact_steps - full_steps
@@ -4663,7 +4663,7 @@ class TouchBarInfoAction(ActionBase):
             w3 = math.sin(tx * math.pi * 8.0 + phase * 1.3) * 0.10
             wave_mod = max(0.08, min(1.0, 0.45 + w1 + w2 + w3))
 
-            val = max(0.05, min(0.98, amp * wave_mod))
+            val = max(0.05, min(0.98, (amp * wave_mod) ** 0.85))
             y = y_max - (val * (bh - 2))
             pts.append((x, y))
 
@@ -4687,7 +4687,7 @@ class TouchBarInfoAction(ActionBase):
         bw = x_max - x_min
         bh = y_max - y_min
 
-        # 1. Left Album Art
+        # 1. Left Album Art (76x76 px at y: 12..88, x: 16..92)
         art_size = int(bh * 0.76)
         margin_x = int(bw * 0.04)
         art_x = x_min + margin_x
@@ -4721,7 +4721,7 @@ class TouchBarInfoAction(ActionBase):
             vb_w = vw + 14
             vb_h = vh + 6
             vb_x = content_max_x - vb_w
-            vb_y = y_min + int(bh * 0.08)
+            vb_y = y_min + 6
 
             ar, ag, ab = self.get_streamcontroller_accent_color()
             # Solid high-contrast dark plate + accent outline
@@ -4729,29 +4729,29 @@ class TouchBarInfoAction(ActionBase):
             draw.text((vb_x + 7, vb_y + 3), vol_str, font=font_badge, fill=(255, 255, 255, 255))
             text_avail_w = max(20.0, float(vb_x - 8 - content_x))
 
-            # Media source icon aligned center underneath the volume badge (27x27 px, +70% size)
-            src_icon = self.get_media_source_icon(identity, size=(27, 27))
+            # Media source icon aligned center underneath the volume badge (24x24 px)
+            src_icon = self.get_media_source_icon(identity, size=(24, 24))
             if src_icon:
                 icon_w, icon_h = src_icon.size
                 icon_x = vb_x + (vb_w - icon_w) // 2
                 icon_y = vb_y + vb_h + 2
                 image.paste(src_icon, (icon_x, icon_y), src_icon)
 
-        artist_y = y_min + int(bh * 0.10)
-        song_y = y_min + int(bh * 0.33)
+        artist_y = y_min + 7
+        song_y = y_min + 25
 
         if artist_display:
             self.draw_marquee_text(image, draw, (content_x, artist_y), text_avail_w, artist_display, font_artist, artist_fill_en, artist_fill_col, artist_out_en, artist_out_col, artist_out_sz)
         self.draw_marquee_text(image, draw, (content_x, song_y), text_avail_w, title, font_song, song_fill_en, song_fill_col, song_out_en, song_out_col, song_out_sz)
 
-        # Visualizer (Spans y: 55 to 74 -> 19px height)
-        # Dedicated 6px gap from y: 74 to 80
-        # Media Progress Time Bar (Spans y: 82 to 94)
+        # Visualizer (Spans y: 50 to 81 -> 31px height, +63% taller!)
+        # Dedicated 5px gap from y: 81 to 86
+        # Media Progress Time Bar (Spans y: 86 to 95)
         is_playing_or_paused = (self.media_state.get("status") in ["Playing", "Paused"])
         if is_playing_or_paused and not self.is_volume_hud_active():
-            vis_box = (content_x, y_min + 55, content_max_x, y_min + 74)
+            vis_box = (content_x, y_min + 50, content_max_x, y_min + 81)
         else:
-            vis_box = (content_x, y_min + int(bh * 0.56), content_max_x, y_max - int(bh * 0.08))
+            vis_box = (content_x, y_min + int(bh * 0.52), content_max_x, y_max - int(bh * 0.08))
 
         if self.is_volume_hud_active():
             self.draw_volume_meter_bar(image, draw, vis_box, align=align)
@@ -4760,7 +4760,7 @@ class TouchBarInfoAction(ActionBase):
         else:
             self.draw_stepped_bars(draw, vis_box, self.vis_heights, color_mode, solid_col, start_col, mid_col, end_col)
 
-        # Media Time Progress Bar with 6px Gap
+        # Media Time Progress Bar with 5px Gap
         if is_playing_or_paused and not self.is_volume_hud_active():
             ar, ag, ab = self.get_streamcontroller_accent_color()
             pos_str = self.media_state.get("pos_str", "0:00")
@@ -4772,7 +4772,7 @@ class TouchBarInfoAction(ActionBase):
 
             bar_x1 = content_x
             bar_x2 = max(bar_x1 + 30, content_max_x - tw - 10)
-            bar_y = y_min + 86
+            bar_y = y_min + 88
 
             # Background Track Trough
             draw.line([(bar_x1, bar_y), (bar_x2, bar_y)], fill=(255, 255, 255, 40), width=3)
