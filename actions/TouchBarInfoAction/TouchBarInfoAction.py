@@ -358,6 +358,21 @@ class TouchBarInfoAction(ActionBase):
 
         return detected
 
+    def get_configured_media_player_id(self) -> str:
+        settings = self.get_settings() or {}
+        slots = ["sec_a", "sec_b", "sec_c"]
+        for prefix in slots:
+            mode = self.get_slot_setting(settings, prefix, "mode", 0)
+            if mode == 0:
+                if self.get_slot_setting(settings, prefix, "full_widget", 0) == 4:
+                    return str(self.get_slot_setting(settings, f"{prefix}_full", "media_player_id", "auto"))
+            else:
+                if self.get_slot_setting(settings, prefix, "top_widget", 0) == 4:
+                    return str(self.get_slot_setting(settings, f"{prefix}_top", "media_player_id", "auto"))
+                if self.get_slot_setting(settings, prefix, "bottom_widget", 0) == 4:
+                    return str(self.get_slot_setting(settings, f"{prefix}_bot", "media_player_id", "auto"))
+        return str(settings.get("media_player_id", "auto"))
+
     def init_options(self):
         # Alphabetical Full Section Widget List
         self.full_widget_options = [
@@ -1392,7 +1407,7 @@ class TouchBarInfoAction(ActionBase):
             )
             player_combo.connect("notify::selected", lambda combo, pspec, sk=slot_key, pids=player_ids: (
                 self.set_slot_setting(sk, "media_player_id", pids[combo.get_selected()] if combo.get_selected() < len(pids) else "auto"),
-                self.update_media_state(pids[combo.get_selected()] if combo.get_selected() < len(pids) else "auto"),
+                self.update_media_state(poll_dbus=True),
                 self.trigger_redraw()
             ))
 
@@ -3492,11 +3507,13 @@ class TouchBarInfoAction(ActionBase):
         if not player_names:
             return None
 
-        # 1. Explicit Player Selection
+        # 1. Explicit Player Selection (Strict: only match the explicitly requested player)
         if player_id and player_id != "auto":
             for name in player_names:
                 if player_id.lower() in name.lower():
                     return name
+            # When a specific player is requested but not currently running/active on DBus, return None
+            return None
 
         # 2. Auto-detect: Prioritize actively playing media players
         playing_candidates = []
@@ -4280,13 +4297,7 @@ class TouchBarInfoAction(ActionBase):
         now_ts = time.time()
         if poll_dbus or (now_ts - self._last_dbus_poll > 0.8):
             self._last_dbus_poll = now_ts
-            settings = self.get_settings() or {}
-            player_id = settings.get("media_player_id", "") if isinstance(settings, dict) else ""
-            if not player_id:
-                player_idx = settings.get("media_player_idx", 0) if isinstance(settings, dict) else 0
-                player_id = self.media_player_ids[player_idx] if hasattr(self, "media_player_ids") and isinstance(player_idx, int) and player_idx < len(self.media_player_ids) else "auto"
-            player_id = str(player_id) if isinstance(player_id, str) else "auto"
-
+            player_id = self.get_configured_media_player_id()
             target_name = self._resolve_target_player_name(player_id)
             bus = self.get_session_bus()
 
@@ -4347,6 +4358,8 @@ class TouchBarInfoAction(ActionBase):
             if target_name:
                 raw_ident = target_name.replace("org.mpris.MediaPlayer2.", "")
                 clean_identity = raw_ident.split(".")[0].capitalize()
+            elif player_id and player_id != "auto":
+                clean_identity = player_id.capitalize()
 
             length_sec = length_us / 1000000.0 if length_us > 0 else 0.0
             position_sec = position_us / 1000000.0 if position_us > 0 else 0.0
